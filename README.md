@@ -58,3 +58,24 @@ Faruk Erdemci
 ## Lisans
 
 Bu proje özel kullanım amacıyla geliştirilmiştir.
+
+## Copyright
+
+Copyright © 2026 Faruk Erdemci
+
+All Rights Reserved.
+
+ZümreNet kaynak kodları, tasarımı, veri modeli ve tüm ilişkili bileşenler telif hakkı ile korunmaktadır.
+
+Bu yazılımın veya herhangi bir bölümünün;
+
+* Kopyalanması
+* Değiştirilmesi
+* Yeniden dağıtılması
+* Ticari amaçla kullanılması
+* Satılması
+* Alt lisans verilmesi
+
+hak sahibinin açık yazılı izni olmadan yasaktır.
+
+Unauthorized copying, modification, redistribution, publication, sublicensing, or commercial use of this software is strictly prohibited.
