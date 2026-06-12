@@ -40,11 +40,11 @@ class MyApp extends StatelessWidget {
     final role = roleData?['role'] ?? 'student';
 
     if (role == 'teacher') {
-      return TeacherHomeScreen();
+      return const TeacherHomeScreen();
     } else if (role == 'admin') {
-      return AdminHomeScreen();
+      return const AdminHomeScreen();
     } else {
-      return StudentHomeScreen();
+      return const StudentHomeScreen();
     }
   }
 
@@ -56,8 +56,15 @@ class MyApp extends StatelessWidget {
       ],
       child: MaterialApp(
         title: 'ZümreNet',
-        theme: ThemeData(primarySwatch: Colors.blue),
-        debugShowCheckedModeBanner: false,
+theme: ThemeData(
+  primarySwatch: Colors.blue,
+  fontFamilyFallback: const [
+    'Arial',
+    'Roboto',
+    'Noto Sans',
+    'sans-serif',
+  ],
+),        debugShowCheckedModeBanner: false,
 
         home: StreamBuilder<User?>(
           stream: FirebaseAuth.instance.authStateChanges(),
@@ -69,7 +76,7 @@ class MyApp extends StatelessWidget {
             }
 
             if (!authSnapshot.hasData) {
-              return LoginScreen();
+              return const LoginScreen();
             }
 
             return FutureBuilder<Widget>(
@@ -82,20 +89,20 @@ class MyApp extends StatelessWidget {
                 }
 
                 if (roleSnapshot.hasError) {
-                  return LoginScreen();
+                  return const LoginScreen();
                 }
 
-                return roleSnapshot.data ?? LoginScreen();
+                return roleSnapshot.data ?? const LoginScreen();
               },
             );
           },
         ),
 
         routes: {
-          '/login': (context) => LoginScreen(),
-          '/student': (context) => StudentHomeScreen(),
-          '/teacher': (context) => TeacherHomeScreen(),
-          '/admin': (context) => AdminHomeScreen(),
+          '/login': (context) => const LoginScreen(),
+          '/student': (context) => const StudentHomeScreen(),
+          '/teacher': (context) => const TeacherHomeScreen(),
+          '/admin': (context) => const AdminHomeScreen(),
         },
       ),
     );

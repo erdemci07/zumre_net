@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class AdminHomeScreen extends StatefulWidget {
+  const AdminHomeScreen({super.key});
+
   @override
   _AdminHomeScreenState createState() => _AdminHomeScreenState();
 }
@@ -13,9 +15,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   int _selectedIndex = 0; // 0: İstatistik, 1: Kullanıcı Yönetimi
 
   final List<Widget> _pages = [
-    StatisticsPage(),
+    const StatisticsPage(),
     
-    UserManagementPage(),
+    const UserManagementPage(),
   ];
 
   @override
@@ -25,7 +27,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         title: Text(_selectedIndex == 0 ? 'İstatistikler' : 'Kullanıcı Yönetimi'),
         actions: [
           IconButton(
-            icon: Icon(Icons.logout),
+            icon: const Icon(Icons.logout),
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
               Navigator.pushReplacementNamed(context, '/login');
@@ -38,20 +40,20 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           padding: EdgeInsets.zero,
           children: [
             DrawerHeader(
-              decoration: BoxDecoration(color: Colors.blue),
+              decoration: const BoxDecoration(color: Colors.blue),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Text('Yönetici Paneli', style: TextStyle(color: Colors.white, fontSize: 24)),
-                  SizedBox(height: 8),
-                  Text(FirebaseAuth.instance.currentUser?.email ?? '', style: TextStyle(color: Colors.white70)),
+                  const Text('Yönetici Paneli', style: TextStyle(color: Colors.white, fontSize: 24)),
+                  const SizedBox(height: 8),
+                  Text(FirebaseAuth.instance.currentUser?.email ?? '', style: const TextStyle(color: Colors.white70)),
                 ],
               ),
             ),
             ListTile(
-              leading: Icon(Icons.bar_chart),
-              title: Text('İstatistikler'),
+              leading: const Icon(Icons.bar_chart),
+              title: const Text('İstatistikler'),
               selected: _selectedIndex == 0,
               onTap: () {
                 setState(() => _selectedIndex = 0);
@@ -59,8 +61,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               },
             ),
             ListTile(
-              leading: Icon(Icons.people),
-              title: Text('Kullanıcı Yönetimi'),
+              leading: const Icon(Icons.people),
+              title: const Text('Kullanıcı Yönetimi'),
               selected: _selectedIndex == 1,
               onTap: () {
                 setState(() => _selectedIndex = 1);
@@ -77,6 +79,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
 // ==================== 1. İSTATİSTİK SAYFASI ====================
 class StatisticsPage extends StatefulWidget {
+  const StatisticsPage({super.key});
+
   @override
   _StatisticsPageState createState() => _StatisticsPageState();
 }
@@ -367,7 +371,7 @@ class _DailySolvedBarChartState extends State<_DailySolvedBarChart> {
                         decoration: BoxDecoration(
                           color: isSelected
                               ? Colors.blue
-                              : Colors.blue.withOpacity(0.55),
+                              : Colors.blue.withValues(alpha: 0.55),
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
@@ -447,6 +451,8 @@ class _DailySolvedBarChartState extends State<_DailySolvedBarChart> {
 }
 // ==================== 2. KULLANICI YÖNETİM SAYFASI ====================
 class UserManagementPage extends StatefulWidget {
+  const UserManagementPage({super.key});
+
   @override
   _UserManagementPageState createState() => _UserManagementPageState();
 }
@@ -466,8 +472,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
           padding: const EdgeInsets.all(8.0),
           child: ElevatedButton.icon(
             onPressed: () => _showUserDialog(),
-            icon: Icon(Icons.person_add),
-            label: Text('Yeni Kullanıcı Ekle'),
+            icon: const Icon(Icons.person_add),
+            label: const Text('Yeni Kullanıcı Ekle'),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
           ),
         ),
@@ -476,7 +482,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
             stream: _firestore.collection('users').snapshots(),
             builder: (context, snapshot) {
               if (snapshot.hasError) return Center(child: Text('Hata: ${snapshot.error}'));
-              if (!snapshot.hasData) return Center(child: CircularProgressIndicator());
+              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
               final users = snapshot.data!.docs;
               return ListView.builder(
                 itemCount: users.length,
@@ -488,19 +494,19 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   final name = data['name'] ?? 'İsimsiz';
                   final email = data['email'] ?? 'Email yok';
                   return Card(
-                    margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     child: ListTile(
                       leading: CircleAvatar(
-                        child: Text(role[0].toUpperCase()),
                         backgroundColor: role == 'admin' ? Colors.red : (role == 'teacher' ? Colors.blue : Colors.green),
+                        child: Text(role[0].toUpperCase()),
                       ),
                       title: Text('$name ($role)'),
                       subtitle: Text(email),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          IconButton(icon: Icon(Icons.edit), onPressed: () => _editUser(uid, data)),
-                          IconButton(icon: Icon(Icons.delete), onPressed: () => _deleteUser(uid, email), color: Colors.red),
+                          IconButton(icon: const Icon(Icons.edit), onPressed: () => _editUser(uid, data)),
+                          IconButton(icon: const Icon(Icons.delete), onPressed: () => _deleteUser(uid, email), color: Colors.red),
                         ],
                       ),
                     ),
@@ -516,7 +522,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
 
   Future<void> _showUserDialog({String? editingUid, Map<String, dynamic>? existingData}) async {
     final isEditing = editingUid != null;
-    final _formKey = GlobalKey<FormState>();
+    final formKey = GlobalKey<FormState>();
     String email = existingData?['email'] ?? '';
     String password = '';
     String name = existingData?['name'] ?? '';
@@ -531,47 +537,47 @@ class _UserManagementPageState extends State<UserManagementPage> {
             title: Text(isEditing ? 'Kullanıcı Düzenle' : 'Yeni Kullanıcı Ekle'),
             content: SingleChildScrollView(
               child: Form(
-                key: _formKey,
+                key: formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     TextFormField(
                       initialValue: email,
-                      decoration: InputDecoration(labelText: 'E-posta'),
+                      decoration: const InputDecoration(labelText: 'E-posta'),
                       onChanged: (val) => email = val,
                       validator: (val) => val!.isEmpty ? 'Email gerekli' : null,
                     ),
                     if (!isEditing) ...[
-                      SizedBox(height: 8),
+                      const SizedBox(height: 8),
                       TextFormField(
-                        decoration: InputDecoration(labelText: 'Şifre'),
+                        decoration: const InputDecoration(labelText: 'Şifre'),
                         obscureText: true,
                         onChanged: (val) => password = val,
                         validator: (val) => val!.length < 6 ? 'Şifre en az 6 karakter' : null,
                       ),
                     ],
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     TextFormField(
                       initialValue: name,
-                      decoration: InputDecoration(labelText: 'Ad Soyad'),
+                      decoration: const InputDecoration(labelText: 'Ad Soyad'),
                       onChanged: (val) => name = val,
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
-                      value: role,
-                      decoration: InputDecoration(labelText: 'Rol'),
+                      initialValue: role,
+                      decoration: const InputDecoration(labelText: 'Rol'),
                       items: _roles.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
                       onChanged: (val) => setStateDialog(() => role = val!),
                     ),
                     if (role == 'teacher') ...[
-                      SizedBox(height: 8),
+                      const SizedBox(height: 8),
                       Container(
                         decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(4)),
-                        padding: EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(8),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Verdiği Dersler (birden çok seçebilirsiniz)'),
+                            const Text('Verdiği Dersler (birden çok seçebilirsiniz)'),
                             Wrap(
                               children: _allSubjects.map((subject) {
                                 return CheckboxListTile(
@@ -600,10 +606,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: Text('İptal')),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('İptal')),
               ElevatedButton(
                 onPressed: () async {
-                  if (!_formKey.currentState!.validate()) return;
+                  if (!formKey.currentState!.validate()) return;
                   setState(() => _isLoading = true);
                   try {
                     if (isEditing) {
@@ -629,7 +635,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
   }
 
   Future<void> _createUser(String email, String password, String name, String role, List<String> subjects) async {
-    final apiKey = 'AIzaSyBznoF8WcalY8k-tUexUTrooeDJdZHsM5w'; 
+    const apiKey = 'AIzaSyBznoF8WcalY8k-tUexUTrooeDJdZHsM5w'; 
     final url = Uri.parse('https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey');
     final response = await http.post(
       url,
@@ -660,11 +666,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Kullanıcıyı Sil'),
+        title: const Text('Kullanıcıyı Sil'),
         content: Text('$email adlı kullanıcıyı silmek istediğinize emin misiniz?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Hayır')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Evet')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Hayır')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Evet')),
         ],
       ),
     );
@@ -672,7 +678,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
     setState(() => _isLoading = true);
     try {
       await _firestore.collection('users').doc(uid).delete();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Kullanıcı Firestore\'dan silindi.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kullanıcı Firestore\'dan silindi.')));
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Silme hatası: $e')));
     } finally {

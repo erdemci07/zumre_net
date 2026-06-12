@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class TeacherHomeScreen extends StatefulWidget {
+  const TeacherHomeScreen({super.key});
+
   @override
   _TeacherHomeScreenState createState() => _TeacherHomeScreenState();
 }
@@ -14,7 +16,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
 
   late TabController _tabController;
 
-  String? _teacherStatus= 'available';
+  String _teacherStatus = 'available';
   String? _teacherName;
   String? _teacherSubject;
   int _todaySolved = 0;
@@ -31,6 +33,19 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  String _statusText(String status) {
+    switch (status) {
+      case 'available':
+        return 'Müsait';
+      case 'break':
+        return 'Molada';
+      case 'absent':
+        return 'Gelmedi';
+      default:
+        return 'Bilinmeyen';
+    }
   }
 
   Future<void> _loadTeacherInfo() async {
@@ -55,29 +70,31 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
       });
     }
   }
-Future<void> _updateTeacherStatus(String status) async {
-  final uid = _auth.currentUser!.uid;
 
-  await _firestore.collection('users').doc(uid).update({
-    'teacherStatus': status,
-  });
+  Future<void> _updateTeacherStatus(String status) async {
+    final uid = _auth.currentUser!.uid;
 
-  setState(() {
-    _teacherStatus = status;
-  });
+    await _firestore.collection('users').doc(uid).update({
+      'teacherStatus': status,
+    });
 
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(
-        status == 'available'
-            ? 'Durumunuz müsait olarak güncellendi'
-            : status == 'break'
-                ? 'Durumunuz molada olarak güncellendi'
-                : 'Durumunuz gelmedi olarak güncellendi',
+    setState(() {
+      _teacherStatus = status;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          status == 'available'
+              ? 'Durumunuz müsait olarak güncellendi'
+              : status == 'break'
+                  ? 'Durumunuz molada olarak güncellendi'
+                  : 'Durumunuz gelmedi olarak güncellendi',
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
+
   Future<void> _loadTodaySolvedCount() async {
     try {
       final uid = _auth.currentUser!.uid;
@@ -140,9 +157,7 @@ Future<void> _updateTeacherStatus(String status) async {
 
     if (availableStudents.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Müsait kayıtlı öğrenci bulunamadı'),
-        ),
+        const SnackBar(content: Text('Müsait kayıtlı öğrenci bulunamadı')),
       );
       return;
     }
@@ -155,13 +170,10 @@ Future<void> _updateTeacherStatus(String status) async {
             return AlertDialog(
               title: const Text('Öğrenciyi Aktif Soruya Ekle'),
               content: DropdownButtonFormField<String>(
-                decoration: const InputDecoration(
-                  labelText: 'Öğrenci Seç',
-                ),
-                value: selectedStudentId,
+                decoration: const InputDecoration(labelText: 'Öğrenci Seç'),
+                initialValue: selectedStudentId,
                 items: availableStudents.map((doc) {
                   final data = doc.data();
-
                   final name = data['name'] ?? data['email'] ?? 'Öğrenci';
 
                   return DropdownMenuItem<String>(
@@ -187,50 +199,47 @@ Future<void> _updateTeacherStatus(String status) async {
               ),
               actions: [
                 TextButton(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                  },
+                  onPressed: () => Navigator.pop(ctx),
                   child: const Text('İptal'),
                 ),
                 ElevatedButton(
                   onPressed: () async {
                     if (selectedStudentId == null) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Lütfen öğrenci seçin'),
-                        ),
+                        const SnackBar(content: Text('Lütfen öğrenci seçin')),
                       );
                       return;
                     }
 
                     try {
-    final teacherId = _auth.currentUser!.uid;
+                      final teacherId = _auth.currentUser!.uid;
 
-final activeSnapshot = await _firestore
-    .collection('queues')
-    .where('teacherId', isEqualTo: teacherId)
-    .where('status', isEqualTo: 'in_progress')
-    .get();
+                      final activeSnapshot = await _firestore
+                          .collection('queues')
+                          .where('teacherId', isEqualTo: teacherId)
+                          .where('status', isEqualTo: 'in_progress')
+                          .get();
 
-final bool hasActiveQuestion = activeSnapshot.docs.isNotEmpty;
+                      final bool hasActiveQuestion =
+                          activeSnapshot.docs.isNotEmpty;
 
-await _firestore.collection('queues').add({
-  'studentId': selectedStudentId,
-  'studentName': selectedStudentName,
-  'teacherId': teacherId,
-  'teacherName': _teacherName ?? 'Öğretmen',
-  'subject': _teacherSubject ?? 'Ders',
-  'status': hasActiveQuestion ? 'waiting' : 'in_progress',
-  'isManual': true,
-  'createdAt': FieldValue.serverTimestamp(),
-  'startedAt': hasActiveQuestion ? null : FieldValue.serverTimestamp(),
-});
+                      await _firestore.collection('queues').add({
+                        'studentId': selectedStudentId,
+                        'studentName': selectedStudentName,
+                        'teacherId': teacherId,
+                        'teacherName': _teacherName ?? 'Öğretmen',
+                        'subject': _teacherSubject ?? 'Ders',
+                        'status': hasActiveQuestion ? 'waiting' : 'in_progress',
+                        'isManual': true,
+                        'createdAt': FieldValue.serverTimestamp(),
+                        'startedAt':
+                            hasActiveQuestion ? null : FieldValue.serverTimestamp(),
+                      });
+
                       Navigator.pop(ctx);
 
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Öğrenci aktif soruya alındı'),
-                        ),
+                        const SnackBar(content: Text('Öğrenci sıraya eklendi')),
                       );
                     } catch (e) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -288,13 +297,10 @@ await _firestore.collection('queues').add({
       });
 
       await _takeNextWaitingQueue();
-
       _loadTodaySolvedCount();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Soru çözüldü olarak işaretlendi'),
-        ),
+        const SnackBar(content: Text('Soru çözüldü olarak işaretlendi')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -313,15 +319,85 @@ await _firestore.collection('queues').add({
       await _takeNextWaitingQueue();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Sıra iptal edildi'),
-        ),
+        const SnackBar(content: Text('Sıra iptal edildi')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Hata: $e')),
       );
     }
+  }
+
+  Widget _buildStatusButton({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    final bool isSelected = _teacherStatus == value;
+
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () async {
+          if (_teacherStatus == value) return;
+
+          final confirm = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Durum değiştirilsin mi?'),
+              content: Text(
+                '${_statusText(_teacherStatus)} durumundan '
+                '${_statusText(value)} durumuna geçmek istiyor musunuz?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('İptal'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Onayla'),
+                ),
+              ],
+            ),
+          );
+
+          if (confirm == true) {
+            await _updateTeacherStatus(value);
+          }
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? color.withValues(alpha: 0.15) : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isSelected ? color : Colors.grey.shade300,
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Column(
+            children: [
+              Icon(
+                icon,
+                color: isSelected ? color : Colors.grey,
+                size: 24,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: isSelected ? color : Colors.grey.shade700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildActiveQuestion() {
@@ -351,17 +427,15 @@ await _firestore.collection('queues').add({
         final activeQueues = snapshot.data!.docs;
 
         if (activeQueues.isEmpty) {
-          return Card(
-            margin: const EdgeInsets.all(12),
+          return const Card(
+            margin: EdgeInsets.all(12),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(16),
               child: Row(
-                children: const [
+                children: [
                   Icon(Icons.info_outline),
                   SizedBox(width: 8),
-                  Expanded(
-                    child: Text('Şu anda aktif sorunuz yok'),
-                  ),
+                  Expanded(child: Text('Şu anda aktif sorunuz yok')),
                 ],
               ),
             ),
@@ -370,7 +444,6 @@ await _firestore.collection('queues').add({
 
         final doc = activeQueues.first;
         final data = doc.data() as Map<String, dynamic>;
-
         final isManual = data['isManual'] == true;
 
         return Card(
@@ -383,10 +456,7 @@ await _firestore.collection('queues').add({
               children: [
                 const Text(
                   'Aktif Soru',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -419,19 +489,9 @@ await _firestore.collection('queues').add({
                     ),
                     const SizedBox(width: 8),
                     IconButton(
-  icon: Icon(
-    Icons.person_add,
-    color: _teacherStatus == 'available'
-        ? null
-        : Colors.grey,
-  ),
-  tooltip: _teacherStatus == 'available'
-      ? 'Öğrenci Ekle'
-      : 'Öğretmen müsait değil',
-  onPressed: _teacherStatus == 'available'
-      ? _showAddStudentDialog
-      : null,
-),
+                      icon: const Icon(Icons.cancel, color: Colors.red),
+                      onPressed: () => _cancelQueue(doc.id),
+                    ),
                   ],
                 ),
               ],
@@ -468,11 +528,9 @@ await _firestore.collection('queues').add({
 
               queues.sort((a, b) {
                 final aTime =
-                    (a.data() as Map<String, dynamic>)['createdAt']
-                        as Timestamp?;
+                    (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
                 final bTime =
-                    (b.data() as Map<String, dynamic>)['createdAt']
-                        as Timestamp?;
+                    (b.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
 
                 if (aTime == null && bTime == null) return 0;
                 if (aTime == null) return 1;
@@ -500,8 +558,7 @@ await _firestore.collection('queues').add({
                     ),
                     child: ListTile(
                       leading: CircleAvatar(
-                        backgroundColor:
-                            isManual ? Colors.orange : Colors.blue,
+                        backgroundColor: isManual ? Colors.orange : Colors.blue,
                         child: Icon(
                           isManual ? Icons.person_add : Icons.person,
                           color: Colors.white,
@@ -610,18 +667,14 @@ await _firestore.collection('queues').add({
                         Expanded(
                           child: Text(
                             '$studentName - $subject',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
                         Row(
                           children: List.generate(
                             5,
                             (i) => Icon(
-                              i < rating
-                                  ? Icons.star
-                                  : Icons.star_border,
+                              i < rating ? Icons.star : Icons.star_border,
                               color: Colors.orange,
                               size: 18,
                             ),
@@ -633,9 +686,7 @@ await _firestore.collection('queues').add({
                       const SizedBox(height: 6),
                       Text(
                         '"$comment"',
-                        style: const TextStyle(
-                          fontStyle: FontStyle.italic,
-                        ),
+                        style: const TextStyle(fontStyle: FontStyle.italic),
                       ),
                     ],
                   ],
@@ -648,12 +699,117 @@ await _firestore.collection('queues').add({
     );
   }
 
+  Widget _buildUnavailableInfo() {
+    if (_teacherStatus == 'available') {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          Icon(
+            Icons.info_outline,
+            size: 18,
+            color: _teacherStatus == 'break' ? Colors.orange : Colors.red,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              _teacherStatus == 'break'
+                  ? 'Molada olduğunuz için yeni öğrenci ekleyemezsiniz.'
+                  : 'Gelmedi durumundayken yeni öğrenci ekleyemezsiniz.',
+              style: TextStyle(
+                fontSize: 13,
+                color: _teacherStatus == 'break' ? Colors.orange : Colors.red,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusCard() {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Şu Anki Durumunuz',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _buildStatusButton(
+                  label: 'Müsait',
+                  value: 'available',
+                  icon: Icons.check_circle,
+                  color: Colors.green,
+                ),
+                const SizedBox(width: 8),
+                _buildStatusButton(
+                  label: 'Molada',
+                  value: 'break',
+                  icon: Icons.coffee,
+                  color: Colors.orange,
+                ),
+                const SizedBox(width: 8),
+                _buildStatusButton(
+                  label: 'Gelmedi',
+                  value: 'absent',
+                  icon: Icons.cancel,
+                  color: Colors.red,
+                ),
+              ],
+            ),
+            _buildUnavailableInfo(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddStudentButton() {
+    return IconButton(
+      icon: Icon(
+        Icons.person_add,
+        color: _teacherStatus == 'available' ? null : Colors.grey,
+      ),
+      tooltip: _teacherStatus == 'available'
+          ? 'Öğrenci Ekle'
+          : 'Öğretmen müsait değil',
+      onPressed:
+          _teacherStatus == 'available' ? _showAddStudentDialog : null,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Hoşgeldin, ${_teacherName ?? "Öğretmen"}'),
-        bottom: TabBar(
+title: LayoutBuilder(
+  builder: (context, constraints) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(
+        'Hoşgeldin, ${_teacherName ?? "Öğretmen"}',
+        maxLines: 1,
+        overflow: TextOverflow.visible,
+      ),
+    );
+  },
+),        bottom: TabBar(
           controller: _tabController,
           tabs: const [
             Tab(text: 'Bekleyen Sorular'),
@@ -661,33 +817,7 @@ await _firestore.collection('queues').add({
           ],
         ),
         actions: [
-          IconButton(
-  icon: Icon(
-    Icons.person_add,
-    color: _teacherStatus == 'available'
-        ? null
-        : Colors.grey,
-  ),
-  tooltip: _teacherStatus == 'available'
-      ? 'Öğrenci Ekle'
-      : 'Öğretmen müsait değil',
-  onPressed: _teacherStatus == 'available'
-      ? _showAddStudentDialog
-      : null,
-),
-if (_teacherStatus != 'available')
-  Padding(
-    padding: const EdgeInsets.only(top: 8),
-    child: Text(
-      _teacherStatus == 'break'
-          ? 'Molada olduğunuz için öğrenci ekleyemezsiniz'
-          : 'Gelmedi durumundayken öğrenci ekleyemezsiniz',
-      style: const TextStyle(
-        color: Colors.orange,
-        fontSize: 12,
-      ),
-    ),
-  ),
+          _buildAddStudentButton(),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
@@ -699,59 +829,7 @@ if (_teacherStatus != 'available')
       ),
       body: Column(
         children: [
-  Card(
-  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-  elevation: 1,
-  shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(18),
-  ),
-  child: Padding(
-    padding: const EdgeInsets.all(14),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Şu Anki Durumunuz',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-
-        const SizedBox(height: 12),
-
-        Row(
-          children: [
-            _buildStatusButton(
-              label: 'Müsait',
-              value: 'available',
-              icon: Icons.check_circle,
-              color: Colors.green,
-            ),
-
-            const SizedBox(width: 8),
-
-            _buildStatusButton(
-              label: 'Molada',
-              value: 'break',
-              icon: Icons.coffee,
-              color: Colors.orange,
-            ),
-
-            const SizedBox(width: 8),
-
-            _buildStatusButton(
-              label: 'Gelmedi',
-              value: 'absent',
-              icon: Icons.cancel,
-              color: Colors.red,
-            ),
-          ],
-        ),
-      ],
-    ),
-  ),
-),
+          _buildStatusCard(),
           if (_teacherSubject != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -773,87 +851,4 @@ if (_teacherStatus != 'available')
       ),
     );
   }
-  Widget _buildStatusButton({
-  required String label,
-  required String value,
-  required IconData icon,
-  required Color color,
-  String _statusText(String status) {
-  switch (status) {
-    case 'available':
-      return 'Müsait';
-    case 'break':
-      return 'Molada';
-    case 'absent':
-      return 'Gelmedi';
-    default:
-      return 'Bilinmeyen';
-  }
-}
-}) {
-  final bool isSelected = _teacherStatus == value;
-
-  return Expanded(
-    child: InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () async {
-  if (_teacherStatus == value) return;
-
-  final confirm = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Durum Değiştirilsin mi?'),
-      content: Text(
-        '${_statusText(_teacherStatus)} durumundan '
-        '${_statusText(value)} durumuna geçmek istiyor musunuz?',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('İptal'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('Onayla'),
-        ),
-      ],
-    ),
-  );
-
-  if (confirm == true) {
-    _updateTeacherStatus(value);
-  }
-},
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: isSelected ? color.withOpacity(0.15) : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSelected ? color : Colors.grey.shade300,
-            width: isSelected ? 2 : 1,
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              icon,
-              color: isSelected ? color : Colors.grey,
-              size: 24,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: isSelected ? color : Colors.grey.shade700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
 }

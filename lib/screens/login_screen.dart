@@ -6,6 +6,8 @@ import 'teacher_home_screen.dart';
 import 'admin_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
   @override
   _LoginScreenState createState() => _LoginScreenState();
 }
@@ -48,17 +50,17 @@ class _LoginScreenState extends State<LoginScreen> {
       if (role == 'teacher') {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => TeacherHomeScreen()),
+          MaterialPageRoute(builder: (_) => const TeacherHomeScreen()),
         );
       } else if (role == 'admin') {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => AdminHomeScreen()),
+          MaterialPageRoute(builder: (_) => const AdminHomeScreen()),
         );
       } else {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => StudentHomeScreen()),
+          MaterialPageRoute(builder: (_) => const StudentHomeScreen()),
         );
       }
     } catch (e) {

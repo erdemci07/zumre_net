@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class StudentHomeScreen extends StatefulWidget {
+  const StudentHomeScreen({super.key});
+
   @override
   _StudentHomeScreenState createState() => _StudentHomeScreenState();
 }
@@ -19,6 +21,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   bool _isLoadingTeachers = false;
   bool _isInQueue = false;
+  bool _shownInProgressPopup = false;
 
   String? _currentQueueId;
   String? _currentTeacherName;
@@ -137,17 +140,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         .snapshots()
         .listen((snapshot) {
       if (snapshot.docs.isEmpty) {
-  if (mounted) {
-    setState(() {
-      _isInQueue = false;
-      _currentQueueId = null;
-      _currentTeacherName = null;
-      _queuePosition = 0;
-    });
-  }
+        if (mounted) {
+          setState(() {
+            _isInQueue = false;
+            _currentQueueId = null;
+            _currentTeacherName = null;
+            _queuePosition = 0;
+          });
+        }
 
-  return;
-}
+        return;
+      }
 
       final doc = snapshot.docs.first;
       final data = doc.data();
@@ -194,20 +197,24 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         final data = snapshot.data()!;
         final status = data['status'];
 
-  if (status == 'completed') {
-  if (mounted) {
-    setState(() {
-      _isInQueue = false;
-      _currentQueueId = null;
-      _queuePosition = 0;
-    });
-  }
+        if (status == 'completed') {
+          _shownInProgressPopup = false;
 
-  _showRatingDialog(queueId);
+          if (mounted) {
+            setState(() {
+              _isInQueue = false;
+              _currentQueueId = null;
+              _queuePosition = 0;
+            });
+          }
 
-  _queueSubscription?.cancel();
-  _queueSubscription = null;
-} else if (status == 'cancelled') {
+          _showRatingDialog(queueId);
+
+          _queueSubscription?.cancel();
+          _queueSubscription = null;
+        } else if (status == 'cancelled') {
+          _shownInProgressPopup = false;
+
           if (mounted) {
             setState(() {
               _isInQueue = false;
@@ -234,6 +241,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
           if (data['teacherId'] != null) {
             _getCurrentTeacherName(data['teacherId']);
+          }
+
+          if (!_shownInProgressPopup) {
+            _shownInProgressPopup = true;
+            _showTeacherStartedPopup();
           }
         } else if (status == 'waiting') {
           await _updatePosition(queueId);
@@ -299,22 +311,22 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           .where('subjects', arrayContains: subject)
           .get();
 
-final teachers = snapshot.docs
-    .where((doc) {
-      final data = doc.data();
-      final status = data['teacherStatus'] ?? 'available';
+      final teachers = snapshot.docs
+          .where((doc) {
+            final data = doc.data();
+            final status = data['teacherStatus'] ?? 'available';
 
-      return status == 'available';
-    })
-    .map((doc) {
-      final data = doc.data();
+            return status == 'available';
+          })
+          .map((doc) {
+            final data = doc.data();
 
-      return {
-        'id': doc.id,
-        'name': data['name'] ?? data['email'] ?? 'Öğretmen',
-      };
-    })
-    .toList();
+            return {
+              'id': doc.id,
+              'name': data['name'] ?? data['email'] ?? 'Öğretmen',
+            };
+          })
+          .toList();
 
       if (mounted) {
         setState(() {
@@ -375,28 +387,29 @@ final teachers = snapshot.docs
           .where('role', isEqualTo: 'teacher')
           .where('subjects', arrayContains: _selectedSubject)
           .get();
-          final availableTeachers = teachersSnapshot.docs.where((doc) {
-  final data = doc.data();
-  final status = data['teacherStatus'] ?? 'available';
 
-  return status == 'available';
-}).toList();
+      final availableTeachers = teachersSnapshot.docs.where((doc) {
+        final data = doc.data();
+        final status = data['teacherStatus'] ?? 'available';
+
+        return status == 'available';
+      }).toList();
 
       if (availableTeachers.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${_selectedSubject} dersi için uygun öğretmen bulunamadı',
+              '$_selectedSubject dersi için uygun öğretmen bulunamadı',
             ),
           ),
         );
         return;
       }
 
-   final randomIndex =
-    DateTime.now().millisecondsSinceEpoch % availableTeachers.length;
+      final randomIndex =
+          DateTime.now().millisecondsSinceEpoch % availableTeachers.length;
 
-teacherId = availableTeachers[randomIndex].id;
+      teacherId = availableTeachers[randomIndex].id;
     }
 
     try {
@@ -471,6 +484,7 @@ teacherId = availableTeachers[randomIndex].id;
         if (mounted) {
           setState(() {
             _isInQueue = false;
+            _shownInProgressPopup = false;
             _cooldownUntil = cooldownDate.millisecondsSinceEpoch;
             _remainingCooldownSeconds = 120;
             _currentQueueId = null;
@@ -491,127 +505,195 @@ teacherId = availableTeachers[randomIndex].id;
     }
   }
 
-void _showRatingDialog(String queueId) {
-  int rating = 5;
-  String comment = '';
+  void _showTeacherStartedPopup() {
+    if (!mounted) return;
 
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (ctx) {
-      bool showCloseButton = false;
-
-      return StatefulBuilder(
-        builder: (context, setStateDialog) {
-
-          if (!showCloseButton) {
-            Future.delayed(const Duration(seconds: 2), () {
-              if (ctx.mounted) {
-                setStateDialog(() {
-                  showCloseButton = true;
-                });
-              }
-            });
-          }
-
-          return AlertDialog(
-            titlePadding: const EdgeInsets.fromLTRB(24, 16, 8, 0),
-
-            title: Row(
-              children: [
-                const Expanded(
-                  child: Text('Sorunuz çözüldü!'),
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.16),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
                 ),
-
-                if (showCloseButton)
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    tooltip: 'Kapat',
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                    },
-                  ),
               ],
             ),
-
-            content: Column(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Öğretmeni puanlayın'),
-
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(
-                    5,
-                    (i) => IconButton(
-                      icon: Icon(
-                        i < rating
-                            ? Icons.star
-                            : Icons.star_border,
-                        color: Colors.orange,
-                      ),
-                      onPressed: () {
-                        setStateDialog(() {
-                          rating = i + 1;
-                        });
-                      },
-                    ),
+                Container(
+                  width: 74,
+                  height: 74,
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade100,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.support_agent,
+                    size: 40,
+                    color: Colors.green.shade700,
                   ),
                 ),
-
-                const SizedBox(height: 8),
-
-                TextField(
-                  decoration: const InputDecoration(
-                    labelText: 'Yorum (isteğe bağlı)',
+                const SizedBox(height: 18),
+                const Text(
+                  'Sıranız Geldi 🎉',
+                  style: TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.bold,
                   ),
-                  onChanged: (val) {
-                    comment = val;
-                  },
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${_currentTeacherName ?? "Öğretmen"} sorunuzla ilgilenmeye başladı.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    color: Colors.black87,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text('Tamam'),
+                  ),
                 ),
               ],
             ),
+          ),
+        );
+      },
+    );
+  }
 
-            actions: [
-              TextButton(
-                onPressed: () async {
-                  try {
-                    await _firestore
-                        .collection('queues')
-                        .doc(queueId)
-                        .update({
-                      'rating': rating,
-                      'comment': comment,
-                    });
+  void _showRatingDialog(String queueId) {
+    int rating = 5;
+    String comment = '';
 
-                    Navigator.pop(ctx);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        bool showCloseButton = false;
 
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Teşekkürler! Değerlendirmeniz kaydedildi.',
-                        ),
-                      ),
-                    );
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Değerlendirme kaydedilemedi: $e',
-                        ),
-                      ),
-                    );
-                  }
-                },
-                child: const Text('Gönder'),
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            if (!showCloseButton) {
+              Future.delayed(const Duration(seconds: 2), () {
+                if (ctx.mounted) {
+                  setStateDialog(() {
+                    showCloseButton = true;
+                  });
+                }
+              });
+            }
+
+            return AlertDialog(
+              titlePadding: const EdgeInsets.fromLTRB(24, 16, 8, 0),
+              title: Row(
+                children: [
+                  const Expanded(
+                    child: Text('Sorunuz çözüldü!'),
+                  ),
+                  if (showCloseButton)
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Kapat',
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                      },
+                    ),
+                ],
               ),
-            ],
-          );
-        },
-      );
-    },
-  );
-}
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Öğretmeni puanlayın'),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      5,
+                      (i) => IconButton(
+                        icon: Icon(
+                          i < rating ? Icons.star : Icons.star_border,
+                          color: Colors.orange,
+                        ),
+                        onPressed: () {
+                          setStateDialog(() {
+                            rating = i + 1;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    decoration: const InputDecoration(
+                      labelText: 'Yorum (isteğe bağlı)',
+                    ),
+                    onChanged: (val) {
+                      comment = val;
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () async {
+                    try {
+                      await _firestore
+                          .collection('queues')
+                          .doc(queueId)
+                          .update({
+                        'rating': rating,
+                        'comment': comment,
+                      });
+
+                      Navigator.pop(ctx);
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Teşekkürler! Değerlendirmeniz kaydedildi.',
+                          ),
+                        ),
+                      );
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Değerlendirme kaydedilemedi: $e',
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text('Gönder'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
   String _formatCooldown(int seconds) {
     final minutes = seconds ~/ 60;
@@ -661,8 +743,19 @@ void _showRatingDialog(String queueId) {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Hoşgeldin, ${_studentName ?? 'Öğrenci'}'),
-        actions: [
+title: LayoutBuilder(
+  builder: (context, constraints) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(
+        'Hoşgeldin, ${_studentName ?? 'Öğrenci'}',
+        maxLines: 1,
+        overflow: TextOverflow.visible,
+      ),
+    );
+  },
+),        actions: [
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
@@ -714,7 +807,6 @@ void _showRatingDialog(String queueId) {
               child: Column(
                 children: [
                   _buildCooldownCard(),
-
                   DropdownButtonFormField<String>(
                     decoration: const InputDecoration(labelText: 'Ders Seçin'),
                     items: _subjects.map((s) {
@@ -734,15 +826,13 @@ void _showRatingDialog(String queueId) {
                       }
                     },
                   ),
-
                   const SizedBox(height: 16),
-
                   if (_selectedSubject != null) ...[
                     if (_isLoadingTeachers)
                       const Center(child: CircularProgressIndicator())
                     else if (_teachersForSubject.isEmpty)
                       const Text(
-                        'Bu dersi veren öğretmen bulunamadı',
+                        'Bu dersi veren müsait öğretmen bulunamadı',
                         style: TextStyle(color: Colors.red),
                       )
                     else
@@ -764,9 +854,7 @@ void _showRatingDialog(String queueId) {
                         },
                       ),
                   ],
-
                   const SizedBox(height: 32),
-
                   ElevatedButton.icon(
                     onPressed: canJoinQueue ? _joinQueue : null,
                     icon: const Icon(Icons.queue),
