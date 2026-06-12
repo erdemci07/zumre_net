@@ -778,15 +778,52 @@ if (_teacherStatus != 'available')
   required String value,
   required IconData icon,
   required Color color,
+  String _statusText(String status) {
+  switch (status) {
+    case 'available':
+      return 'Müsait';
+    case 'break':
+      return 'Molada';
+    case 'absent':
+      return 'Gelmedi';
+    default:
+      return 'Bilinmeyen';
+  }
+}
 }) {
   final bool isSelected = _teacherStatus == value;
 
   return Expanded(
     child: InkWell(
       borderRadius: BorderRadius.circular(14),
-      onTap: () {
-        _updateTeacherStatus(value);
-      },
+      onTap: () async {
+  if (_teacherStatus == value) return;
+
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Durum Değiştirilsin mi?'),
+      content: Text(
+        '${_statusText(_teacherStatus)} durumundan '
+        '${_statusText(value)} durumuna geçmek istiyor musunuz?',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('İptal'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Onayla'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirm == true) {
+    _updateTeacherStatus(value);
+  }
+},
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         padding: const EdgeInsets.symmetric(vertical: 12),
