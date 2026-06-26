@@ -27,7 +27,7 @@ function makeEmailFromUsername(username) {
     .replace(/\s+/g, "")
     .toLowerCase();
 
-  return `${cleanUsername}@zumrenet.local`;
+  return `${cleanUsername}@bilimkalesi.com`;
 }
 
 function makeIdentityKey(username) {
