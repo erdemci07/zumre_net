@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../auth/auth_service.dart';
-import 'student_home_screen.dart';
-import 'teacher_home_screen.dart';
-import 'admin_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  _LoginScreenState createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
@@ -20,51 +17,45 @@ class _LoginScreenState extends State<LoginScreen> {
 
   final String _domain = "@bilimkalesi.com";
 
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
   Future<void> _login() async {
+    if (_isLoading) return;
+
+    final username = _usernameController.text.trim().toLowerCase();
+    final password = _passwordController.text.trim();
+
+    if (username.isEmpty || password.isEmpty) {
+      _showLoginErrorDialog(
+        title: 'Eksik Bilgi',
+        message: 'Lütfen kullanıcı adı ve şifre alanlarını doldurun.',
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
-      String username = _usernameController.text.trim();
-
-      if (username.isEmpty) {
-        throw Exception("Kullanıcı adı giriniz");
-      }
-
-      if (_passwordController.text.trim().isEmpty) {
-        throw Exception("Şifre giriniz");
-      }
-
-      String fullEmail = username + _domain;
+      final fullEmail = username.contains('@')
+          ? username
+          : username + _domain;
 
       final auth = Provider.of<AuthService>(context, listen: false);
 
-      await auth.signIn(
-        fullEmail,
-        _passwordController.text.trim(),
-      );
+      await auth.signIn(fullEmail, password);
 
-      final user = auth.currentUser!;
-      final roleData = await auth.getUserRole(user.uid);
-      final role = roleData?['role'] ?? 'student';
-
-      if (role == 'teacher') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const TeacherHomeScreen()),
-        );
-      } else if (role == 'admin') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const AdminHomeScreen()),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const StudentHomeScreen()),
-        );
-      }
     } catch (e) {
-      _showLoginErrorDialog();
+      if (!mounted) return;
+
+      _showLoginErrorDialog(
+        title: 'Giriş Başarısız',
+        message: 'Kullanıcı adı veya şifre hatalı.\nLütfen tekrar deneyin.',
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -72,7 +63,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _showLoginErrorDialog() {
+  void _showLoginErrorDialog({
+    required String title,
+    required String message,
+  }) {
+    if (!mounted) return;
+
     showDialog(
       context: context,
       builder: (context) {
@@ -98,18 +94,19 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Text(
-                  'Giriş Başarısız',
-                  style: TextStyle(
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  'Kullanıcı adı veya şifre hatalı.\nLütfen tekrar deneyin.',
+                Text(
+                  message,
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 16,
                     color: Colors.black87,
                   ),
@@ -146,47 +143,193 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('ZümreNet Giriş'),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextFormField(
-              controller: _usernameController,
-              decoration: InputDecoration(
-                labelText: 'Kullanıcı Adı',
-                suffixText: _domain,
-                suffixStyle: const TextStyle(
-                  color: Colors.grey,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-              autocorrect: false,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Şifre',
-              ),
-            ),
-            const SizedBox(height: 20),
-            _isLoading
-                ? const CircularProgressIndicator()
-                : ElevatedButton(
-                    onPressed: _login,
-                    child: const Text('Giriş Yap'),
-                  ),
-          ],
+  Widget _buildLoginButton() {
+    if (_isLoading) {
+      return const SizedBox(
+        height: 48,
+        child: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: ElevatedButton(
+        onPressed: _login,
+        child: const Text(
+          'Giriş Yap',
+          style: TextStyle(fontSize: 16),
         ),
       ),
     );
   }
+
+  @override
+Widget build(BuildContext context) {
+  return Scaffold(
+    body: Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF061B26),
+            Color(0xFF0E3A8A),
+            Color(0xFF2B1055),
+          ],
+        ),
+      ),
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(22),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 420),
+            padding: const EdgeInsets.all(26),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(32),
+              border: Border.all(color: Colors.white.withOpacity(0.18)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.25),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  child: Image.asset(
+                    'assets/images/bilim_kalesi_logo.jpeg',
+                    height: 76,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+
+                const SizedBox(height: 22),
+
+                const Text(
+                  'ZümreNet',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 6),
+
+                const Text(
+                  'Bilim Kalesi Eğitim Kurumları için\nakıllı zümre sıra sistemi',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white70,
+                    height: 1.35,
+                  ),
+                ),
+
+                const SizedBox(height: 28),
+
+                TextField(
+                  controller: _usernameController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'Kullanıcı Adı',
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    suffixText: _domain,
+                    suffixStyle: const TextStyle(
+                      color: Colors.white38,
+                      fontStyle: FontStyle.italic,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.person_outline,
+                      color: Colors.white70,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  autocorrect: false,
+                ),
+
+                const SizedBox(height: 16),
+
+                TextField(
+                  controller: _passwordController,
+                  obscureText: true,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'Şifre',
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    prefixIcon: const Icon(
+                      Icons.lock_outline,
+                      color: Colors.white70,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF6C3DFF),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text(
+                            'Giriş Yap',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                  ),
+                ),
+
+                const SizedBox(height: 18),
+
+                const Text(
+                  'ZümreNet × Bilim Kalesi',
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
 }

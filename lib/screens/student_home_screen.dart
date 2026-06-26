@@ -23,16 +23,32 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   bool _isInQueue = false;
   bool _shownInProgressPopup = false;
 
+
   String? _currentQueueId;
+  String? _activeQueueBeingWatchedId;
   String? _currentTeacherName;
+  String? _activeRatingQueueId;
 
   int _queuePosition = 0;
+  int _selectedQuestionCount = 1;
+
+int _estimatedMinutesForQuestionCount(int count) {
+  switch (count) {
+    case 1:
+      return 4;
+    case 2:
+      return 7;
+    case 3:
+      return 10;
+    default:
+      return 13;
+  }
+}
   int _cooldownUntil = 0;
   int _remainingCooldownSeconds = 0;
 
   Timer? _cooldownTimer;
   StreamSubscription<DocumentSnapshot>? _queueSubscription;
-  StreamSubscription<QuerySnapshot>? _myQueueWatcher;
 
   final List<String> _subjects = [
     'Matematik',
@@ -45,20 +61,64 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     'Geometri',
   ];
 
-  @override
-  void initState() {
-    super.initState();
-    _loadStudentInfo();
-    _listenForMyQueue();
-  }
+ @override
+void initState() {
+  super.initState();
+  _loadStudentInfo();
+  _findAndListenActiveQueue();
+}
 
   @override
-  void dispose() {
-    _queueSubscription?.cancel();
-    _myQueueWatcher?.cancel();
-    _cooldownTimer?.cancel();
-    super.dispose();
+  @override
+void dispose() {
+  _queueSubscription?.cancel();
+  _cooldownTimer?.cancel();
+  super.dispose();
+}
+  Future<void> _findAndListenActiveQueue() async {
+  final userId = _auth.currentUser!.uid;
+
+  final userDoc = await _firestore.collection('users').doc(userId).get();
+
+  final activeQueueId = userDoc.data()?['activeQueueId'];
+
+  if (activeQueueId != null && activeQueueId.toString().isNotEmpty) {
+    final queueDoc =
+        await _firestore.collection('queues').doc(activeQueueId).get();
+
+    if (queueDoc.exists) {
+      final data = queueDoc.data()!;
+      final status = data['status'];
+
+      if (status == 'waiting' ||
+          status == 'in_progress' ||
+          status == 'completed') {
+        if (mounted && status != 'completed') {
+          setState(() {
+            _isInQueue = true;
+            _currentQueueId = activeQueueId;
+          });
+        }
+
+        if (data['teacherId'] != null) {
+          _getCurrentTeacherName(data['teacherId']);
+        }
+
+        _listenToQueue(activeQueueId);
+        return;
+      }
+    }
   }
+
+  if (mounted) {
+    setState(() {
+      _isInQueue = false;
+      _currentQueueId = null;
+      _currentTeacherName = null;
+      _queuePosition = 0;
+    });
+  }
+}
 
   Future<void> _loadStudentInfo() async {
     final user = _auth.currentUser!;
@@ -128,49 +188,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  void _listenForMyQueue() {
-    final userId = _auth.currentUser!.uid;
-
-    _myQueueWatcher?.cancel();
-
-    _myQueueWatcher = _firestore
-        .collection('queues')
-        .where('studentId', isEqualTo: userId)
-        .where('status', whereIn: ['waiting', 'in_progress'])
-        .snapshots()
-        .listen((snapshot) {
-      if (snapshot.docs.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _isInQueue = false;
-            _currentQueueId = null;
-            _currentTeacherName = null;
-            _queuePosition = 0;
-          });
-        }
-
-        return;
-      }
-
-      final doc = snapshot.docs.first;
-      final data = doc.data();
-
-      if (mounted) {
-        setState(() {
-          _isInQueue = true;
-          _currentQueueId = doc.id;
-        });
-      }
-
-      _listenToQueue(doc.id);
-
-      final teacherId = data['teacherId'];
-      if (teacherId != null) {
-        _getCurrentTeacherName(teacherId);
-      }
-    });
-  }
-
   Future<void> _getCurrentTeacherName(String teacherId) async {
     final teacherDoc =
         await _firestore.collection('users').doc(teacherId).get();
@@ -184,75 +201,104 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }
   }
 
-  void _listenToQueue(String queueId) {
-    if (_currentQueueId == queueId && _queueSubscription != null) return;
+void _listenToQueue(String queueId) {
+  _queueSubscription?.cancel();
 
-    _queueSubscription?.cancel();
+  _queueSubscription =
+      _firestore.collection('queues').doc(queueId).snapshots().listen(
+    (snapshot) async {
+      if (!snapshot.exists) return;
 
-    _queueSubscription =
-        _firestore.collection('queues').doc(queueId).snapshots().listen(
-      (snapshot) async {
-        if (!snapshot.exists) return;
+      final data = snapshot.data()!;
+      final status = data['status'];
 
-        final data = snapshot.data()!;
-        final status = data['status'];
-
-        if (status == 'completed') {
-          _shownInProgressPopup = false;
-
-          if (mounted) {
-            setState(() {
-              _isInQueue = false;
-              _currentQueueId = null;
-              _queuePosition = 0;
-            });
-          }
-
-          _showRatingDialog(queueId);
-
-          _queueSubscription?.cancel();
-          _queueSubscription = null;
-        } else if (status == 'cancelled') {
-          _shownInProgressPopup = false;
-
-          if (mounted) {
-            setState(() {
-              _isInQueue = false;
-              _currentQueueId = null;
-              _currentTeacherName = null;
-              _queuePosition = 0;
-            });
-          }
-
-          _queueSubscription?.cancel();
-          _queueSubscription = null;
-        } else if (status == 'in_progress') {
-          final teacherNameFromQueue = data['teacherName'];
-
-          if (mounted) {
-            setState(() {
-              _queuePosition = 0;
-
-              if (teacherNameFromQueue != null) {
-                _currentTeacherName = teacherNameFromQueue;
-              }
-            });
-          }
-
-          if (data['teacherId'] != null) {
-            _getCurrentTeacherName(data['teacherId']);
-          }
-
-          if (!_shownInProgressPopup) {
-            _shownInProgressPopup = true;
-            _showTeacherStartedPopup();
-          }
-        } else if (status == 'waiting') {
-          await _updatePosition(queueId);
+      if (status == 'waiting') {
+        if (mounted) {
+          setState(() {
+            _isInQueue = true;
+            _currentQueueId = queueId;
+          });
         }
-      },
-    );
+
+        await _updatePosition(queueId);
+        return;
+      }
+
+      if (status == 'in_progress') {
+        final teacherNameFromQueue = data['teacherName'];
+
+        if (mounted) {
+          setState(() {
+            _isInQueue = true;
+            _currentQueueId = queueId;
+            _queuePosition = 0;
+
+            if (teacherNameFromQueue != null) {
+              _currentTeacherName = teacherNameFromQueue;
+            }
+          });
+        }
+
+        if (data['teacherId'] != null) {
+          _getCurrentTeacherName(data['teacherId']);
+        }
+
+        if (!_shownInProgressPopup) {
+          _shownInProgressPopup = true;
+          _showTeacherStartedPopup();
+        }
+
+        return;
+      }
+
+      if (status == 'completed') {
+await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
+    'activeQueueId': FieldValue.delete(),
+  });
+  _shownInProgressPopup = false;
+  
+
+  if (mounted) {
+    setState(() {
+      _isInQueue = false;
+      _currentQueueId = null;
+      _currentTeacherName = null;
+      _queuePosition = 0;
+      
+    });
   }
+
+  await _queueSubscription?.cancel();
+  _queueSubscription = null;
+
+  Future.delayed(const Duration(milliseconds: 400), () {
+    if (mounted) {
+      _showRatingDialog(queueId);
+    }
+  });
+
+  return;
+}
+
+      if (status == 'cancelled') {
+        _shownInProgressPopup = false;
+
+        if (mounted) {
+          setState(() {
+            _isInQueue = false;
+            _currentQueueId = null;
+            _currentTeacherName = null;
+            _queuePosition = 0;
+          });
+        }
+
+        await _queueSubscription?.cancel();
+        _queueSubscription = null;
+        return;
+      }
+    },
+  );
+}
 
   Future<void> _updatePosition(String queueId) async {
     final queueDoc =
@@ -419,10 +465,16 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         'subject': _selectedSubject,
         'status': 'waiting',
         'studentName': _studentName,
+        'questionCount': _selectedQuestionCount,
+'estimatedMinutes': _estimatedMinutesForQuestionCount(_selectedQuestionCount),
+'extraMinutes': 0,
         'createdAt': FieldValue.serverTimestamp(),
       };
 
       final docRef = await _firestore.collection('queues').add(newQueue);
+      await _firestore.collection('users').doc(userId).update({
+  'activeQueueId': docRef.id,
+});
 
       if (mounted) {
         setState(() {
@@ -584,48 +636,103 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   void _showRatingDialog(String queueId) {
-    int rating = 5;
-    String comment = '';
+  int rating = 5;
+  String comment = '';
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        bool showCloseButton = false;
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) {
+      bool showCloseButton = false;
 
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            if (!showCloseButton) {
-              Future.delayed(const Duration(seconds: 2), () {
-                if (ctx.mounted) {
-                  setStateDialog(() {
-                    showCloseButton = true;
-                  });
-                }
-              });
-            }
+      return StatefulBuilder(
+        builder: (context, setStateDialog) {
+          if (!showCloseButton) {
+            Future.delayed(const Duration(seconds: 2), () {
+              if (ctx.mounted) {
+                setStateDialog(() {
+                  showCloseButton = true;
+                });
+              }
+            });
+          }
 
-            return AlertDialog(
-              titlePadding: const EdgeInsets.fromLTRB(24, 16, 8, 0),
-              title: Row(
-                children: [
-                  const Expanded(
-                    child: Text('Sorunuz çözüldü!'),
-                  ),
-                  if (showCloseButton)
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      tooltip: 'Kapat',
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                      },
-                    ),
-                ],
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF071A3A),
+                    Color(0xFF30106B),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: Colors.white24),
               ),
-              content: Column(
+              child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Öğretmeni puanlayın'),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Sorunuz çözüldü!',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      if (showCloseButton)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.white70,
+                          ),
+                          onPressed: () async {
+                            await _firestore
+                                .collection('queues')
+                                .doc(queueId)
+                                .update({
+                              'ratingPopupClosed': true,
+                            });
+
+                            Navigator.pop(ctx);
+                          },
+                        ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.18),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_circle,
+                      color: Colors.greenAccent,
+                      size: 42,
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  const Text(
+                    'Öğretmeni puanlayın',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+
+                  const SizedBox(height: 8),
+
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(
@@ -633,7 +740,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       (i) => IconButton(
                         icon: Icon(
                           i < rating ? Icons.star : Icons.star_border,
-                          color: Colors.orange,
+                          color: Colors.amber,
+                          size: 30,
                         ),
                         onPressed: () {
                           setStateDialog(() {
@@ -643,57 +751,82 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
+
+                  const SizedBox(height: 12),
+
                   TextField(
-                    decoration: const InputDecoration(
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
                       labelText: 'Yorum (isteğe bağlı)',
+                      labelStyle: const TextStyle(color: Colors.white60),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.08),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
                     onChanged: (val) {
                       comment = val;
                     },
                   ),
+
+                  const SizedBox(height: 20),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        try {
+                          await _firestore
+                              .collection('queues')
+                              .doc(queueId)
+                              .update({
+                            'rating': rating,
+                            'comment': comment,
+                            'ratingPopupClosed': true,
+                          });
+
+                          Navigator.pop(ctx);
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Teşekkürler! Değerlendirmeniz kaydedildi.',
+                              ),
+                            ),
+                          );
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Değerlendirme kaydedilemedi: $e',
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.send),
+                      label: const Text('Değerlendirmeyi Gönder'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF6C3DFF),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () async {
-                    try {
-                      await _firestore
-                          .collection('queues')
-                          .doc(queueId)
-                          .update({
-                        'rating': rating,
-                        'comment': comment,
-                      });
-
-                      Navigator.pop(ctx);
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Teşekkürler! Değerlendirmeniz kaydedildi.',
-                          ),
-                        ),
-                      );
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Değerlendirme kaydedilemedi: $e',
-                          ),
-                        ),
-                      );
-                    }
-                  },
-                  child: const Text('Gönder'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+            ),
+          );
+        },
+      );
+    },
+  );
+}
 
   String _formatCooldown(int seconds) {
     final minutes = seconds ~/ 60;
@@ -705,35 +838,568 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     return '$remainingSeconds sn';
   }
+  Widget _buildSubjectGrid() {
+  return GridView.count(
+    shrinkWrap: true,
+    physics: const NeverScrollableScrollPhysics(),
+    crossAxisCount: 2,
+    crossAxisSpacing: 12,
+    mainAxisSpacing: 12,
+    childAspectRatio: 1.8,
+    children: [
+      _subjectCard('Matematik', Icons.calculate, const Color(0xFF6C3DFF)),
+      _subjectCard('Fizik', Icons.science, const Color(0xFF0099FF)),
+      _subjectCard('Kimya', Icons.biotech, const Color(0xFFFF8A00)),
+      _subjectCard('Biyoloji', Icons.eco, const Color(0xFF00C878)),
+      _subjectCard('Türkçe', Icons.menu_book, const Color(0xFFE91E63)),
+      _subjectCard('Tarih', Icons.history_edu, const Color(0xFFFFC107)),
+      _subjectCard('Coğrafya', Icons.public, const Color(0xFF00BCD4)),
+      _subjectCard('Geometri', Icons.square_foot, const Color(0xFF9C27B0)),
+    ],
+  );
+}
+Widget _buildQuestionCountSelector() {
+  final options = [1, 2, 3, 4];
 
-  Widget _buildCooldownCard() {
-    if (_remainingCooldownSeconds <= 0) {
-      return const SizedBox.shrink();
-    }
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(24),
+      border: Border.all(color: Colors.white.withOpacity(0.14)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Kaç soru çözdüreceksin?',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: options.map((count) {
+            final selected = _selectedQuestionCount == count;
+            final label = count == 4 ? '4+' : '$count';
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(14),
+            return Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () {
+                    setState(() {
+                      _selectedQuestionCount = count;
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? const Color(0xFF6C3DFF)
+                          : Colors.white.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: selected
+                            ? Colors.white.withOpacity(0.55)
+                            : Colors.white24,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'Tahmini çözüm süresi: ~${_estimatedMinutesForQuestionCount(_selectedQuestionCount)} dk',
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+
+Widget _subjectCard(String title, IconData icon, Color color) {
+  final selected = _selectedSubject == title;
+
+  return InkWell(
+    borderRadius: BorderRadius.circular(20),
+    onTap: () {
+      setState(() {
+        _selectedSubject = title;
+        _selectedTeacherId = null;
+      });
+
+      _loadTeachersForSubject(title);
+    },
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
       decoration: BoxDecoration(
-        color: Colors.orange.shade100,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.orange.shade300),
+        color: selected ? color.withOpacity(0.26) : Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: selected ? color : Colors.white24,
+          width: selected ? 2 : 1,
+        ),
       ),
-      child: Row(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.timer, color: Colors.orange),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Tekrar sıra almak için ${_formatCooldown(_remainingCooldownSeconds)} bekleyiniz lütfen.',
-              style: const TextStyle(fontWeight: FontWeight.w600),
+          Icon(icon, color: selected ? Colors.white : color, size: 30),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ],
       ),
+    ),
+  );
+}
+
+  Widget _buildCooldownCard() {
+  if (_remainingCooldownSeconds <= 0) {
+    return const SizedBox.shrink();
+  }
+
+  return Container(
+    width: double.infinity,
+    margin: const EdgeInsets.only(bottom: 18),
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      color: Colors.orange.withOpacity(0.16),
+      borderRadius: BorderRadius.circular(24),
+      border: Border.all(
+        color: Colors.orangeAccent.withOpacity(0.45),
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.16),
+          blurRadius: 14,
+          offset: const Offset(0, 6),
+        ),
+      ],
+    ),
+    child: Row(
+      children: [
+        Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: Colors.orange.withOpacity(0.20),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.timer,
+            color: Colors.orangeAccent,
+            size: 28,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Kısa bir bekleme süresi',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Tekrar sıra almak için ${_formatCooldown(_remainingCooldownSeconds)} bekleyiniz.',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+  Widget _buildHomeView() {
+  return SingleChildScrollView(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+
+        _buildWelcomeCard(),
+
+        const SizedBox(height: 24),
+
+        _buildCooldownCard(),
+
+        const SizedBox(height: 12),
+
+        const Text(
+          "Ders Seç",
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        _buildSubjectGrid(),
+
+        const SizedBox(height: 24),
+        const SizedBox(height: 18),
+_buildQuestionCountSelector(),
+
+        _buildTeacherSelector(),
+
+        const SizedBox(height: 24),
+
+        _buildJoinQueueButton(),
+      ],
+    ),
+  );
+}
+Widget _buildWelcomeCard() {
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(22),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.white.withOpacity(0.12),
+          const Color(0xFF6C3DFF).withOpacity(0.22),
+        ],
+      ),
+      borderRadius: BorderRadius.circular(30),
+      border: Border.all(color: Colors.white.withOpacity(0.18)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.22),
+          blurRadius: 18,
+          offset: const Offset(0, 8),
+        ),
+      ],
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 66,
+              height: 66,
+              decoration: BoxDecoration(
+                color: const Color(0xFF6C3DFF).withOpacity(0.22),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white.withOpacity(0.18)),
+              ),
+              child: const Icon(
+                Icons.school,
+                color: Colors.white,
+                size: 34,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Merhaba 👋',
+                    style: TextStyle(color: Colors.white60, fontSize: 14),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _studentName ?? 'Öğrenci',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 25,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Sorunu seç, sıranı al ve öğretmenine ulaş.',
+                    style: TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Çıkış Yap',
+              onPressed: () async {
+                await _auth.signOut();
+              },
+              icon: const Icon(
+                Icons.logout,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+Widget _buildTeacherSelector() {
+  if (_selectedSubject == null) {
+    return const SizedBox();
+  }
+
+  if (_isLoadingTeachers) {
+    return const Center(
+      child: CircularProgressIndicator(),
     );
   }
+
+  return Container(
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(24),
+    ),
+    child: DropdownButtonFormField<String>(
+      dropdownColor: const Color(0xFF1A1F3A),
+      style: const TextStyle(color: Colors.white),
+      decoration: const InputDecoration(
+        labelText: 'Öğretmen Seç',
+        labelStyle: TextStyle(color: Colors.white70),
+      ),
+      items: _teachersForSubject.map<DropdownMenuItem<String>>((t) {
+        final id = (t['id'] ?? '') as String;
+        final name = (t['name'] ?? '') as String;
+        return DropdownMenuItem<String>(
+          value: id,
+          child: Text(name),
+        );
+      }).toList(),
+      onChanged: (val) {
+        setState(() {
+          _selectedTeacherId = val;
+        });
+      },
+    ),
+  );
+}
+Widget _buildJoinQueueButton() {
+  final canJoinQueue =
+      _selectedSubject != null &&
+      _remainingCooldownSeconds <= 0;
+
+  return SizedBox(
+    width: double.infinity,
+    height: 58,
+    child: ElevatedButton.icon(
+      onPressed: canJoinQueue ? _joinQueue : null,
+      icon: const Icon(Icons.flash_on),
+      label: const Text(
+        "Sıra Al",
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF6C3DFF),
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+    ),
+  );
+}
+Widget _buildQueueView() {
+  final bool isTeacherWorking = _queuePosition == 0;
+
+  return Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(26),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.18),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 86,
+              height: 86,
+              decoration: BoxDecoration(
+                color: isTeacherWorking
+                    ? Colors.green.withOpacity(0.18)
+                    : Colors.blue.withOpacity(0.18),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isTeacherWorking
+                    ? Icons.support_agent
+                    : Icons.hourglass_top,
+                color: isTeacherWorking ? Colors.greenAccent : Colors.blueAccent,
+                size: 44,
+              ),
+            ),
+
+            const SizedBox(height: 22),
+
+            Text(
+              isTeacherWorking
+                  ? 'Öğretmen sorunuzla ilgileniyor'
+                  : 'Sıranız beklemede',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 23,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            Text(
+              isTeacherWorking
+                  ? 'Lütfen öğretmenin yönlendirmesini bekleyin.'
+                  : 'Önünüzde $_queuePosition kişi var.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 15,
+              ),
+            ),
+
+            if (_currentTeacherName != null) ...[
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.person,
+                      color: Colors.white70,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Öğretmen: $_currentTeacherName',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 24),
+
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                children: [
+                  const Text(
+                    'Tahmini Bekleme',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    isTeacherWorking
+                        ? 'Şu an ilgileniliyor'
+                        : '~${_queuePosition * 3} dk',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 26),
+
+            SizedBox(
+              width: double.infinity,
+              height: 54,
+              child: ElevatedButton.icon(
+                onPressed: isTeacherWorking ? null : _cancelQueue,
+                icon: const Icon(Icons.cancel),
+                label: Text(
+                  isTeacherWorking
+                      ? 'İptal Edilemez'
+                      : 'Sırayı İptal Et',
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  disabledBackgroundColor: Colors.white.withOpacity(0.12),
+                  foregroundColor: Colors.white,
+                  disabledForegroundColor: Colors.white54,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -743,129 +1409,26 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-title: LayoutBuilder(
-  builder: (context, constraints) {
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.centerLeft,
-      child: Text(
-        'Hoşgeldin, ${_studentName ?? 'Öğrenci'}',
-        maxLines: 1,
-        overflow: TextOverflow.visible,
-      ),
-    );
-  },
-),        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await _auth.signOut();
-              Navigator.pushReplacementNamed(context, '/login');
-            },
-          ),
-        ],
-      ),
-      body: _isInQueue
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.hourglass_top,
-                    size: 64,
-                    color: Colors.blue,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _queuePosition == 0
-                        ? 'Öğretmen sorunuzla ilgileniyor...'
-                        : 'Önünüzde $_queuePosition kişi var.',
-                    style: const TextStyle(fontSize: 18),
-                  ),
-                  if (_currentTeacherName != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        'Öğretmen: $_currentTeacherName',
-                        style: const TextStyle(color: Colors.grey),
-                      ),
-                    ),
-                  const SizedBox(height: 40),
-                  ElevatedButton.icon(
-                    onPressed: _queuePosition == 0 ? null : _cancelQueue,
-                    icon: const Icon(Icons.cancel),
-                    label: const Text('Sırayı İptal Et'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _buildCooldownCard(),
-                  DropdownButtonFormField<String>(
-                    decoration: const InputDecoration(labelText: 'Ders Seçin'),
-                    items: _subjects.map((s) {
-                      return DropdownMenuItem(
-                        value: s,
-                        child: Text(s),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedSubject = value;
-                        _selectedTeacherId = null;
-                      });
-
-                      if (value != null) {
-                        _loadTeachersForSubject(value);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  if (_selectedSubject != null) ...[
-                    if (_isLoadingTeachers)
-                      const Center(child: CircularProgressIndicator())
-                    else if (_teachersForSubject.isEmpty)
-                      const Text(
-                        'Bu dersi veren müsait öğretmen bulunamadı',
-                        style: TextStyle(color: Colors.red),
-                      )
-                    else
-                      DropdownButtonFormField<String>(
-                        decoration: const InputDecoration(
-                          labelText: 'Öğretmen Seç (isteğe bağlı)',
-                        ),
-                        hint: const Text('Rastgele'),
-                        items: _teachersForSubject.map((t) {
-                          return DropdownMenuItem<String>(
-                            value: t['id'],
-                            child: Text(t['name']),
-                          );
-                        }).toList(),
-                        onChanged: (val) {
-                          setState(() {
-                            _selectedTeacherId = val;
-                          });
-                        },
-                      ),
-                  ],
-                  const SizedBox(height: 32),
-                  ElevatedButton.icon(
-                    onPressed: canJoinQueue ? _joinQueue : null,
-                    icon: const Icon(Icons.queue),
-                    label: const Text('Sıra Al'),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 48),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+  toolbarHeight: 0,
+),
+  body: Container(
+  decoration: const BoxDecoration(
+    gradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        Color(0xFF071A3A),
+        Color(0xFF30106B),
+        Color(0xFF050814),
+      ],
+    ),
+  ),
+  child: SafeArea(
+    child: _isInQueue
+        ? _buildQueueView()
+        : _buildHomeView(),
+  ),
+),
     );
   }
 }

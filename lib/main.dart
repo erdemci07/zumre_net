@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
-
+import 'package:zumre_net/theme/app_theme.dart';
 import 'package:zumre_net/screens/admin_home_screen.dart';
 import 'package:zumre_net/screens/student_home_screen.dart';
 import 'package:zumre_net/screens/teacher_home_screen.dart';
@@ -54,17 +54,9 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthService()),
       ],
-      child: MaterialApp(
-        title: 'ZümreNet',
-theme: ThemeData(
-  primarySwatch: Colors.blue,
-  fontFamilyFallback: const [
-    'Arial',
-    'Roboto',
-    'Noto Sans',
-    'sans-serif',
-  ],
-),        debugShowCheckedModeBanner: false,
+child: MaterialApp(
+  title: 'ZümreNet',
+  theme: AppTheme.theme,        debugShowCheckedModeBanner: false,
 
         home: StreamBuilder<User?>(
           stream: FirebaseAuth.instance.authStateChanges(),
@@ -89,8 +81,38 @@ theme: ThemeData(
                 }
 
                 if (roleSnapshot.hasError) {
-                  return const LoginScreen();
-                }
+  return Scaffold(
+    body: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const SizedBox(height: 16),
+            const Text(
+              'Giriş başarılı ancak kullanıcı rolü okunamadı.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${roleSnapshot.error}',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () async {
+                await FirebaseAuth.instance.signOut();
+              },
+              child: const Text('Tekrar Giriş Yap'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
 
                 return roleSnapshot.data ?? const LoginScreen();
               },

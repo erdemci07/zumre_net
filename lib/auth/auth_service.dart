@@ -18,8 +18,22 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Map<String, dynamic>?> getUserRole(String uid) async {
-    final doc = await _firestore.collection('users').doc(uid).get();
+ Future<Map<String, dynamic>?> getUserRole(String uid) async {
+  try {
+    final doc = await _firestore
+        .collection('users')
+        .doc(uid)
+        .get()
+        .timeout(const Duration(seconds: 8));
+
+    if (!doc.exists) {
+      throw Exception('Kullanıcı Firestore kaydı bulunamadı.');
+    }
+
     return doc.data();
+  } catch (e) {
+    print('GET USER ROLE HATASI: $e');
+    rethrow;
   }
+}
 }

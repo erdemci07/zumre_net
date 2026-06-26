@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -6,7 +8,7 @@ class TeacherHomeScreen extends StatefulWidget {
   const TeacherHomeScreen({super.key});
 
   @override
-  _TeacherHomeScreenState createState() => _TeacherHomeScreenState();
+  State<TeacherHomeScreen> createState() => _TeacherHomeScreenState();
 }
 
 class _TeacherHomeScreenState extends State<TeacherHomeScreen>
@@ -19,7 +21,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   String _teacherStatus = 'available';
   String? _teacherName;
   String? _teacherSubject;
+
   int _todaySolved = 0;
+
+  Timer? _activeQuestionTimer;
+  String? _activeTimerQueueId;
+  int? _activeTimerLimitMinutes;
+  String? _warnedQueueKey;
+  bool _isTimeDialogOpen = false;
+  int _elapsedSeconds = 0;
 
   @override
   void initState() {
@@ -32,7 +42,289 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _activeQuestionTimer?.cancel();
     super.dispose();
+  }
+
+  String _formatElapsed(int seconds) {
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  int _toInt(dynamic value, {int fallback = 0}) {
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    return int.tryParse('$value') ?? fallback;
+  }
+
+ void _resetActiveQuestionTimer() {
+  _activeQuestionTimer?.cancel();
+  _activeQuestionTimer = null;
+  _activeTimerQueueId = null;
+  _activeTimerLimitMinutes = null;
+  _warnedQueueKey = null;
+  _isTimeDialogOpen = false;
+  _elapsedSeconds = 0;
+}
+
+  void _startActiveQuestionTimer({
+    required String queueId,
+    required Timestamp? startedAt,
+    required int estimatedMinutes,
+    required int extraMinutes,
+  }) {
+    if (startedAt == null) return;
+
+    final totalMinutes = estimatedMinutes + extraMinutes;
+
+    if (_activeTimerQueueId == queueId &&
+        _activeTimerLimitMinutes == totalMinutes) {
+      return;
+    }
+
+    _activeTimerQueueId = queueId;
+    _activeTimerLimitMinutes = totalMinutes;
+
+    _activeQuestionTimer?.cancel();
+
+    final initialElapsed =
+        DateTime.now().difference(startedAt.toDate()).inSeconds;
+        _elapsedSeconds = initialElapsed;
+
+    _activeQuestionTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) {
+        final elapsed =
+            DateTime.now().difference(startedAt.toDate()).inSeconds;
+
+        if (mounted) {
+          setState(() {
+            _elapsedSeconds = elapsed;
+          });
+        }
+
+        final totalLimitSeconds = totalMinutes * 60;
+        final warningKey = '$queueId-$totalMinutes';
+
+        if (elapsed >= totalLimitSeconds &&
+            _warnedQueueKey != warningKey &&
+            !_isTimeDialogOpen) {
+          _warnedQueueKey = warningKey;
+          _showTimeExceededDialog(queueId);
+        }
+      },
+    );
+  }
+ Future<bool> _confirmAction({
+  required String title,
+  required String message,
+  required String confirmText,
+  IconData icon = Icons.help_outline,
+  Color color = Colors.green,
+}) async {
+  final result = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) {
+      return Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF06312E),
+                Color(0xFF008A5C),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 34,
+                backgroundColor: color.withOpacity(0.18),
+                child: Icon(icon, color: color, size: 36),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, height: 1.35),
+              ),
+              const SizedBox(height: 22),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Vazgeç'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: color,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: Text(confirmText),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  return result == true;
+}
+
+  Future<void> _showTimeExceededDialog(String queueId) async {
+    if (!mounted) return;
+
+    _isTimeDialogOpen = true;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF06312E),
+                  Color(0xFF008A5C),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 68,
+                  height: 68,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.timer_off,
+                    color: Colors.orangeAccent,
+                    size: 38,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Tahmini süre doldu',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Süre ekleyebilir veya soruyu çözüldü olarak işaretleyebilirsiniz.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white70,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () async {
+                          await _addExtraMinute(queueId, 1);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white38),
+                        ),
+                        child: const Text('+1 dk'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () async {
+                          await _addExtraMinute(queueId, 3);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white38),
+                        ),
+                        child: const Text('+3 dk'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      await _markAsSolved(queueId);
+                    },
+                    icon: const Icon(Icons.check),
+                    label: const Text('Çözüldü'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    _isTimeDialogOpen = false;
+  }
+
+  Future<void> _addExtraMinute(String queueId, int minute) async {
+    await _firestore.collection('queues').doc(queueId).update({
+      'extraMinutes': FieldValue.increment(minute),
+    });
+
+    _activeTimerQueueId = null;
+    _activeTimerLimitMinutes = null;
+    _warnedQueueKey = null;
   }
 
   String _statusText(String status) {
@@ -52,23 +344,22 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
     final uid = _auth.currentUser!.uid;
     final doc = await _firestore.collection('users').doc(uid).get();
 
-    if (doc.exists) {
-      final data = doc.data();
+    if (!doc.exists || !mounted) return;
 
-      String? subject;
+    final data = doc.data();
 
-      if (data?['subjects'] is List && data!['subjects'].isNotEmpty) {
-        subject = data['subjects'][0];
-      } else if (data?['subject'] != null) {
-        subject = data?['subject'];
-      }
-
-      setState(() {
-        _teacherName = data?['name'] ?? data?['email'] ?? 'Öğretmen';
-        _teacherSubject = subject ?? 'Ders';
-        _teacherStatus = data?['teacherStatus'] ?? 'available';
-      });
+    String? subject;
+    if (data?['subjects'] is List && data!['subjects'].isNotEmpty) {
+      subject = data['subjects'][0];
+    } else if (data?['subject'] != null) {
+      subject = data?['subject'];
     }
+
+    setState(() {
+      _teacherName = data?['name'] ?? data?['email'] ?? 'Öğretmen';
+      _teacherSubject = subject ?? 'Ders';
+      _teacherStatus = data?['teacherStatus'] ?? 'available';
+    });
   }
 
   Future<void> _updateTeacherStatus(String status) async {
@@ -77,6 +368,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
     await _firestore.collection('users').doc(uid).update({
       'teacherStatus': status,
     });
+
+    if (!mounted) return;
 
     setState(() {
       _teacherStatus = status;
@@ -95,6 +388,35 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
     );
   }
 
+  Future<void> _showStatusChangeDialog(String value) async {
+    if (_teacherStatus == value) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Durum değiştirilsin mi?'),
+        content: Text(
+          '${_statusText(_teacherStatus)} durumundan '
+          '${_statusText(value)} durumuna geçmek istiyor musunuz?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('İptal'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Onayla'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _updateTeacherStatus(value);
+    }
+  }
+
   Future<void> _loadTodaySolvedCount() async {
     try {
       final uid = _auth.currentUser!.uid;
@@ -108,7 +430,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
       final today = DateTime.now();
       int count = 0;
 
-      for (var doc in snapshot.docs) {
+      for (final doc in snapshot.docs) {
         final completedAt = doc.data()['completedAt'] as Timestamp?;
 
         if (completedAt != null) {
@@ -127,12 +449,17 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
           _todaySolved = count;
         });
       }
-    } catch (e) {
-      print(e);
-    }
+    } catch (_) {}
   }
 
   Future<void> _showAddStudentDialog() async {
+    if (_teacherStatus != 'available') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Müsait değilken öğrenci ekleyemezsiniz')),
+      );
+      return;
+    }
+
     String? selectedStudentId;
     String? selectedStudentName;
 
@@ -151,8 +478,17 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
         .where((id) => id != null)
         .toSet();
 
+    final now = DateTime.now();
+
     final availableStudents = studentsSnapshot.docs.where((doc) {
-      return !activeStudentIds.contains(doc.id);
+      final data = doc.data();
+      final cooldownUntil = data['cooldownUntil'] as Timestamp?;
+      final isInCooldown =
+          cooldownUntil != null && cooldownUntil.toDate().isAfter(now);
+
+      final isInActiveQueue = activeStudentIds.contains(doc.id);
+
+      return !isInActiveQueue && !isInCooldown;
     }).toList();
 
     if (availableStudents.isEmpty) {
@@ -167,89 +503,184 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Öğrenciyi Aktif Soruya Ekle'),
-              content: DropdownButtonFormField<String>(
-                decoration: const InputDecoration(labelText: 'Öğrenci Seç'),
-                initialValue: selectedStudentId,
-                items: availableStudents.map((doc) {
-                  final data = doc.data();
-                  final name = data['name'] ?? data['email'] ?? 'Öğrenci';
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFF06312E),
+                      Color(0xFF008A5C),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            color: Colors.greenAccent.withOpacity(0.18),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.person_add,
+                            color: Colors.greenAccent,
+                            size: 30,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Öğrenci Ekle',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 23,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Sırada olmayan kayıtlı öğrencilerden birini seçin.',
+                      style: TextStyle(color: Colors.white70, height: 1.35),
+                    ),
+                    const SizedBox(height: 18),
+                    DropdownButtonFormField<String>(
+                      value: selectedStudentId,
+                      dropdownColor: const Color(0xFF06312E),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: 'Öğrenci Seç',
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      items: availableStudents.map((doc) {
+                        final data = doc.data();
+                        final name = data['name'] ?? data['email'] ?? 'Öğrenci';
 
-                  return DropdownMenuItem<String>(
-                    value: doc.id,
-                    child: Text(name),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  if (value == null) return;
+                        return DropdownMenuItem<String>(
+                          value: doc.id,
+                          child: Text(name),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
 
-                  final selectedDoc = availableStudents.firstWhere(
-                    (doc) => doc.id == value,
-                  );
+                        final selectedDoc = availableStudents.firstWhere(
+                          (doc) => doc.id == value,
+                        );
 
-                  final data = selectedDoc.data();
+                        final data = selectedDoc.data();
 
-                  setDialogState(() {
-                    selectedStudentId = selectedDoc.id;
-                    selectedStudentName =
-                        data['name'] ?? data['email'] ?? 'Öğrenci';
-                  });
-                },
+                        setDialogState(() {
+                          selectedStudentId = selectedDoc.id;
+                          selectedStudentName =
+                              data['name'] ?? data['email'] ?? 'Öğrenci';
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 22),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: ElevatedButton.icon(
+                        onPressed: selectedStudentId == null
+                            ? null
+                            : () async {
+                                try {
+                                  final teacherId = _auth.currentUser!.uid;
+
+                                  final activeSnapshot = await _firestore
+                                      .collection('queues')
+                                      .where('teacherId', isEqualTo: teacherId)
+                                      .where('status', isEqualTo: 'in_progress')
+                                      .get();
+
+                                  final hasActiveQuestion =
+                                      activeSnapshot.docs.isNotEmpty;
+
+                                  final docRef = await _firestore
+                                      .collection('queues')
+                                      .add({
+                                    'studentId': selectedStudentId,
+                                    'studentName': selectedStudentName,
+                                    'teacherId': teacherId,
+                                    'teacherName': _teacherName ?? 'Öğretmen',
+                                    'subject': _teacherSubject ?? 'Ders',
+                                    'status': hasActiveQuestion
+                                        ? 'waiting'
+                                        : 'in_progress',
+                                    'isManual': true,
+                                    'questionCount': 1,
+                                    'estimatedMinutes': 4,
+                                    'extraMinutes': 0,
+                                    'createdAt': Timestamp.now(),
+                                    'startedAt': hasActiveQuestion
+                                        ? null
+                                        : Timestamp.now(),
+                                  });
+
+                                  await _firestore
+                                      .collection('users')
+                                      .doc(selectedStudentId)
+                                      .update({
+                                    'activeQueueId': docRef.id,
+                                  });
+
+                                  if (ctx.mounted) Navigator.pop(ctx);
+
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Öğrenci sıraya eklendi'),
+                                    ),
+                                  );
+                                } catch (e) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Hata: $e')),
+                                  );
+                                }
+                              },
+                        icon: const Icon(Icons.add),
+                        label: const Text(
+                          'Sıraya Ekle',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor:
+                              Colors.white.withOpacity(0.15),
+                          disabledForegroundColor: Colors.white54,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('İptal'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (selectedStudentId == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Lütfen öğrenci seçin')),
-                      );
-                      return;
-                    }
-
-                    try {
-                      final teacherId = _auth.currentUser!.uid;
-
-                      final activeSnapshot = await _firestore
-                          .collection('queues')
-                          .where('teacherId', isEqualTo: teacherId)
-                          .where('status', isEqualTo: 'in_progress')
-                          .get();
-
-                      final bool hasActiveQuestion =
-                          activeSnapshot.docs.isNotEmpty;
-
-                      await _firestore.collection('queues').add({
-                        'studentId': selectedStudentId,
-                        'studentName': selectedStudentName,
-                        'teacherId': teacherId,
-                        'teacherName': _teacherName ?? 'Öğretmen',
-                        'subject': _teacherSubject ?? 'Ders',
-                        'status': hasActiveQuestion ? 'waiting' : 'in_progress',
-                        'isManual': true,
-                        'createdAt': FieldValue.serverTimestamp(),
-                        'startedAt':
-                            hasActiveQuestion ? null : FieldValue.serverTimestamp(),
-                      });
-
-                      Navigator.pop(ctx);
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Öğrenci sıraya eklendi')),
-                      );
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Hata: $e')),
-                      );
-                    }
-                  },
-                  child: const Text('Ekle'),
-                ),
-              ],
             );
           },
         );
@@ -285,35 +716,45 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
 
     await _firestore.collection('queues').doc(nextQueue.id).update({
       'status': 'in_progress',
-      'startedAt': FieldValue.serverTimestamp(),
+      'startedAt': Timestamp.now(),
     });
   }
 
   Future<void> _markAsSolved(String queueId) async {
     try {
+      _resetActiveQuestionTimer();
+
       await _firestore.collection('queues').doc(queueId).update({
         'status': 'completed',
-        'completedAt': FieldValue.serverTimestamp(),
+        'completedAt': Timestamp.now(),
       });
 
+      if (mounted) {
+        setState(() {
+          _todaySolved++;
+        });
+      }
+
+      await Future.delayed(const Duration(milliseconds: 400));
       await _takeNextWaitingQueue();
-      _loadTodaySolvedCount();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Soru çözüldü olarak işaretlendi')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Hata: $e')),
+        SnackBar(content: Text('Çözüldü işlemi başarısız: $e')),
       );
     }
   }
 
   Future<void> _cancelQueue(String queueId) async {
     try {
+      _resetActiveQuestionTimer();
+
       await _firestore.collection('queues').doc(queueId).update({
         'status': 'cancelled',
-        'cancelledAt': FieldValue.serverTimestamp(),
+        'cancelledAt': Timestamp.now(),
       });
 
       await _takeNextWaitingQueue();
@@ -328,74 +769,37 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
     }
   }
 
-  Widget _buildStatusButton({
-    required String label,
+  Widget _miniTimeBox({
+    required String title,
     required String value,
     required IconData icon,
-    required Color color,
   }) {
-    final bool isSelected = _teacherStatus == value;
-
-    return Expanded(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () async {
-          if (_teacherStatus == value) return;
-
-          final confirm = await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text('Durum değiştirilsin mi?'),
-              content: Text(
-                '${_statusText(_teacherStatus)} durumundan '
-                '${_statusText(value)} durumuna geçmek istiyor musunuz?',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('İptal'),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Onayla'),
-                ),
-              ],
-            ),
-          );
-
-          if (confirm == true) {
-            await _updateTeacherStatus(value);
-          }
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected ? color.withValues(alpha: 0.15) : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isSelected ? color : Colors.grey.shade300,
-              width: isSelected ? 2 : 1,
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: Colors.greenAccent, size: 20),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          child: Column(
-            children: [
-              Icon(
-                icon,
-                color: isSelected ? color : Colors.grey,
-                size: 24,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: isSelected ? color : Colors.grey.shade700,
-                ),
-              ),
-            ],
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white60,
+              fontSize: 11,
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -411,196 +815,449 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Card(
-            margin: const EdgeInsets.all(12),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('Aktif soru hatası: ${snapshot.error}'),
-            ),
+          _resetActiveQuestionTimer();
+          return _glassInfoCard(
+            icon: Icons.error_outline,
+            title: 'Aktif soru yüklenemedi',
+            subtitle: '${snapshot.error}',
+            iconColor: Colors.redAccent,
           );
         }
 
         if (!snapshot.hasData) {
-          return const SizedBox();
+          return const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          );
         }
 
         final activeQueues = snapshot.data!.docs;
 
         if (activeQueues.isEmpty) {
-          return const Card(
-            margin: EdgeInsets.all(12),
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline),
-                  SizedBox(width: 8),
-                  Expanded(child: Text('Şu anda aktif sorunuz yok')),
-                ],
-              ),
-            ),
+          _resetActiveQuestionTimer();
+
+          return _glassInfoCard(
+            icon: Icons.task_alt,
+            title: 'Şu anda aktif sorunuz yok',
+            subtitle:
+                'Yeni öğrenci ekleyebilir veya bekleyen sıradan başlatabilirsiniz.',
+            iconColor: Colors.greenAccent,
           );
         }
 
         final doc = activeQueues.first;
         final data = doc.data() as Map<String, dynamic>;
+
+        final questionCount = _toInt(data['questionCount'], fallback: 1);
+        final estimatedMinutes = _toInt(data['estimatedMinutes'], fallback: 4);
+        final extraMinutes = _toInt(data['extraMinutes']);
+        final startedAt = data['startedAt'] as Timestamp?;
         final isManual = data['isManual'] == true;
 
-        return Card(
-          color: Colors.green.shade50,
-          margin: const EdgeInsets.all(12),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Aktif Soru',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${data['studentName'] ?? 'Öğrenci'} - ${data['subject'] ?? 'Ders'}',
-                  style: const TextStyle(fontSize: 16),
-                ),
-                if (isManual)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: Text(
-                      'Öğretmen tarafından eklendi',
-                      style: TextStyle(
-                        color: Colors.orange,
-                        fontWeight: FontWeight.bold,
-                      ),
+        _startActiveQuestionTimer(
+          queueId: doc.id,
+          startedAt: startedAt,
+          estimatedMinutes: estimatedMinutes,
+          extraMinutes: extraMinutes,
+        );
+
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white.withOpacity(0.16)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 58,
+                    height: 58,
+                    decoration: BoxDecoration(
+                      color: Colors.greenAccent.withOpacity(0.16),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.support_agent,
+                      color: Colors.greenAccent,
+                      size: 32,
                     ),
                   ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _markAsSolved(doc.id),
-                        icon: const Icon(Icons.check),
-                        label: const Text('Çözüldü'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Aktif Soru',
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
                         ),
-                      ),
+                        const SizedBox(height: 4),
+                        Text(
+                          data['studentName'] ?? 'Öğrenci',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          data['subject'] ?? 'Ders',
+                          style: const TextStyle(color: Colors.white60),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.cancel, color: Colors.red),
-                      onPressed: () => _cancelQueue(doc.id),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _miniTimeBox(
+                      title: 'Soru',
+                      value: '$questionCount',
+                      icon: Icons.menu_book,
                     ),
-                  ],
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _miniTimeBox(
+                      title: 'Tahmini',
+                      value: '${estimatedMinutes + extraMinutes} dk',
+                      icon: Icons.timer,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _miniTimeBox(
+                      title: 'Geçen',
+                      value: _formatElapsed(_elapsedSeconds),
+                      icon: Icons.access_time,
+                    ),
+                  ),
+                ],
+              ),
+              if (isManual) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.18),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Text(
+                    'Öğretmen tarafından eklendi',
+                    style: TextStyle(
+                      color: Colors.orangeAccent,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ],
-            ),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+  final confirm = await _confirmAction(
+    title: 'Soru çözüldü mü?',
+    message: 'Bu öğrencinin sorusunu çözüldü olarak işaretlemek istiyor musunuz?',
+    confirmText: 'Çözüldü',
+  );
+
+  if (confirm) {
+    await _markAsSolved(doc.id);
+  }
+},
+                  icon: const Icon(Icons.check),
+                  label: const Text(
+                    'Çözüldü',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: OutlinedButton.icon(
+                 onPressed: () async {
+  final confirm = await _confirmAction(
+    title: 'Soru iptal edilsin mi?',
+    message: 'Bu aktif soruyu iptal etmek istiyor musunuz?',
+    confirmText: 'İptal Et',
+  );
+
+  if (confirm) {
+    await _cancelQueue(doc.id);
+  }
+},
+                  icon: const Icon(Icons.close),
+                  label: const Text('İptal Et'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                    side: const BorderSide(color: Colors.redAccent),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       },
     );
   }
 
-  Widget _buildWaitingQueues() {
+  Widget _glassInfoCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color iconColor,
+  }) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.15)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: iconColor.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: iconColor, size: 30),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.white60, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWaitingQueueList() {
     final teacherId = _auth.currentUser!.uid;
 
-    return Column(
-      children: [
-        _buildActiveQuestion(),
-        Expanded(
-          child: StreamBuilder<QuerySnapshot>(
-            stream: _firestore
-                .collection('queues')
-                .where('teacherId', isEqualTo: teacherId)
-                .where('status', isEqualTo: 'waiting')
-                .snapshots(),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return Center(child: Text('Hata: ${snapshot.error}'));
-              }
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('queues')
+          .where('teacherId', isEqualTo: teacherId)
+          .where('status', isEqualTo: 'waiting')
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _glassInfoCard(
+            icon: Icons.error_outline,
+            title: 'Bekleyenler yüklenemedi',
+            subtitle: '${snapshot.error}',
+            iconColor: Colors.redAccent,
+          );
+        }
 
-              if (!snapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
+        if (!snapshot.hasData) {
+          return const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
 
-              final queues = snapshot.data!.docs;
+        final queues = snapshot.data!.docs;
 
-              queues.sort((a, b) {
-                final aTime =
-                    (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
-                final bTime =
-                    (b.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
+        queues.sort((a, b) {
+          final aTime =
+              (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
+          final bTime =
+              (b.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
 
-                if (aTime == null && bTime == null) return 0;
-                if (aTime == null) return 1;
-                if (bTime == null) return -1;
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1;
+          if (bTime == null) return -1;
 
-                return aTime.compareTo(bTime);
-              });
+          return aTime.compareTo(bTime);
+        });
 
-              if (queues.isEmpty) {
-                return const Center(child: Text('Bekleyen soru yok'));
-              }
+        if (queues.isEmpty) {
+          return _glassInfoCard(
+            icon: Icons.people_outline,
+            title: 'Bekleyen öğrenci yok',
+            subtitle: 'Sıraya yeni öğrenci geldiğinde burada görünecek.',
+            iconColor: Colors.white70,
+          );
+        }
 
-              return ListView.builder(
-                itemCount: queues.length,
-                itemBuilder: (context, index) {
-                  final doc = queues[index];
-                  final data = doc.data() as Map<String, dynamic>;
-                  final isManual = data['isManual'] == true;
+        return Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(18, 8, 18, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Bekleyen Öğrenciler',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 19,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            ...queues.map((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final isManual = data['isManual'] == true;
+              final questionCount = _toInt(data['questionCount'], fallback: 1);
+              final estimatedMinutes =
+                  _toInt(data['estimatedMinutes'], fallback: 4);
+              final extraMinutes = _toInt(data['extraMinutes']);
 
-                  return Card(
-                    color: isManual ? Colors.orange.shade50 : null,
-                    margin: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
+              return Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: Colors.white.withOpacity(0.14)),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: isManual ? Colors.orange : Colors.green,
+                      child: Icon(
+                        isManual ? Icons.person_add : Icons.person,
+                        color: Colors.white,
+                      ),
                     ),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: isManual ? Colors.orange : Colors.blue,
-                        child: Icon(
-                          isManual ? Icons.person_add : Icons.person,
-                          color: Colors.white,
-                        ),
-                      ),
-                      title: Text(
-                        '${data['studentName'] ?? 'Öğrenci'} - ${data['subject'] ?? 'Ders'}',
-                      ),
-                      subtitle: Text(
-                        isManual
-                            ? 'Öğretmen tarafından sıraya eklendi'
-                            : 'Durum: Bekliyor',
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          ElevatedButton(
-                            onPressed: () async {
-                              await _firestore
-                                  .collection('queues')
-                                  .doc(doc.id)
-                                  .update({
-                                'status': 'in_progress',
-                                'startedAt': FieldValue.serverTimestamp(),
-                              });
-                            },
-                            child: const Text('Başlat'),
+                          Text(
+                            data['studentName'] ?? 'Öğrenci',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _cancelQueue(doc.id),
+                          Text(
+                            '${data['subject'] ?? 'Ders'} • $questionCount soru • ${estimatedMinutes + extraMinutes} dk',
+                            style: const TextStyle(color: Colors.white60),
                           ),
+                          if (isManual)
+                            const Text(
+                              'Öğretmen tarafından eklendi',
+                              style: TextStyle(
+                                color: Colors.orangeAccent,
+                                fontSize: 12,
+                              ),
+                            ),
                         ],
                       ),
                     ),
-                  );
-                },
+                    Column(
+                      children: [
+                        ElevatedButton(
+                          onPressed: () async {
+                            await _firestore
+                                .collection('queues')
+                                .doc(doc.id)
+                                .update({
+                              'status': 'in_progress',
+                              'startedAt': Timestamp.now(),
+                            });
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(80, 38),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Text('Başlat'),
+                        ),
+                      IconButton(
+  icon: const Icon(
+    Icons.delete_outline_rounded,
+    color: Colors.redAccent,
+  ),
+  tooltip: 'Sırayı İptal Et',
+  onPressed: () async {
+    final confirm = await _confirmAction(
+      title: 'Bekleyen öğrenci iptal edilsin mi?',
+      message:
+          '${data['studentName']} isimli öğrencinin sırasını iptal etmek istediğinize emin misiniz?',
+      confirmText: 'İptal Et',
+    );
+
+    if (confirm) {
+      await _cancelQueue(doc.id);
+    }
+  },
+),
+                      ],
+                    ),
+                  ],
+                ),
               );
-            },
-          ),
-        ),
-      ],
+            }),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildWaitingQueues() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(bottom: 28),
+      child: Column(
+        children: [
+          _buildActiveQuestion(),
+          _buildWaitingQueueList(),
+        ],
+      ),
     );
   }
 
@@ -615,7 +1272,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(child: Text('Hata: ${snapshot.error}'));
+          return _glassInfoCard(
+            icon: Icons.error_outline,
+            title: 'Değerlendirmeler yüklenemedi',
+            subtitle: '${snapshot.error}',
+            iconColor: Colors.redAccent,
+          );
         }
 
         if (!snapshot.hasData) {
@@ -641,56 +1303,125 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
         });
 
         if (queues.isEmpty) {
-          return const Center(child: Text('Henüz değerlendirme yapılmamış'));
+          return SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: 28),
+            child: _glassInfoCard(
+              icon: Icons.star_border,
+              title: 'Henüz değerlendirme yok',
+              subtitle:
+                  'Öğrenciler soru çözüldükten sonra puan verince burada görünecek.',
+              iconColor: Colors.amber,
+            ),
+          );
         }
 
         return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
           itemCount: queues.length,
           itemBuilder: (context, index) {
             final doc = queues[index];
             final data = doc.data() as Map<String, dynamic>;
 
-            final rating = data['rating'] ?? 0;
+            final rating = _toInt(data['rating']);
             final comment = data['comment'] ?? '';
             final studentName = data['studentName'] ?? 'Öğrenci';
             final subject = data['subject'] ?? 'Ders';
 
-            return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '$studentName - $subject',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
+            final completedAt = data['completedAt'] as Timestamp?;
+            final dateText = completedAt == null
+                ? ''
+                : '${completedAt.toDate().day}.${completedAt.toDate().month}.${completedAt.toDate().year}';
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withOpacity(0.15)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withOpacity(0.18),
+                          shape: BoxShape.circle,
                         ),
-                        Row(
-                          children: List.generate(
-                            5,
-                            (i) => Icon(
-                              i < rating ? Icons.star : Icons.star_border,
-                              color: Colors.orange,
-                              size: 18,
-                            ),
-                          ),
+                        child: const Icon(
+                          Icons.star,
+                          color: Colors.amber,
+                          size: 28,
                         ),
-                      ],
-                    ),
-                    if (comment.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        '"$comment"',
-                        style: const TextStyle(fontStyle: FontStyle.italic),
                       ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              studentName,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 17,
+                              ),
+                            ),
+                            Text(
+                              subject,
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (dateText.isNotEmpty)
+                        Text(
+                          dateText,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
                     ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: List.generate(
+                      5,
+                      (i) => Icon(
+                        i < rating ? Icons.star : Icons.star_border,
+                        color: Colors.amber,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                  if (comment.toString().trim().isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Text(
+                        '"$comment"',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontStyle: FontStyle.italic,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
                   ],
-                ),
+                ],
               ),
             );
           },
@@ -699,80 +1430,125 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
     );
   }
 
-  Widget _buildUnavailableInfo() {
-    if (_teacherStatus == 'available') {
-      return const SizedBox.shrink();
-    }
+  Widget _statusButton(
+    String text,
+    IconData icon,
+    Color color,
+    String value,
+  ) {
+    final selected = _teacherStatus == value;
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Row(
-        children: [
-          Icon(
-            Icons.info_outline,
-            size: 18,
-            color: _teacherStatus == 'break' ? Colors.orange : Colors.red,
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        _showStatusChangeDialog(value);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withOpacity(0.25)
+              : Colors.white.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? color : Colors.white24,
           ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _teacherStatus == 'break'
-                  ? 'Molada olduğunuz için yeni öğrenci ekleyemezsiniz.'
-                  : 'Gelmedi durumundayken yeni öğrenci ekleyemezsiniz.',
-              style: TextStyle(
-                fontSize: 13,
-                color: _teacherStatus == 'break' ? Colors.orange : Colors.red,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              text,
+              style: const TextStyle(
+                color: Colors.white,
                 fontWeight: FontWeight.w600,
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildStatusCard() {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      elevation: 1,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.15),
+          ),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Şu Anki Durumunuz',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              'Durumum',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             Row(
               children: [
-                _buildStatusButton(
-                  label: 'Müsait',
-                  value: 'available',
-                  icon: Icons.check_circle,
-                  color: Colors.green,
+                Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: _teacherStatus == 'available'
+                        ? Colors.green
+                        : _teacherStatus == 'break'
+                            ? Colors.orange
+                            : Colors.red,
+                    shape: BoxShape.circle,
+                  ),
                 ),
-                const SizedBox(width: 8),
-                _buildStatusButton(
-                  label: 'Molada',
-                  value: 'break',
-                  icon: Icons.coffee,
-                  color: Colors.orange,
-                ),
-                const SizedBox(width: 8),
-                _buildStatusButton(
-                  label: 'Gelmedi',
-                  value: 'absent',
-                  icon: Icons.cancel,
-                  color: Colors.red,
+                const SizedBox(width: 10),
+                Text(
+                  _statusText(_teacherStatus),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             ),
-            _buildUnavailableInfo(),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                _statusButton(
+                  'Müsait',
+                  Icons.check_circle,
+                  Colors.green,
+                  'available',
+                ),
+                _statusButton(
+                  'Molada',
+                  Icons.free_breakfast,
+                  Colors.orange,
+                  'break',
+                ),
+                _statusButton(
+                  'Gelmedi',
+                  Icons.person_off,
+                  Colors.red,
+                  'absent',
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -783,71 +1559,316 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
     return IconButton(
       icon: Icon(
         Icons.person_add,
-        color: _teacherStatus == 'available' ? null : Colors.grey,
+        color: _teacherStatus == 'available' ? Colors.white : Colors.grey,
       ),
       tooltip: _teacherStatus == 'available'
           ? 'Öğrenci Ekle'
           : 'Öğretmen müsait değil',
-      onPressed:
-          _teacherStatus == 'available' ? _showAddStudentDialog : null,
+      onPressed: _teacherStatus == 'available' ? _showAddStudentDialog : null,
     );
   }
+
+  Widget _buildTeacherHeader() {
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.12),
+            Colors.green.withOpacity(0.20),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: Colors.greenAccent.withOpacity(0.28)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.22),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: Colors.greenAccent.withOpacity(0.16),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.greenAccent.withOpacity(0.35),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.school,
+                  color: Colors.greenAccent,
+                  size: 38,
+                ),
+              ),
+
+              const SizedBox(width: 16),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Hoş geldiniz',
+                      style: TextStyle(
+                        color: Colors.white60,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _teacherName ?? 'Öğretmen',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 25,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: Text(
+                        'Branş: ${_teacherSubject ?? "Ders"}',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+Container(
+  width: 112,
+  padding: const EdgeInsets.symmetric(vertical: 12),
+  decoration: BoxDecoration(
+    color: Colors.greenAccent.withOpacity(0.12),
+    borderRadius: BorderRadius.circular(22),
+    border: Border.all(
+      color: Colors.greenAccent.withOpacity(0.28),
+    ),
+  ),
+  child: Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Icon(
+        Icons.bar_chart_rounded,
+        color: Colors.greenAccent,
+        size: 24,
+      ),
+      const SizedBox(height: 6),
+      Text(
+        '$_todaySolved',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 28,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      const SizedBox(height: 2),
+      const Text(
+        'bugünkü çözüm',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white60,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ],
+  ),
+),
+            ],
+          ),
+
+          const SizedBox(height: 22),
+
+          Container(
+            height: 1,
+            color: Colors.white.withOpacity(0.12),
+          ),
+
+          const SizedBox(height: 18),
+
+          Row(
+            children: [
+              Expanded(
+                child: _headerActionButton(
+                  icon: Icons.person_add,
+                  title: 'Öğrenci Ekle',
+                  subtitle: 'Sıraya öğrenci ekle',
+                  color: Colors.greenAccent,
+                  onTap: _teacherStatus == 'available'
+                      ? _showAddStudentDialog
+                      : null,
+                ),
+              ),
+
+              const SizedBox(width: 12),
+
+              Expanded(
+                child: _headerActionButton(
+                  icon: Icons.logout,
+                  title: 'Çıkış Yap',
+                  subtitle: 'Hesabından çık',
+                  color: Colors.redAccent,
+                  onTap: () async {
+                    await _auth.signOut();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+Widget _headerActionButton({
+  required IconData icon,
+  required String title,
+  required String subtitle,
+  required Color color,
+  required VoidCallback? onTap,
+}) {
+  final bool disabled = onTap == null;
+
+  return InkWell(
+    borderRadius: BorderRadius.circular(22),
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: disabled
+            ? Colors.white.withOpacity(0.05)
+            : color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: disabled ? Colors.white12 : color.withOpacity(0.35),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: disabled
+                  ? Colors.white.withOpacity(0.08)
+                  : color.withOpacity(0.18),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              color: disabled ? Colors.white38 : color,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: disabled ? Colors.white38 : Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                Text(
+                  disabled ? 'Müsait değil' : subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: disabled ? Colors.white30 : Colors.white60,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-title: LayoutBuilder(
-  builder: (context, constraints) {
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.centerLeft,
-      child: Text(
-        'Hoşgeldin, ${_teacherName ?? "Öğretmen"}',
-        maxLines: 1,
-        overflow: TextOverflow.visible,
+  toolbarHeight: 0,
+  bottom: TabBar(
+    controller: _tabController,
+    indicatorColor: Colors.greenAccent,
+    labelColor: Colors.greenAccent,
+    unselectedLabelColor: Colors.white60,
+    tabs: const [
+      Tab(
+        icon: Icon(Icons.list_alt),
+        text: 'Bekleyen Sorular',
       ),
-    );
-  },
-),        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Bekleyen Sorular'),
-            Tab(text: 'Değerlendirmeler'),
-          ],
+      Tab(
+        icon: Icon(Icons.star),
+        text: 'Değerlendirmeler',
+      ),
+    ],
+  ),
+),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF06312E),
+              Color(0xFF008A5C),
+              Color(0xFF061B26),
+            ],
+          ),
         ),
-        actions: [
-          _buildAddStudentButton(),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await _auth.signOut();
-              Navigator.pushReplacementNamed(context, '/login');
-            },
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          _buildStatusCard(),
-          if (_teacherSubject != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                'Branş: $_teacherSubject',
-                style: const TextStyle(color: Colors.grey),
+        child: SafeArea(
+          child: Column(
+            children: [
+              _buildTeacherHeader(),
+              _buildStatusCard(),
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildWaitingQueues(),
+                    _buildMyRatings(),
+                  ],
+                ),
               ),
-            ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildWaitingQueues(),
-                _buildMyRatings(),
-              ],
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
