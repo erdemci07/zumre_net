@@ -1250,16 +1250,31 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   }
 
   Widget _buildWaitingQueues() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 28),
-      child: Column(
-        children: [
-          _buildActiveQuestion(),
-          _buildWaitingQueueList(),
-        ],
+  return ListView(
+    physics: const AlwaysScrollableScrollPhysics(),
+    padding: const EdgeInsets.only(bottom: 32),
+    children: [
+      _buildTeacherHeader(),
+      _buildStatusCard(),
+      _buildActiveQuestion(),
+      _buildWaitingQueueList(),
+    ],
+  );
+}
+Widget _buildRatingsPage() {
+  return ListView(
+    physics: const AlwaysScrollableScrollPhysics(),
+    padding: const EdgeInsets.only(bottom: 32),
+    children: [
+      _buildTeacherHeader(),
+      _buildStatusCard(),
+      SizedBox(
+        height: MediaQuery.of(context).size.height * 0.75,
+        child: _buildMyRatings(),
       ),
-    );
-  }
+    ],
+  );
+}
 
   Widget _buildMyRatings() {
     final teacherId = _auth.currentUser!.uid;
@@ -1570,10 +1585,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
 
   Widget _buildTeacherHeader() {
   return Padding(
-    padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+    padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
     child: Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -1583,162 +1598,195 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
             Colors.green.withOpacity(0.20),
           ],
         ),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.greenAccent.withOpacity(0.28)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.22),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: Colors.greenAccent.withOpacity(0.25)),
       ),
       child: Column(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 72,
-                height: 72,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 380;
+
+              final info = Row(
+                children: [
+                  Container(
+                    width: isNarrow ? 54 : 62,
+                    height: isNarrow ? 54 : 62,
+                    decoration: BoxDecoration(
+                      color: Colors.greenAccent.withOpacity(0.16),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.greenAccent.withOpacity(0.35),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.school,
+                      color: Colors.greenAccent,
+                      size: isNarrow ? 28 : 32,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Hoş geldiniz',
+                          style: TextStyle(
+                            color: Colors.white60,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          _teacherName ?? 'Öğretmen',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: isNarrow ? 22 : 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Text(
+                            'Branş: ${_teacherSubject ?? "Ders"}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+
+              final solved = Container(
+                width: isNarrow ? double.infinity : 96,
+                padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: Colors.greenAccent.withOpacity(0.16),
-                  shape: BoxShape.circle,
+                  color: Colors.greenAccent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: Colors.greenAccent.withOpacity(0.35),
+                    color: Colors.greenAccent.withOpacity(0.28),
                   ),
                 ),
-                child: const Icon(
-                  Icons.school,
-                  color: Colors.greenAccent,
-                  size: 38,
-                ),
-              ),
-
-              const SizedBox(width: 16),
-
-              Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
-                      'Hoş geldiniz',
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 14,
-                      ),
+                    const Icon(
+                      Icons.bar_chart_rounded,
+                      color: Colors.greenAccent,
+                      size: 22,
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _teacherName ?? 'Öğretmen',
+                      '$_todaySolved',
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 25,
+                        fontSize: 26,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white12),
-                      ),
-                      child: Text(
-                        'Branş: ${_teacherSubject ?? "Ders"}',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
+                    const Text(
+                      'çözüm',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white60,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
-              ),
-Container(
-  width: 112,
-  padding: const EdgeInsets.symmetric(vertical: 12),
-  decoration: BoxDecoration(
-    color: Colors.greenAccent.withOpacity(0.12),
-    borderRadius: BorderRadius.circular(22),
-    border: Border.all(
-      color: Colors.greenAccent.withOpacity(0.28),
-    ),
-  ),
-  child: Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      const Icon(
-        Icons.bar_chart_rounded,
-        color: Colors.greenAccent,
-        size: 24,
-      ),
-      const SizedBox(height: 6),
-      Text(
-        '$_todaySolved',
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 28,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      const SizedBox(height: 2),
-      const Text(
-        'bugünkü çözüm',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: Colors.white60,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    ],
-  ),
-),
-            ],
+              );
+
+              if (isNarrow) {
+                return Column(
+                  children: [
+                    info,
+                    const SizedBox(height: 12),
+                    solved,
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(child: info),
+                  const SizedBox(width: 12),
+                  solved,
+                ],
+              );
+            },
           ),
 
-          const SizedBox(height: 22),
+          const SizedBox(height: 16),
 
           Container(
             height: 1,
             color: Colors.white.withOpacity(0.12),
           ),
 
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
 
-          Row(
-            children: [
-              Expanded(
-                child: _headerActionButton(
-                  icon: Icons.person_add,
-                  title: 'Öğrenci Ekle',
-                  subtitle: 'Sıraya öğrenci ekle',
-                  color: Colors.greenAccent,
-                  onTap: _teacherStatus == 'available'
-                      ? _showAddStudentDialog
-                      : null,
-                ),
-              ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 360;
 
-              const SizedBox(width: 12),
+              final addButton = _headerActionButton(
+                icon: Icons.person_add,
+                title: 'Öğrenci Ekle',
+                subtitle: 'Sıraya ekle',
+                color: Colors.greenAccent,
+                onTap: _teacherStatus == 'available'
+                    ? _showAddStudentDialog
+                    : null,
+              );
 
-              Expanded(
-                child: _headerActionButton(
-                  icon: Icons.logout,
-                  title: 'Çıkış Yap',
-                  subtitle: 'Hesabından çık',
-                  color: Colors.redAccent,
-                  onTap: () async {
-                    await _auth.signOut();
-                  },
-                ),
-              ),
-            ],
+              final logoutButton = _headerActionButton(
+                icon: Icons.logout,
+                title: 'Çıkış Yap',
+                subtitle: 'Hesaptan çık',
+                color: Colors.redAccent,
+                onTap: () async {
+                  await _auth.signOut();
+                },
+              );
+
+              if (isNarrow) {
+                return Column(
+                  children: [
+                    addButton,
+                    const SizedBox(height: 10),
+                    logoutButton,
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(child: addButton),
+                  const SizedBox(width: 10),
+                  Expanded(child: logoutButton),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -1853,22 +1901,14 @@ Widget _headerActionButton({
           ),
         ),
         child: SafeArea(
-          child: Column(
-            children: [
-              _buildTeacherHeader(),
-              _buildStatusCard(),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildWaitingQueues(),
-                    _buildMyRatings(),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+  child: TabBarView(
+    controller: _tabController,
+    children: [
+      _buildWaitingQueues(),
+      _buildRatingsPage(),
+    ],
+  ),
+),
       ),
     );
   }
