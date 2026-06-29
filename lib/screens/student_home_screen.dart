@@ -22,13 +22,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   bool _isLoadingTeachers = false;
   bool _isInQueue = false;
   bool _shownInProgressPopup = false;
-
-
+  bool _isZumreOpenNow = false;
+  bool _isLunchNow = false;
+  String _zumreMessage = 'Zümre saati kontrol ediliyor...';
   String? _currentQueueId;
-  String? _activeQueueBeingWatchedId;
   String? _currentTeacherName;
-  String? _activeRatingQueueId;
-
   int _queuePosition = 0;
   int _selectedQuestionCount = 1;
 
@@ -50,22 +48,85 @@ int _estimatedMinutesForQuestionCount(int count) {
   Timer? _cooldownTimer;
   StreamSubscription<DocumentSnapshot>? _queueSubscription;
 
-  final List<String> _subjects = [
-    'Matematik',
-    'Fizik',
-    'Kimya',
-    'Biyoloji',
-    'Türkçe',
-    'Tarih',
-    'Coğrafya',
-    'Geometri',
-  ];
-
- @override
+  @override
 void initState() {
   super.initState();
   _loadStudentInfo();
   _findAndListenActiveQueue();
+  _checkZumreAvailability();
+}
+int _timeToMinutes(String time) {
+  final parts = time.split(':');
+  if (parts.length != 2) return 0;
+
+  final hour = int.tryParse(parts[0]) ?? 0;
+  final minute = int.tryParse(parts[1]) ?? 0;
+
+  return hour * 60 + minute;
+}
+
+bool _isNowInSlots(DateTime now, List<Map<String, dynamic>> slots) {
+  final nowMinutes = now.hour * 60 + now.minute;
+
+  for (final slot in slots) {
+    final start = _timeToMinutes('${slot['start']}');
+    final end = _timeToMinutes('${slot['end']}');
+
+    if (nowMinutes >= start && nowMinutes <= end) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+Future<void> _checkZumreAvailability() async {
+  final now = DateTime.now();
+  final isWeekend =
+      now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
+
+  final doc =
+      await _firestore.collection('settings').doc('zumreSchedule').get();
+
+  final data = doc.data() ?? {};
+
+  final rawSlots = isWeekend
+      ? List.from(data['weekendSlots'] ?? [])
+      : List.from(data['weekdaySlots'] ?? []);
+
+  final slots = rawSlots.map((e) => Map<String, dynamic>.from(e)).toList();
+
+  final lunch = Map<String, dynamic>.from(data['lunchBreak'] ?? {});
+
+  final isZumreOpen = _isNowInSlots(now, slots);
+
+  bool isLunch = false;
+  if (lunch.isNotEmpty) {
+    isLunch = _isNowInSlots(now, [
+      {
+        'start': lunch['start'] ?? '12:20',
+        'end': lunch['end'] ?? '13:00',
+      }
+    ]);
+  }
+
+  String message;
+
+  if (isLunch) {
+    message = 'Şu an öğle arası. Zümre sırası geçici olarak kapalı.';
+  } else if (!isZumreOpen) {
+    message = 'Şu an zümre saati aktif değil.';
+  } else {
+    message = 'Zümre saati aktif. Sıra alabilirsiniz.';
+  }
+
+  if (!mounted) return;
+
+  setState(() {
+    _isZumreOpenNow = isZumreOpen;
+    _isLunchNow = isLunch;
+    _zumreMessage = message;
+  });
 }
 
   @override
@@ -351,28 +412,17 @@ await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
     });
 
     try {
-      final snapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'teacher')
-          .where('subjects', arrayContains: subject)
-          .get();
+  final snapshot = await _firestore
+      .collection('users')
+      .where('role', isEqualTo: 'teacher')
+      .where('teacherStatus', isEqualTo: 'available')
+      .where('subjects', arrayContains: subject)
+      .get();
 
-      final teachers = snapshot.docs
-          .where((doc) {
-            final data = doc.data();
-            final status = data['teacherStatus'] ?? 'available';
-
-            return status == 'available';
-          })
-          .map((doc) {
-            final data = doc.data();
-
-            return {
-              'id': doc.id,
-              'name': data['name'] ?? data['email'] ?? 'Öğretmen',
-            };
-          })
-          .toList();
+      final teachers = snapshot.docs.where((doc) {
+  final data = doc.data();
+  return data['teacherStatus'] == 'available';
+}).map((doc) => doc.data()).toList();
 
       if (mounted) {
         setState(() {
@@ -470,6 +520,14 @@ await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
 'extraMinutes': 0,
         'createdAt': FieldValue.serverTimestamp(),
       };
+      await _checkZumreAvailability();
+
+if (!_isZumreOpenNow || _isLunchNow) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(_zumreMessage)),
+  );
+  return;
+}
 
       final docRef = await _firestore.collection('queues').add(newQueue);
       await _firestore.collection('users').doc(userId).update({
@@ -1213,10 +1271,14 @@ Widget _buildTeacherSelector() {
     ),
   );
 }
+
+
 Widget _buildJoinQueueButton() {
-  final canJoinQueue =
-      _selectedSubject != null &&
-      _remainingCooldownSeconds <= 0;
+ final canJoinQueue =
+    _selectedSubject != null &&
+    _remainingCooldownSeconds <= 0 &&
+    _isZumreOpenNow &&
+    !_isLunchNow;
 
   return SizedBox(
     width: double.infinity,
@@ -1243,8 +1305,46 @@ Widget _buildJoinQueueButton() {
 }
 Widget _buildQueueView() {
   final bool isTeacherWorking = _queuePosition == 0;
+Container(
+  width: double.infinity,
+  margin: const EdgeInsets.only(bottom: 12),
+  padding: const EdgeInsets.all(14),
+  decoration: BoxDecoration(
+    color: (_isZumreOpenNow && !_isLunchNow)
+        ? Colors.greenAccent.withOpacity(0.12)
+        : Colors.orangeAccent.withOpacity(0.12),
+    borderRadius: BorderRadius.circular(18),
+    border: Border.all(
+      color: (_isZumreOpenNow && !_isLunchNow)
+          ? Colors.greenAccent.withOpacity(0.30)
+          : Colors.orangeAccent.withOpacity(0.30),
+    ),
+  ),
+  child: Row(
+    children: [
+      Icon(
+        (_isZumreOpenNow && !_isLunchNow)
+            ? Icons.check_circle
+            : Icons.info_outline,
+        color: (_isZumreOpenNow && !_isLunchNow)
+            ? Colors.greenAccent
+            : Colors.orangeAccent,
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Text(
+          _zumreMessage,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    ],
+  ),
+);
 
-  return Center(
+return Center(
     child: Padding(
       padding: const EdgeInsets.all(24),
       child: Container(
@@ -1403,10 +1503,6 @@ Widget _buildQueueView() {
 
   @override
   Widget build(BuildContext context) {
-    final bool canJoinQueue = _selectedSubject != null &&
-        (_teachersForSubject.isNotEmpty || _selectedTeacherId != null) &&
-        _remainingCooldownSeconds <= 0;
-
     return Scaffold(
       appBar: AppBar(
   toolbarHeight: 0,

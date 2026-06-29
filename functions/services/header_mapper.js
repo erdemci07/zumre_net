@@ -48,8 +48,8 @@ function mapHeaders(rawHeaders, type) {
 function hasRequiredFields(mapping, type) {
   const required =
     type === "teacher"
-      ? ["name", "surname", "username", "password"]
-      : ["name", "surname", "username", "password", "className", "branch"];
+      ? ["name", "surname", "username", "password", "subjects"]
+      : ["name", "surname", "username", "password", "className", "subjects"];
 
   const missing = required.filter((field) => mapping[field] === undefined);
 

@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -21,6 +20,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   String _teacherStatus = 'available';
   String? _teacherName;
   String? _teacherSubject;
+  Map<String, List<Map<String, String>>> _weeklyAvailability = {};
+  bool _isZumreOpenNow = false;
+  bool _isTeacherWorkingNow = false;
+  bool _isLunchNow = false;
+  String _scheduleMessage = 'Kontrol ediliyor...';
+  bool _availabilityOverride = false;
 
   int _todaySolved = 0;
 
@@ -37,7 +42,57 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
     _tabController = TabController(length: 2, vsync: this);
     _loadTeacherInfo();
     _loadTodaySolvedCount();
+    _loadTeacherAvailability();
+    _checkScheduleAvailability();
   }
+  int _timeToMinutes(String time) {
+  final parts = time.split(':');
+  if (parts.length != 2) return 0;
+
+  final hour = int.tryParse(parts[0]) ?? 0;
+  final minute = int.tryParse(parts[1]) ?? 0;
+
+  return hour * 60 + minute;
+}
+
+String _dayKey(DateTime date) {
+  switch (date.weekday) {
+    case DateTime.monday:
+      return 'monday';
+    case DateTime.tuesday:
+      return 'tuesday';
+    case DateTime.wednesday:
+      return 'wednesday';
+    case DateTime.thursday:
+      return 'thursday';
+    case DateTime.friday:
+      return 'friday';
+    case DateTime.saturday:
+      return 'saturday';
+    case DateTime.sunday:
+      return 'sunday';
+    default:
+      return 'monday';
+  }
+}
+
+bool _isNowInSlots(
+  DateTime now,
+  List<Map<String, dynamic>> slots,
+) {
+  final nowMinutes = now.hour * 60 + now.minute;
+
+  for (final slot in slots) {
+    final start = _timeToMinutes('${slot['start']}');
+    final end = _timeToMinutes('${slot['end']}');
+
+    if (nowMinutes >= start && nowMinutes <= end) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
   @override
   void dispose() {
@@ -197,6 +252,337 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   );
 
   return result == true;
+}
+InputDecoration _teacherTimeInputDecoration(String label) {
+  return InputDecoration(
+    labelText: label,
+    labelStyle: const TextStyle(color: Colors.white60),
+    hintText: '09:00',
+    hintStyle: const TextStyle(color: Colors.white38),
+    filled: true,
+    fillColor: Colors.white.withOpacity(0.08),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide.none,
+    ),
+  );
+}
+Future<void> _checkScheduleAvailability() async {
+  final now = DateTime.now();
+  final todayKey = _dayKey(now);
+  final isWeekend =
+      now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
+
+  final settingsDoc =
+      await _firestore.collection('settings').doc('zumreSchedule').get();
+
+  final settings = settingsDoc.data() ?? {};
+
+  final rawZumreSlots = isWeekend
+      ? List.from(settings['weekendSlots'] ?? [])
+      : List.from(settings['weekdaySlots'] ?? []);
+
+  final zumreSlots = rawZumreSlots
+      .map((e) => Map<String, dynamic>.from(e))
+      .toList();
+
+  final lunch = Map<String, dynamic>.from(settings['lunchBreak'] ?? {});
+
+  final teacherSlots = (_weeklyAvailability[todayKey] ?? [])
+      .map((e) => Map<String, dynamic>.from(e))
+      .toList();
+
+  final isZumreOpen = _isNowInSlots(now, zumreSlots);
+  final isTeacherWorking = _isNowInSlots(now, teacherSlots);
+
+  bool isLunch = false;
+  if (lunch.isNotEmpty) {
+    isLunch = _isNowInSlots(now, [
+      {
+        'start': lunch['start'] ?? '12:20',
+        'end': lunch['end'] ?? '13:00',
+      }
+    ]);
+  }
+
+  String message;
+
+  if (!isZumreOpen) {
+    message = 'Şu an zümre saati aktif değil.';
+  } else if (isLunch) {
+    message = 'Şu an öğle arası.';
+} else if (!isTeacherWorking && !_availabilityOverride) {
+  message = 'Bugün çalışma programınıza göre kurumda değilsiniz.';
+} else if (_teacherStatus == 'absent') {
+    message = 'Kurumda değil olarak görünüyorsunuz.';
+  } else if (_teacherStatus == 'break') {
+    message = 'Şu an moladasınız.';
+  } else {
+    message = 'Zümre saati aktif. Öğrenci ekleyebilirsiniz.';
+  }
+
+  if (!mounted) return;
+
+if (!isTeacherWorking && !_availabilityOverride && _teacherStatus != 'absent') {
+  final uid = _auth.currentUser!.uid;
+
+  await _firestore.collection('users').doc(uid).update({
+    'teacherStatus': 'absent',
+  });
+}
+
+if (!mounted) return;
+
+setState(() {
+  _isZumreOpenNow = isZumreOpen;
+  _isTeacherWorkingNow = isTeacherWorking;
+  _isLunchNow = isLunch;
+  _scheduleMessage = message;
+
+  if (!isTeacherWorking && !_availabilityOverride) {
+    _teacherStatus = 'absent';
+  }
+});
+}
+
+Future<void> _showAvailabilityDialog() async {
+  final days = {
+    'monday': 'Pazartesi',
+    'tuesday': 'Salı',
+    'wednesday': 'Çarşamba',
+    'thursday': 'Perşembe',
+    'friday': 'Cuma',
+    'saturday': 'Cumartesi',
+    'sunday': 'Pazar',
+  };
+
+  final temp = <String, List<Map<String, String>>>{};
+
+  for (final key in days.keys) {
+    temp[key] = List<Map<String, String>>.from(
+      (_weeklyAvailability[key] ?? []).map(
+        (e) => {
+          'start': e['start'] ?? '09:00',
+          'end': e['end'] ?? '17:00',
+        },
+      ),
+    );
+  }
+
+  await showDialog(
+    context: context,
+    builder: (ctx) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 560),
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF06312E),
+                    Color(0xFF008A5C),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Kurumda Bulunduğum Saatler',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Hangi gün ve saat aralıklarında kurumda olduğunuzu belirtin.',
+                      style: TextStyle(color: Colors.white60),
+                    ),
+                    const SizedBox(height: 18),
+
+                    ...days.entries.map((day) {
+                      final slots = temp[day.key] ?? [];
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    day.value,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      temp[day.key]!.add({
+                                        'start': '09:00',
+                                        'end': '17:00',
+                                      });
+                                    });
+                                  },
+                                  icon: const Icon(
+                                    Icons.add_circle,
+                                    color: Colors.greenAccent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (slots.isEmpty)
+                              const Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  'Bu gün kurumda değilim.',
+                                  style: TextStyle(color: Colors.white54),
+                                ),
+                              )
+                            else
+                              ...List.generate(slots.length, (index) {
+                                final slot = slots[index];
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextFormField(
+                                          initialValue: slot['start'],
+                                          style: const TextStyle(color: Colors.white),
+                                          decoration: _teacherTimeInputDecoration('Başlangıç'),
+                                          onChanged: (value) {
+                                            slot['start'] = value;
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: TextFormField(
+                                          initialValue: slot['end'],
+                                          style: const TextStyle(color: Colors.white),
+                                          decoration: _teacherTimeInputDecoration('Bitiş'),
+                                          onChanged: (value) {
+                                            slot['end'] = value;
+                                          },
+                                        ),
+                                      ),
+                                      IconButton(
+                                        onPressed: () {
+                                          setDialogState(() {
+                                            temp[day.key]!.removeAt(index);
+                                          });
+                                        },
+                                        icon: const Icon(
+                                          Icons.delete_outline,
+                                          color: Colors.redAccent,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                          ],
+                        ),
+                      );
+                    }),
+
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Vazgeç'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              final uid = _auth.currentUser!.uid;
+
+                              await _firestore.collection('users').doc(uid).update({
+                                'weeklyAvailability': temp,
+                                'updatedAt': FieldValue.serverTimestamp(),
+                              });
+
+                              if (!mounted) return;
+
+                              setState(() {
+                                _weeklyAvailability = temp;
+                              });
+
+                              if (ctx.mounted) Navigator.pop(ctx);
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Kurum saatleriniz güncellendi'),
+                                ),
+                              );
+                            },
+                            child: const Text('Kaydet'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+Future<void> _loadTeacherAvailability() async {
+  final uid = _auth.currentUser!.uid;
+  final doc = await _firestore.collection('users').doc(uid).get();
+
+  final data = doc.data();
+  final raw = Map<String, dynamic>.from(data?['weeklyAvailability'] ?? {});
+
+  final parsed = <String, List<Map<String, String>>>{};
+
+  for (final entry in raw.entries) {
+    final list = List.from(entry.value ?? []);
+    parsed[entry.key] = list.map((e) {
+      final item = Map<String, dynamic>.from(e);
+      return {
+        'start': '${item['start']}',
+        'end': '${item['end']}',
+      };
+    }).toList();
+  }
+
+  if (!mounted) return;
+
+  setState(() {
+    _weeklyAvailability = parsed;
+  });
 }
 
   Future<void> _showTimeExceededDialog(String queueId) async {
@@ -374,6 +760,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
     setState(() {
       _teacherStatus = status;
     });
+    if (status != 'available') {
+  _availabilityOverride = false;
+}
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -390,6 +779,24 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
 
   Future<void> _showStatusChangeDialog(String value) async {
     if (_teacherStatus == value) return;
+    await _checkScheduleAvailability();
+
+if (value == 'available' && !_isTeacherWorkingNow) {
+  final override = await _confirmAction(
+    title: 'Program dışında görünüyorsunuz',
+    message:
+        'Bugünkü çalışma programınıza göre kurumda değilsiniz. Buna rağmen durumunuzu müsait olarak değiştirmek istiyor musunuz?',
+    confirmText: 'Müsait Yap',
+    icon: Icons.warning_amber_rounded,
+    color: Colors.orangeAccent,
+  );
+
+  if (!override) return;
+
+  setState(() {
+    _availabilityOverride = true;
+  });
+}
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -453,15 +860,23 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   }
 
   Future<void> _showAddStudentDialog() async {
-    if (_teacherStatus != 'available') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Müsait değilken öğrenci ekleyemezsiniz')),
-      );
-      return;
-    }
+    await _checkScheduleAvailability();
 
+final canAddStudent =
+    _teacherStatus == 'available' &&
+    _isZumreOpenNow &&
+    _isTeacherWorkingNow &&
+    !_isLunchNow;
+
+if (!canAddStudent) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(_scheduleMessage)),
+  );
+  return;
+}
     String? selectedStudentId;
     String? selectedStudentName;
+    String searchText = '';
 
     final studentsSnapshot = await _firestore
         .collection('users')
@@ -502,7 +917,24 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
+          
           builder: (context, setDialogState) {
+            final filteredStudents = availableStudents.where((doc) {
+  final data = doc.data();
+  final name = (data['fullName'] ?? data['name'] ?? data['email'] ?? '')
+      .toString()
+      .toLowerCase();
+
+  final username = (data['username'] ?? '')
+      .toString()
+      .toLowerCase();
+
+  final query = searchText.toLowerCase().trim();
+
+  return query.isEmpty ||
+      name.contains(query) ||
+      username.contains(query);
+}).toList();
             return Dialog(
               backgroundColor: Colors.transparent,
               child: Container(
@@ -561,49 +993,101 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
                       style: TextStyle(color: Colors.white70, height: 1.35),
                     ),
                     const SizedBox(height: 18),
-                    DropdownButtonFormField<String>(
-                      value: selectedStudentId,
-                      dropdownColor: const Color(0xFF06312E),
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        labelText: 'Öğrenci Seç',
-                        labelStyle: const TextStyle(color: Colors.white70),
-                        filled: true,
-                        fillColor: Colors.white.withOpacity(0.10),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      items: availableStudents.map((doc) {
-                        final data = doc.data();
-                        final name = data['name'] ?? data['email'] ?? 'Öğrenci';
+                    TextField(
+  style: const TextStyle(color: Colors.white),
+  decoration: InputDecoration(
+    hintText: 'Öğrenci ara...',
+    hintStyle: const TextStyle(color: Colors.white54),
+    prefixIcon: const Icon(Icons.search, color: Colors.white70),
+    filled: true,
+    fillColor: Colors.white.withOpacity(0.10),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(18),
+      borderSide: BorderSide.none,
+    ),
+  ),
+  onChanged: (value) {
+    setDialogState(() {
+      searchText = value;
+      selectedStudentId = null;
+      selectedStudentName = null;
+    });
+  },
+),
 
-                        return DropdownMenuItem<String>(
-                          value: doc.id,
-                          child: Text(name),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        if (value == null) return;
+const SizedBox(height: 12),
+                    Container(
+  height: 320,
+  decoration: BoxDecoration(
+    color: Colors.white.withOpacity(0.08),
+    borderRadius: BorderRadius.circular(18),
+    border: Border.all(color: Colors.white12),
+  ),
+  child: filteredStudents.isEmpty
+      ? const Center(
+          child: Text(
+            'Öğrenci bulunamadı',
+            style: TextStyle(color: Colors.white60),
+          ),
+        )
+      : ListView.builder(
+          itemCount: filteredStudents.length,
+          itemBuilder: (context, index) {
+            final doc = filteredStudents[index];
+            final data = doc.data();
 
-                        final selectedDoc = availableStudents.firstWhere(
-                          (doc) => doc.id == value,
-                        );
+            final fullName =
+                data['fullName'] ??
+                data['name'] ??
+                data['email'] ??
+                'Öğrenci';
 
-                        final data = selectedDoc.data();
+            final className = data['className'] ?? '';
+            final department = data['department'] ?? '';
+            final username = data['username'] ?? '';
 
-                        setDialogState(() {
-                          selectedStudentId = selectedDoc.id;
-                          selectedStudentName =
-                              data['name'] ?? data['email'] ?? 'Öğrenci';
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 22),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
+            final selected = selectedStudentId == doc.id;
+
+            return ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.green,
+                child: const Icon(
+                  Icons.person,
+                  color: Colors.white,
+                ),
+              ),
+              title: Text(
+                fullName,
+                style: const TextStyle(color: Colors.white),
+              ),
+              subtitle: Text(
+                '$className • $department\n$username',
+                style: const TextStyle(
+                  color: Colors.white60,
+                  fontSize: 12,
+                ),
+              ),
+              trailing: selected
+                  ? const Icon(
+                      Icons.check_circle,
+                      color: Colors.greenAccent,
+                    )
+                  : null,
+              selected: selected,
+              onTap: () {
+                setDialogState(() {
+                  selectedStudentId = doc.id;
+                  selectedStudentName = fullName;
+                });
+              },
+            );
+          },
+        ),
+      ),
+      const SizedBox(height: 22),
+      SizedBox(
+        width: double.infinity,
+        height: 54,
                       child: ElevatedButton.icon(
                         onPressed: selectedStudentId == null
                             ? null
@@ -1557,29 +2041,25 @@ Widget _buildRatingsPage() {
                   'break',
                 ),
                 _statusButton(
-                  'Gelmedi',
+                  'Kurumda Değil',
                   Icons.person_off,
                   Colors.red,
                   'absent',
                 ),
               ],
             ),
+            const SizedBox(height: 22),
+
+_headerActionButton(
+  icon: Icons.event_available_rounded,
+  title: 'Çalışma Programınız',
+  subtitle: 'Kurumda bulunduğunuz gün ve saatleri düzenleyin',
+  color: Colors.lightBlueAccent,
+  onTap: _showAvailabilityDialog,
+),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildAddStudentButton() {
-    return IconButton(
-      icon: Icon(
-        Icons.person_add,
-        color: _teacherStatus == 'available' ? Colors.white : Colors.grey,
-      ),
-      tooltip: _teacherStatus == 'available'
-          ? 'Öğrenci Ekle'
-          : 'Öğretmen müsait değil',
-      onPressed: _teacherStatus == 'available' ? _showAddStudentDialog : null,
     );
   }
 
@@ -1753,12 +2233,9 @@ Widget _buildRatingsPage() {
                 icon: Icons.person_add,
                 title: 'Öğrenci Ekle',
                 subtitle: 'Sıraya ekle',
-                color: Colors.greenAccent,
-                onTap: _teacherStatus == 'available'
-                    ? _showAddStudentDialog
-                    : null,
+                    color: Colors.greenAccent,
+                    onTap: _showAddStudentDialog,
               );
-
               final logoutButton = _headerActionButton(
                 icon: Icons.logout,
                 title: 'Çıkış Yap',

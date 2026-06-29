@@ -47,7 +47,81 @@ function splitFullName(value) {
 
 function detectSubject(value) {
   const normalized = normalizeText(value);
-  return KNOWN_SUBJECTS[normalized] || "";
+
+  if (!normalized) return "";
+
+  if (
+    normalized.includes("MAT") ||
+    normalized.includes("CEBIR") ||
+    normalized.includes("ANALIZ")
+  ) {
+    return "Matematik";
+  }
+
+  if (normalized.includes("FIZ")) {
+    return "Fizik";
+  }
+
+  if (normalized.includes("KIM")) {
+    return "Kimya";
+  }
+
+  if (
+    normalized.includes("BIYO") ||
+    normalized.includes("CANLI")
+  ) {
+    return "Biyoloji";
+  }
+
+  if (
+    normalized.includes("TURK") ||
+    normalized.includes("EDEBI")
+  ) {
+    return "Türkçe";
+  }
+
+  if (normalized.includes("TARIH")) {
+    return "Tarih";
+  }
+
+  if (
+    normalized.includes("COG") ||
+    normalized.includes("COGRAF")
+  ) {
+    return "Coğrafya";
+  }
+
+  if (normalized.includes("GEO")) {
+    return "Geometri";
+  }
+
+  if (normalized.includes("FEN")) {
+    return "Fen";
+  }
+
+  if (
+    normalized.includes("ING") ||
+    normalized.includes("ENGLISH")
+  ) {
+    return "İngilizce";
+  }
+
+  if (
+    normalized.includes("DIN") ||
+    normalized.includes("KULTUR")
+  ) {
+    return "Din Kültürü";
+  }
+
+  if (
+    normalized.includes("FELSEFE") ||
+    normalized.includes("PSIKO") ||
+    normalized.includes("SOSYO")
+  ) {
+    return "Felsefe";
+  }
+
+  return "";
 }
 
 function validateRows(rows, mapping, type) {
@@ -74,12 +148,34 @@ function validateRows(rows, mapping, type) {
       : [];
 
     if (type === "teacher") {
-      const subjectFromSurname = detectSubject(surname);
+let detectedSubject = detectSubject(subjectsRaw);
 
-      if (subjectFromSurname) {
-        subjects = [subjectFromSurname];
-        surname = "";
-      }
+if (!detectedSubject) {
+  detectedSubject = detectSubject(surname);
+}
+
+if (!detectedSubject) {
+  detectedSubject = detectSubject(name);
+}
+
+if (!detectedSubject) {
+for (const cell of row) {
+  const subject = detectSubject(cell);
+
+  if (subject) {
+    detectedSubject = subject;
+    break;
+  }
+}
+}
+
+if (detectedSubject) {
+  subjects = [detectedSubject];
+
+  if (detectSubject(surname)) {
+    surname = "";
+  }
+}
 
       if (!surname && name.includes(" ")) {
         const split = splitFullName(name);

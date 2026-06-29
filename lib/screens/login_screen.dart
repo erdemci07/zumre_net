@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../auth/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -25,43 +26,41 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
-    if (_isLoading) return;
+  if (_isLoading) return;
 
-    final username = _usernameController.text.trim().toLowerCase();
-    final password = _passwordController.text.trim();
+  final username = _usernameController.text.trim().toLowerCase();
+  final password = _passwordController.text.trim();
 
-    if (username.isEmpty || password.isEmpty) {
-      _showLoginErrorDialog(
-        title: 'Eksik Bilgi',
-        message: 'Lütfen kullanıcı adı ve şifre alanlarını doldurun.',
-      );
-      return;
-    }
+  if (username.isEmpty || password.isEmpty) {
+    _showLoginErrorDialog(
+      title: 'Eksik Bilgi',
+      message: 'Lütfen kullanıcı adı ve şifre alanlarını doldurun.',
+    );
+    return;
+  }
 
-    setState(() => _isLoading = true);
+  setState(() => _isLoading = true);
 
-    try {
-      final fullEmail = username.contains('@')
-          ? username
-          : username + _domain;
+  try {
+    final fullEmail = username.contains('@') ? username : username + _domain;
 
-      final auth = Provider.of<AuthService>(context, listen: false);
+    final auth = Provider.of<AuthService>(context, listen: false);
+    await auth.signIn(fullEmail, password);
+  } catch (e) {
+    await FirebaseAuth.instance.signOut();
 
-      await auth.signIn(fullEmail, password);
+    if (!mounted) return;
 
-    } catch (e) {
-      if (!mounted) return;
-
-      _showLoginErrorDialog(
-        title: 'Giriş Başarısız',
-        message: 'Kullanıcı adı veya şifre hatalı.\nLütfen tekrar deneyin.',
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+    _showLoginErrorDialog(
+      title: 'Giriş Başarısız',
+      message: 'Kullanıcı adı veya şifre hatalı.\nLütfen tekrar deneyin.',
+    );
+  } finally {
+    if (mounted) {
+      setState(() => _isLoading = false);
     }
   }
+}
 
   void _showLoginErrorDialog({
     required String title,
@@ -140,29 +139,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _buildLoginButton() {
-    if (_isLoading) {
-      return const SizedBox(
-        height: 48,
-        child: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    return SizedBox(
-      width: double.infinity,
-      height: 48,
-      child: ElevatedButton(
-        onPressed: _login,
-        child: const Text(
-          'Giriş Yap',
-          style: TextStyle(fontSize: 16),
-        ),
-      ),
     );
   }
 

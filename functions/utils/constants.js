@@ -24,8 +24,19 @@ const TEACHER_FIELD_ALIASES = {
   surname: ["SOYAD", "SOYADI", "OGRETMEN SOYADI"],
   username: ["KULLANICI ADI", "KULLANICI", "USERNAME"],
   password: ["SIFRE", "PAROLA", "PASSWORD"],
-  subjects: ["DERS", "BRANS", "BRANSI", "SUBJECT"],
-};
+subjects: [
+  "DERS",
+  "DERSI",
+  "DERSİ",
+  "BRANS",
+  "BRANSI",
+  "BRANSI",
+  "BRANŞ",
+  "BRANŞI",
+  "ALANI",
+  "ALAN",
+  "SUBJECT",
+]};
 
 module.exports = {
   STUDENT_FIELD_ALIASES,

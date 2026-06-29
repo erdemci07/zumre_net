@@ -221,6 +221,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
 class StatisticsPage extends StatefulWidget {
   const StatisticsPage({super.key});
+  
 
   @override
   State<StatisticsPage> createState() => _StatisticsPageState();
@@ -238,6 +239,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
   bool _isLoading = true;
   bool _isImporting = false;
+  final List<Map<String, String>> _weekdaySlots = [];
+final List<Map<String, String>> _weekendSlots = [];
+
+String _lunchStart = '12:20';
+String _lunchEnd = '13:00';
 
   @override
   void initState() {
@@ -275,12 +281,18 @@ class _StatisticsPageState extends State<StatisticsPage> {
     final questionCount = (data['questionCount'] is num
             ? (data['questionCount'] as num).toInt()
             : 1);
+            final studentDoc = await _firestore
+    .collection('users')
+    .doc(studentId.toString())
+    .get();
+
+final studentData = studentDoc.data() ?? {};
 
     studentMap.putIfAbsent(studentId, () {
       return {
         'studentName': studentName,
-        'className': data['className'] ?? '',
-        'branch': data['branch'] ?? '',
+       'className': studentData['className'] ?? data['className'] ?? '',
+'branch': studentData['branch'] ?? data['branch'] ?? '',
         'subjects': <String, int>{},
         'total': 0,
       };
@@ -463,7 +475,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 
   Future<void> _pickEdesisFile(String type) async {
-    final user = FirebaseAuth.instance.currentUser;
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -893,9 +904,17 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       subtitle: 'Günlük zümre kullanım raporu',
                       color: Colors.redAccent,
                       onTap: _generateDailyPdfReport,
+                    ),   
+                                        const SizedBox(height: 12),
+                    _quickActionCard(
+                      icon: Icons.schedule_rounded,
+                      title: 'Zümre Saatleri',
+                      subtitle: 'Hafta içi, hafta sonu ve öğle arası',
+                      color: Colors.purpleAccent,
+                      onTap: _showZumreScheduleDialog,
                     ),
                   ],
-                ),
+                ),         
         ),
         if (_isImporting)
           Container(
@@ -1009,6 +1028,291 @@ class _StatisticsPageState extends State<StatisticsPage> {
       ),
     );
   }
+  Future<void> _showZumreScheduleDialog() async {
+  final doc = await _firestore.collection('settings').doc('zumreSchedule').get();
+
+  _weekdaySlots.clear();
+  _weekendSlots.clear();
+
+  if (doc.exists) {
+    final data = doc.data() ?? {};
+    final weekday = List.from(data['weekdaySlots'] ?? []);
+    final weekend = List.from(data['weekendSlots'] ?? []);
+    final lunch = Map<String, dynamic>.from(data['lunchBreak'] ?? {});
+
+    _weekdaySlots.addAll(
+      weekday.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
+    );
+
+    _weekendSlots.addAll(
+      weekend.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
+    );
+
+    _lunchStart = lunch['start'] ?? '12:20';
+    _lunchEnd = lunch['end'] ?? '13:00';
+  }
+
+  if (!mounted) return;
+
+  await showDialog(
+    context: context,
+    builder: (ctx) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 560),
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: const Color(0xFF071A3A),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Zümre Saatleri Ayarı',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Öğrenci sıra alma ve öğretmen öğrenci ekleme bu saatlere göre çalışır.',
+                      style: TextStyle(color: Colors.white60),
+                    ),
+                    const SizedBox(height: 20),
+                    _scheduleSection(
+                      title: 'Hafta İçi Zümre Saatleri',
+                      slots: _weekdaySlots,
+                      color: Colors.greenAccent,
+                      onAdd: () {
+                        setDialogState(() {
+                          _weekdaySlots.add({'start': '10:40', 'end': '11:20'});
+                        });
+                      },
+                      onDelete: (index) {
+                        setDialogState(() => _weekdaySlots.removeAt(index));
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _scheduleSection(
+                      title: 'Hafta Sonu Zümre Saatleri',
+                      slots: _weekendSlots,
+                      color: Colors.orangeAccent,
+                      onAdd: () {
+                        setDialogState(() {
+                          _weekendSlots.add({'start': '13:00', 'end': '14:00'});
+                        });
+                      },
+                      onDelete: (index) {
+                        setDialogState(() => _weekendSlots.removeAt(index));
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _lunchSection(),
+                    const SizedBox(height: 22),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Vazgeç'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              await _firestore
+                                  .collection('settings')
+                                  .doc('zumreSchedule')
+                                  .set({
+                                'weekdaySlots': _weekdaySlots,
+                                'weekendSlots': _weekendSlots,
+                                'lunchBreak': {
+                                  'start': _lunchStart,
+                                  'end': _lunchEnd,
+                                },
+                                'updatedAt': FieldValue.serverTimestamp(),
+                              });
+
+                              if (ctx.mounted) Navigator.pop(ctx);
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Zümre saatleri güncellendi'),
+                                ),
+                              );
+                            },
+                            child: const Text('Kaydet'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+Widget _scheduleSection({
+  required String title,
+  required List<Map<String, String>> slots,
+  required Color color,
+  required VoidCallback onAdd,
+  required Function(int index) onDelete,
+}) {
+  return Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: Colors.white12),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.access_time, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: onAdd,
+              icon: Icon(Icons.add_circle, color: color),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (slots.isEmpty)
+          const Text(
+            'Henüz saat eklenmedi.',
+            style: TextStyle(color: Colors.white60),
+          )
+        else
+          ...List.generate(slots.length, (index) {
+            final slot = slots[index];
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      initialValue: slot['start'],
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _timeInputDecoration('Başlangıç'),
+                      onChanged: (value) => slot['start'] = value,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      initialValue: slot['end'],
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _timeInputDecoration('Bitiş'),
+                      onChanged: (value) => slot['end'] = value,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => onDelete(index),
+                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  ),
+                ],
+              ),
+            );
+          }),
+      ],
+    ),
+  );
+}
+
+Widget _lunchSection() {
+  return Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: Colors.white12),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.restaurant_rounded, color: Colors.redAccent),
+            SizedBox(width: 10),
+            Text(
+              'Öğle Arası',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: TextFormField(
+                initialValue: _lunchStart,
+                style: const TextStyle(color: Colors.white),
+                decoration: _timeInputDecoration('Başlangıç'),
+                onChanged: (value) => _lunchStart = value,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextFormField(
+                initialValue: _lunchEnd,
+                style: const TextStyle(color: Colors.white),
+                decoration: _timeInputDecoration('Bitiş'),
+                onChanged: (value) => _lunchEnd = value,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+InputDecoration _timeInputDecoration(String label) {
+  return InputDecoration(
+    labelText: label,
+    labelStyle: const TextStyle(color: Colors.white60),
+    hintText: '09:00',
+    hintStyle: const TextStyle(color: Colors.white38),
+    filled: true,
+    fillColor: Colors.white.withOpacity(0.08),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide.none,
+    ),
+  );
+}
 
   Widget _quickActionCard({
     required IconData icon,
@@ -1337,11 +1641,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                           data['email'] ??
                           'İsimsiz';
                       final email = data['email'] ?? 'Email yok';
-                      final className = data['className'] ?? '';
-final branch = data['branch'] ?? '';
-final department = data['department'] ?? '';
-final username = data['username'] ?? '';
-
                       final roleColor = role == 'admin'
                           ? Colors.redAccent
                           : role == 'teacher'
@@ -1399,26 +1698,7 @@ final username = data['username'] ?? '';
                                       fontSize: 12,
                                     ),
                                   ),
-                                  if (role == 'student' && (className != '' || branch != '')) ...[
-  const SizedBox(height: 4),
-  Text(
-    'Sınıf: $className-$branch ${department != '' ? '• $department' : ''}',
-    style: const TextStyle(
-      color: Colors.white60,
-      fontSize: 12,
-    ),
-  ),
-],
-if (username != '') ...[
-  const SizedBox(height: 4),
-  Text(
-    'Kullanıcı adı: $username',
-    style: const TextStyle(
-      color: Colors.white54,
-      fontSize: 11,
-    ),
-  ),
-],
+
                                 ],
                               ),
                             ),
@@ -1466,6 +1746,11 @@ if (username != '') ...[
     String password = '';
     String name = existingData?['fullName'] ?? existingData?['name'] ?? '';
     String role = existingData?['role'] ?? 'student';
+    String className = existingData?['className'] ?? '';
+String branch = existingData?['branch'] ?? '';
+String department = existingData?['department'] ?? '';
+String studentNo = existingData?['studentNo'] ?? '';
+String username = existingData?['username'] ?? '';
     List<String> selectedSubjects = existingData?['subjects'] != null
         ? List<String>.from(existingData?['subjects'])
         : [];
@@ -1582,6 +1867,11 @@ if (username != '') ...[
                         name,
                         role,
                         selectedSubjects,
+                        username,
+                        className,
+                        branch,
+                        department,
+                        studentNo,
                       );
                     } else {
                       await _createUser(
@@ -1590,6 +1880,11 @@ if (username != '') ...[
                         name,
                         role,
                         selectedSubjects,
+                        username,
+                        className,
+                        branch,
+                        department,
+                        studentNo,
                       );
                     }
 
@@ -1627,6 +1922,11 @@ if (username != '') ...[
     String name,
     String role,
     List<String> subjects,
+    String username,
+    String className,
+    String branch,
+    String department,
+    String studentNo,
   ) async {
     const apiKey = 'AIzaSyBznoF8WcalY8k-tUexUTrooeDJdZHsM5w';
     final url = Uri.parse(
@@ -1679,6 +1979,11 @@ if (username != '') ...[
     String newName,
     String newRole,
     List<String> subjects,
+    String username,
+    String className,
+    String branch,
+    String department,
+    String studentNo,
   ) async {
     final parts = newName.trim().split(' ');
     final firstName = parts.isNotEmpty ? parts.first : newName;
@@ -1691,6 +1996,11 @@ if (username != '') ...[
       'role': newRole,
       'email': newEmail,
       'updatedAt': FieldValue.serverTimestamp(),
+      'username': username,
+      'className': className,
+      'branch': branch,
+      'department': department,
+      'studentNo': studentNo,
     };
 
     if (newRole == 'teacher') {
