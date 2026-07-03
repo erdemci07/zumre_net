@@ -36,15 +36,19 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   bool _isTimeDialogOpen = false;
   int _elapsedSeconds = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _loadTeacherInfo();
-    _loadTodaySolvedCount();
-    _loadTeacherAvailability();
-    _checkScheduleAvailability();
-  }
+@override
+void initState() {
+  super.initState();
+  _tabController = TabController(length: 2, vsync: this);
+  _initTeacherPage();
+}
+
+Future<void> _initTeacherPage() async {
+  await _loadTeacherInfo();
+  await _loadTeacherAvailability();
+  await _loadTodaySolvedCount();
+  await _checkScheduleAvailability();
+}
   int _timeToMinutes(String time) {
   final parts = time.split(':');
   if (parts.length != 2) return 0;
@@ -86,9 +90,13 @@ bool _isNowInSlots(
     final start = _timeToMinutes('${slot['start']}');
     final end = _timeToMinutes('${slot['end']}');
 
-    if (nowMinutes >= start && nowMinutes <= end) {
-      return true;
-    }
+    if (end <= start) {
+  continue;
+}
+
+if (nowMinutes >= start && nowMinutes <= end) {
+  return true;
+}
   }
 
   return false;
@@ -252,20 +260,6 @@ bool _isNowInSlots(
   );
 
   return result == true;
-}
-InputDecoration _teacherTimeInputDecoration(String label) {
-  return InputDecoration(
-    labelText: label,
-    labelStyle: const TextStyle(color: Colors.white60),
-    hintText: '09:00',
-    hintStyle: const TextStyle(color: Colors.white38),
-    filled: true,
-    fillColor: Colors.white.withOpacity(0.08),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide.none,
-    ),
-  );
 }
 Future<void> _checkScheduleAvailability() async {
   final now = DateTime.now();
@@ -468,23 +462,25 @@ Future<void> _showAvailabilityDialog() async {
                                   child: Row(
                                     children: [
                                       Expanded(
-                                        child: TextFormField(
-                                          initialValue: slot['start'],
-                                          style: const TextStyle(color: Colors.white),
-                                          decoration: _teacherTimeInputDecoration('Başlangıç'),
+                                        child: _timePickerBox(
+                                          label: 'Başlangıç',
+                                          value: slot['start'] ?? '09:00',
                                           onChanged: (value) {
-                                            slot['start'] = value;
+                                            setDialogState(() {
+                                              slot['start'] = value;
+                                            });
                                           },
                                         ),
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
-                                        child: TextFormField(
-                                          initialValue: slot['end'],
-                                          style: const TextStyle(color: Colors.white),
-                                          decoration: _teacherTimeInputDecoration('Bitiş'),
+                                        child: _timePickerBox(
+                                          label: 'Bitiş',
+                                          value: slot['end'] ?? '10:00',
                                           onChanged: (value) {
-                                            slot['end'] = value;
+                                            setDialogState(() {
+                                              slot['end'] = value;
+                                            });
                                           },
                                         ),
                                       ),
@@ -534,6 +530,7 @@ Future<void> _showAvailabilityDialog() async {
                               setState(() {
                                 _weeklyAvailability = temp;
                               });
+                              await _checkScheduleAvailability();
 
                               if (ctx.mounted) Navigator.pop(ctx);
 
@@ -685,12 +682,14 @@ Future<void> _loadTeacherAvailability() async {
                       if (ctx.mounted) Navigator.pop(ctx);
                       await _markAsSolved(queueId);
                     },
+                    
                     icon: const Icon(Icons.check),
                     label: const Text('Çözüldü'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       foregroundColor: Colors.white,
                     ),
+                    
                   ),
                 ),
               ],
@@ -698,7 +697,10 @@ Future<void> _loadTeacherAvailability() async {
           ),
         );
       },
+      
     );
+    
+    
 
     _isTimeDialogOpen = false;
   }
@@ -1252,6 +1254,203 @@ const SizedBox(height: 12),
       );
     }
   }
+  Future<void> _showTransferDialog({
+  required String queueId,
+  required String subject,
+  required String studentName,
+}) async {
+  final currentTeacherId = _auth.currentUser!.uid;
+
+  final teachersSnapshot = await _firestore
+      .collection('users')
+      .where('role', isEqualTo: 'teacher')
+      .where('teacherStatus', isEqualTo: 'available')
+      .where('subjects', arrayContains: subject)
+      .get();
+
+  final availableTeachers = teachersSnapshot.docs
+      .where((doc) => doc.id != currentTeacherId)
+      .toList();
+
+  if (availableTeachers.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Devredilebilecek müsait öğretmen bulunamadı.'),
+      ),
+    );
+    return;
+  }
+
+  await showDialog(
+    context: context,
+    builder: (ctx) {
+      return Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 520),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF06312E),
+                Color(0xFF008A5C),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 54,
+                    height: 54,
+                    decoration: BoxDecoration(
+                      color: Colors.lightBlueAccent.withOpacity(0.18),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.swap_horiz_rounded,
+                      color: Colors.lightBlueAccent,
+                      size: 32,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Öğrenciyi Devret',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white70),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '$studentName isimli öğrenciyi aynı branştaki müsait bir öğretmene devredebilirsiniz.',
+                  style: const TextStyle(color: Colors.white70, height: 1.35),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: availableTeachers.length,
+                  itemBuilder: (context, index) {
+                    final teacherDoc = availableTeachers[index];
+                    final teacherData = teacherDoc.data();
+
+                    final teacherName =
+                        teacherData['fullName'] ??
+                        teacherData['name'] ??
+                        teacherData['email'] ??
+                        'Öğretmen';
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.09),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: ListTile(
+                        leading: const CircleAvatar(
+                          backgroundColor: Colors.green,
+                          child: Icon(Icons.person, color: Colors.white),
+                        ),
+                        title: Text(
+                          '$teacherName',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        subtitle: Text(
+                          subject,
+                          style: const TextStyle(color: Colors.white60),
+                        ),
+                        trailing: const Icon(
+                          Icons.chevron_right,
+                          color: Colors.white70,
+                        ),
+                        onTap: () async {
+                          final confirm = await _confirmAction(
+                            title: 'Devretme onayı',
+                            message:
+                                '$studentName isimli öğrenci $teacherName öğretmenine devredilsin mi?',
+                            confirmText: 'Devret',
+                            icon: Icons.swap_horiz_rounded,
+                            color: Colors.lightBlueAccent,
+                          );
+
+                          if (!confirm) return;
+
+                          await _resetAndTransferQueue(
+                            queueId: queueId,
+                            newTeacherId: teacherDoc.id,
+                            newTeacherName: '$teacherName',
+                          );
+
+                          if (ctx.mounted) Navigator.pop(ctx);
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Öğrenci $teacherName öğretmenine devredildi.',
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+Future<void> _resetAndTransferQueue({
+  required String queueId,
+  required String newTeacherId,
+  required String newTeacherName,
+}) async {
+  _resetActiveQuestionTimer();
+
+  final currentTeacherId = _auth.currentUser!.uid;
+
+  await _firestore.collection('queues').doc(queueId).update({
+    'teacherId': newTeacherId,
+    'teacherName': newTeacherName,
+    'status': 'waiting',
+    'startedAt': null,
+    'transferredAt': Timestamp.now(),
+    'transferredFromTeacherId': currentTeacherId,
+    'transferredFromTeacherName': _teacherName ?? 'Öğretmen',
+  });
+
+  await _takeNextWaitingQueue();
+}
 
   Widget _miniTimeBox({
     required String title,
@@ -1287,6 +1486,66 @@ const SizedBox(height: 12),
       ),
     );
   }
+  Widget _timePickerBox({
+  required String label,
+  required String value,
+  required void Function(String value) onChanged,
+}) {
+  return InkWell(
+    borderRadius: BorderRadius.circular(16),
+    onTap: () async {
+      final parts = value.split(':');
+      final initialHour = int.tryParse(parts.first) ?? 9;
+      final initialMinute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+
+      final picked = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay(hour: initialHour, minute: initialMinute),
+        builder: (context, child) {
+          return Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: const ColorScheme.dark(
+                primary: Colors.greenAccent,
+                surface: Color(0xFF06312E),
+              ),
+            ),
+            child: child!,
+          );
+        },
+      );
+
+      if (picked == null) return;
+
+      final formatted =
+          '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+
+      onChanged(formatted);
+    },
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
 
   Widget _buildActiveQuestion() {
     final teacherId = _auth.currentUser!.uid;
@@ -1399,6 +1658,30 @@ const SizedBox(height: 12),
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+
+SizedBox(
+  width: double.infinity,
+  height: 50,
+  child: OutlinedButton.icon(
+    onPressed: () async {
+      await _showTransferDialog(
+        queueId: doc.id,
+        subject: data['subject'] ?? 'Ders',
+        studentName: data['studentName'] ?? 'Öğrenci',
+      );
+    },
+    icon: const Icon(Icons.swap_horiz_rounded),
+    label: const Text('Devret'),
+    style: OutlinedButton.styleFrom(
+      foregroundColor: Colors.lightBlueAccent,
+      side: const BorderSide(color: Colors.lightBlueAccent),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+    ),
+  ),
+),
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -1707,6 +1990,7 @@ const SizedBox(height: 12),
     Icons.delete_outline_rounded,
     color: Colors.redAccent,
   ),
+  
   tooltip: 'Sırayı İptal Et',
   onPressed: () async {
     final confirm = await _confirmAction(
@@ -1720,6 +2004,28 @@ const SizedBox(height: 12),
       await _cancelQueue(doc.id);
     }
   },
+),
+const SizedBox(height: 6),
+
+OutlinedButton.icon(
+  onPressed: () async {
+    await _showTransferDialog(
+      queueId: doc.id,
+      subject: data['subject'] ?? 'Ders',
+      studentName: data['studentName'] ?? 'Öğrenci',
+    );
+  },
+  icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+  label: const Text('Devret'),
+  style: OutlinedButton.styleFrom(
+    foregroundColor: Colors.lightBlueAccent,
+    side: const BorderSide(color: Colors.lightBlueAccent),
+    minimumSize: const Size(80, 34),
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(14),
+    ),
+  ),
 ),
                       ],
                     ),

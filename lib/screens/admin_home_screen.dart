@@ -7,6 +7,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 
@@ -236,7 +237,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
   int _totalSolvedToday = 0;
   int _totalSolvedAll = 0;
-
   bool _isLoading = true;
   bool _isImporting = false;
   final List<Map<String, String>> _weekdaySlots = [];
@@ -254,145 +254,433 @@ String _lunchEnd = '13:00';
   String _dateKey(DateTime date) {
     return '${date.day}/${date.month}';
   }
-  Future<void> _generateDailyPdfReport() async {
+  void _showPdfLoadingDialog() {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => AlertDialog(
+      content: Row(
+        children: const [
+          SizedBox(
+            width: 26,
+            height: 26,
+            child: CircularProgressIndicator(),
+          ),
+          SizedBox(width: 18),
+          Expanded(
+            child: Text(
+              'PDF raporu hazırlanıyor...\n'
+              'Veri yoğunluğuna bağlı olarak bu işlem birkaç saniye sürebilir.',
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+void _hidePdfLoadingDialog() {
+  if (Navigator.canPop(context)) {
+    Navigator.pop(context);
+  }
+}
+
+Future<void> _showPdfReportDialog() async {
+  DateTime? startDate;
+  DateTime? endDate;
+
+  await showDialog(
+    context: context,
+    builder: (ctx) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('PDF Rapor Oluştur'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.today),
+                    label: const Text('Bugünün Raporu'),
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      await _generateDailyPdfReport();
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.date_range),
+                  label: const Text('Başlangıç Tarihi Seç'),
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      firstDate: DateTime(2024),
+                      lastDate: DateTime.now(),
+                      initialDate: startDate ?? DateTime.now(),
+                    );
+                    if (picked != null) {
+                      setDialogState(() => startDate = picked);
+                    }
+                  },
+                ),
+                if (startDate != null)
+                  Text('Başlangıç: ${startDate!.day}.${startDate!.month}.${startDate!.year}'),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.event),
+                  label: const Text('Bitiş Tarihi Seç'),
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      firstDate: DateTime(2024),
+                      lastDate: DateTime.now(),
+                      initialDate: endDate ?? startDate ?? DateTime.now(),
+                    );
+                    if (picked != null) {
+                      setDialogState(() => endDate = picked);
+                    }
+                  },
+                ),
+                if (endDate != null)
+                  Text('Bitiş: ${endDate!.day}.${endDate!.month}.${endDate!.year}'),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('İptal'),
+              ),
+              ElevatedButton(
+                onPressed: startDate == null || endDate == null
+                    ? null
+                    : () async {
+                        Navigator.pop(ctx);
+                        await _generatePdfReportForRange(
+                          startDate: startDate!,
+                          endDate: endDate!,
+                        );
+                      },
+                child: const Text('Tarih Aralığı Raporu'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
+
+Future<void> _generateDailyPdfReport() async {
   final now = DateTime.now();
   final todayStart = DateTime(now.year, now.month, now.day);
-  final tomorrowStart = todayStart.add(const Duration(days: 1));
+  final todayEnd = todayStart.add(const Duration(days: 1));
 
+  await _generatePdfReport(
+    startDate: todayStart,
+    endDateExclusive: todayEnd,
+    fileNamePrefix: 'ZumreNet_Gunluk_Rapor',
+  );
+}
+
+Future<void> _generatePdfReportForRange({
+  required DateTime startDate,
+  required DateTime endDate,
+}) async {
+  final start = DateTime(startDate.year, startDate.month, startDate.day);
+  final endExclusive = DateTime(endDate.year, endDate.month, endDate.day)
+      .add(const Duration(days: 1));
+
+  await _generatePdfReport(
+    startDate: start,
+    endDateExclusive: endExclusive,
+    fileNamePrefix: 'ZumreNet_Tarih_Araligi_Raporu',
+  );
+}
+
+Future<void> _generatePdfReport({
+  required DateTime startDate,
+  required DateTime endDateExclusive,
+  required String fileNamePrefix,
+}) async {
+  _showPdfLoadingDialog();
   final regularFont = await PdfGoogleFonts.notoSansRegular();
   final boldFont = await PdfGoogleFonts.notoSansBold();
 
   final snapshot = await _firestore
       .collection('queues')
       .where('status', isEqualTo: 'completed')
-      .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
-      .where('completedAt', isLessThan: Timestamp.fromDate(tomorrowStart))
+      .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+      .where('completedAt', isLessThan: Timestamp.fromDate(endDateExclusive))
       .get();
 
   final Map<String, Map<String, dynamic>> studentMap = {};
   final Map<String, int> subjectTotals = {};
+  final Set<String> teacherIds = {};
+  final List<Map<String, dynamic>> historyRows = [];
+
+  String formatDate(DateTime date) {
+    const months = [
+      'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+      'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
+    ];
+    return '${date.day} ${months[date.month - 1]} ${date.year}';
+  }
+
+  String shortDateTime(dynamic timestamp) {
+    if (timestamp is! Timestamp) return '-';
+    final d = timestamp.toDate();
+    return '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
 
   for (final doc in snapshot.docs) {
     final data = doc.data();
 
     final studentName = data['studentName'] ?? 'Öğrenci';
-    final studentId = data['studentId'] ?? studentName;
+    final studentId = '${data['studentId'] ?? studentName}';
+    final teacherName = data['teacherName'] ?? '-';
+    final teacherId = data['teacherId'];
     final subject = data['subject'] ?? 'Bilinmeyen';
-    final questionCount = (data['questionCount'] is num
-            ? (data['questionCount'] as num).toInt()
-            : 1);
-            final studentDoc = await _firestore
-    .collection('users')
-    .doc(studentId.toString())
-    .get();
+    final completedAt = data['completedAt'];
 
-final studentData = studentDoc.data() ?? {};
+    final questionCount =
+        data['questionCount'] is num ? (data['questionCount'] as num).toInt() : 1;
+
+    if (teacherId != null) teacherIds.add('$teacherId');
+
+    final studentDoc = await _firestore.collection('users').doc(studentId).get();
+    final studentData = studentDoc.data() ?? {};
 
     studentMap.putIfAbsent(studentId, () {
       return {
         'studentName': studentName,
-       'className': studentData['className'] ?? data['className'] ?? '',
-'branch': studentData['branch'] ?? data['branch'] ?? '',
+        'className': studentData['className'] ?? data['className'] ?? '',
+        'branch': studentData['branch'] ?? data['branch'] ?? '',
+        'department': studentData['department'] ?? data['department'] ?? '',
         'subjects': <String, int>{},
         'total': 0,
+        'lastTeacher': '',
+        'lastCompleted': null,
       };
     });
 
     final subjects = studentMap[studentId]!['subjects'] as Map<String, int>;
     subjects[subject] = (subjects[subject] ?? 0) + questionCount;
+
     studentMap[studentId]!['total'] =
         (studentMap[studentId]!['total'] ?? 0) + questionCount;
+    studentMap[studentId]!['lastTeacher'] = teacherName;
+    studentMap[studentId]!['lastCompleted'] = completedAt;
 
     subjectTotals[subject] = (subjectTotals[subject] ?? 0) + questionCount;
+
+    historyRows.add({
+      'completedAt': completedAt,
+      'studentName': studentName,
+      'teacherName': teacherName,
+      'subject': subject,
+      'questionCount': questionCount,
+    });
   }
 
+  historyRows.sort((a, b) {
+    final at = a['completedAt'];
+    final bt = b['completedAt'];
+    if (at is! Timestamp && bt is! Timestamp) return 0;
+    if (at is! Timestamp) return 1;
+    if (bt is! Timestamp) return -1;
+    return at.toDate().compareTo(bt.toDate());
+  });
+
+  final totalQuestions = subjectTotals.values.fold<int>(0, (a, b) => a + b);
+  final average = studentMap.isEmpty ? 0 : totalQuestions / studentMap.length;
+
   final pdf = pw.Document(
-    theme: pw.ThemeData.withFont(
-      base: regularFont,
-      bold: boldFont,
-    ),
+    theme: pw.ThemeData.withFont(base: regularFont, bold: boldFont),
   );
 
-  final dateText =
-      '${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year}';
+  final endVisible = endDateExclusive.subtract(const Duration(days: 1));
+  final dateTitle = startDate.year == endVisible.year &&
+          startDate.month == endVisible.month &&
+          startDate.day == endVisible.day
+      ? formatDate(startDate)
+      : '${formatDate(startDate)} - ${formatDate(endVisible)}';
+
+  pw.Widget statBox(String title, String value) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.blueGrey50,
+        borderRadius: pw.BorderRadius.circular(8),
+        border: pw.Border.all(color: PdfColors.blueGrey200),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            value,
+            style: pw.TextStyle(
+              fontSize: 18,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.blue900,
+            ),
+          ),
+          pw.SizedBox(height: 3),
+          pw.Text(title, style: const pw.TextStyle(fontSize: 8)),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget subjectBar(String subject, int value) {
+    final max = subjectTotals.values.isEmpty
+        ? 1
+        : subjectTotals.values.reduce((a, b) => a > b ? a : b);
+    final percent = max == 0 ? 0.0 : value / max;
+
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 7),
+      child: pw.Row(
+        children: [
+          pw.SizedBox(width: 85, child: pw.Text(subject, style: const pw.TextStyle(fontSize: 9))),
+          pw.Expanded(
+  child: pw.LayoutBuilder(
+    builder: (context, constraints) {
+      return pw.Container(
+        height: 9,
+        color: PdfColors.blueGrey100,
+        child: pw.Align(
+          alignment: pw.Alignment.centerLeft,
+          child: pw.Container(
+            width: constraints!.maxWidth * percent,
+            height: 9,
+            color: PdfColors.blue700,
+          ),
+        ),
+      );
+    },
+  ),
+),
+          pw.SizedBox(width: 8),
+          pw.Text('$value', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+        ],
+      ),
+    );
+  }
 
   final fileName =
-      'ZumreNet_Gunluk_Rapor_${now.year}_${now.month}_${now.day}.pdf';
+      '${fileNamePrefix}_${startDate.year}_${startDate.month}_${startDate.day}.pdf';
 
   pdf.addPage(
     pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
       margin: const pw.EdgeInsets.all(28),
       build: (context) => [
-        pw.Text(
-          'ZümreNet Günlük Kullanım Raporu',
-          style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
+        pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.all(18),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.blue900,
+            borderRadius: pw.BorderRadius.circular(14),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text('ZümreNet',
+                  style: pw.TextStyle(
+                    color: PdfColors.white,
+                    fontSize: 26,
+                    fontWeight: pw.FontWeight.bold,
+                  )),
+              pw.SizedBox(height: 4),
+              pw.Text('Kullanım Analiz Raporu',
+                  style: const pw.TextStyle(color: PdfColors.white, fontSize: 15)),
+              pw.SizedBox(height: 10),
+              pw.Text(dateTitle,
+                  style: pw.TextStyle(
+                    color: PdfColors.greenAccent100,
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  )),
+            ],
+          ),
         ),
-        pw.SizedBox(height: 6),
-        pw.Text('Tarih: $dateText'),
         pw.SizedBox(height: 18),
-
-        pw.Text(
-          'Genel Özet',
-          style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+        pw.Row(
+          children: [
+            pw.Expanded(child: statBox('Öğrenci', '${studentMap.length}')),
+            pw.SizedBox(width: 8),
+            pw.Expanded(child: statBox('Öğretmen', '${teacherIds.length}')),
+            pw.SizedBox(width: 8),
+            pw.Expanded(child: statBox('Çözülen Soru', '$totalQuestions')),
+            pw.SizedBox(width: 8),
+            pw.Expanded(child: statBox('Aktif Zümre', '${subjectTotals.length}')),
+            pw.SizedBox(width: 8),
+            pw.Expanded(child: statBox('Ort. Soru', average.toStringAsFixed(1))),
+          ],
         ),
-        pw.SizedBox(height: 8),
-        pw.Text('Bugün çözülen toplam soru: ${subjectTotals.values.fold<int>(0, (a, b) => a + b)}'),
-        pw.Text('Sistemi kullanan öğrenci sayısı: ${studentMap.length}'),
-        pw.SizedBox(height: 16),
-
-        pw.Text(
-          'Ders / Zümre Dağılımı',
-          style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
-        ),
+        pw.SizedBox(height: 22),
+        pw.Text('Ders / Zümre Dağılımı',
+            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 10),
+        if (subjectTotals.isEmpty)
+          pw.Text('Bu tarih aralığında çözülen soru bulunamadı.')
+        else
+          ...subjectTotals.entries.map((e) => subjectBar(e.key, e.value)),
+        pw.SizedBox(height: 22),
+        pw.Text('Öğrenci Kullanım Özeti',
+            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
         pw.SizedBox(height: 8),
         pw.Table.fromTextArray(
-          headers: ['Ders', 'Çözülen Soru'],
-          data: subjectTotals.entries
-              .map((e) => [e.key, e.value.toString()])
-              .toList(),
-          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-        ),
-
-        pw.SizedBox(height: 20),
-
-        pw.Text(
-          'Öğrenci Bazlı Günlük Kullanım',
-          style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
-        ),
-        pw.SizedBox(height: 8),
-
-        pw.Table.fromTextArray(
-          headers: ['Öğrenci', 'Sınıf', 'Ders/Zümreler', 'Toplam'],
+          headers: ['Öğrenci', 'Sınıf', 'Alan', 'Toplam', 'Son İşlem', 'Son Öğretmen'],
           data: studentMap.values.map((student) {
-            final subjects = student['subjects'] as Map<String, int>;
-            final subjectText = subjects.entries
-                .map((e) => '${e.key}: ${e.value}')
-                .join(' | ');
-
             final classText =
                 '${student['className']}${student['branch'] != '' ? '-${student['branch']}' : ''}';
-
             return [
               student['studentName'],
               classText,
-              subjectText,
+              student['department'],
               '${student['total']}',
+              shortDateTime(student['lastCompleted']),
+              student['lastTeacher'],
             ];
           }).toList(),
-          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-          cellStyle: const pw.TextStyle(fontSize: 9),
+          headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey100),
+          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
+          cellStyle: const pw.TextStyle(fontSize: 7.5),
+          cellPadding: const pw.EdgeInsets.all(5),
+        ),
+        pw.SizedBox(height: 22),
+        pw.Text('İşlem Geçmişi',
+            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 8),
+        pw.Table.fromTextArray(
+          headers: ['Tarih/Saat', 'Öğrenci', 'Öğretmen', 'Ders', 'Soru'],
+          data: historyRows.map((row) {
+            return [
+              shortDateTime(row['completedAt']),
+              row['studentName'],
+              row['teacherName'],
+              row['subject'],
+              '${row['questionCount']}',
+            ];
+          }).toList(),
+          headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey100),
+          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
+          cellStyle: const pw.TextStyle(fontSize: 7),
+          cellPadding: const pw.EdgeInsets.all(4),
         ),
       ],
     ),
   );
+  _hidePdfLoadingDialog();
 
   await Printing.sharePdf(
     bytes: await pdf.save(),
     filename: fileName,
   );
 }
-
 
   Future<void> _loadStats() async {
     if (mounted) setState(() => _isLoading = true);
@@ -660,9 +948,9 @@ final studentData = studentDoc.data() ?? {};
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Text(
-                          type == 'student'
-? '${row['fullName']} • ${row['className']}-${row['branch']} • ${row['department'] ?? ''} • ${row['username']}'                              : '${row['fullName']} • ${row['username']}',
-                          style: const TextStyle(color: Colors.white70),
+type == 'student'
+    ? '${row['fullName']} • ${row['className']}-${row['branch']} • ${row['department'] ?? ''} • ${row['username']}'
+    : '${row['fullName']} • ${(row['subjects'] is List && row['subjects'].isNotEmpty) ? row['subjects'].join(', ') : 'Branş yok'} • ${row['username']}',                          style: const TextStyle(color: Colors.white70),
                         ),
                       );
                     }),
@@ -899,12 +1187,12 @@ final studentData = studentDoc.data() ?? {};
                     ),
                     const SizedBox(height: 12),
                     _quickActionCard(
-                      icon: Icons.picture_as_pdf_rounded,
-                      title: 'PDF Rapor Oluştur',
-                      subtitle: 'Günlük zümre kullanım raporu',
-                      color: Colors.redAccent,
-                      onTap: _generateDailyPdfReport,
-                    ),   
+  icon: Icons.picture_as_pdf_rounded,
+  title: 'PDF Rapor Oluştur',
+  subtitle: 'Bugün veya tarih aralığı',
+  color: Colors.redAccent,
+  onTap: _showPdfReportDialog,
+),  
                                         const SizedBox(height: 12),
                     _quickActionCard(
                       icon: Icons.schedule_rounded,
@@ -1219,6 +1507,12 @@ Widget _scheduleSection({
                 children: [
                   Expanded(
                     child: TextFormField(
+                      keyboardType: TextInputType.number,
+inputFormatters: [
+  FilteringTextInputFormatter.digitsOnly,
+  LengthLimitingTextInputFormatter(4),
+  _TimeTextInputFormatter(),
+],
                       initialValue: slot['start'],
                       style: const TextStyle(color: Colors.white),
                       decoration: _timeInputDecoration('Başlangıç'),
@@ -1286,6 +1580,12 @@ Widget _lunchSection() {
             const SizedBox(width: 10),
             Expanded(
               child: TextFormField(
+                keyboardType: TextInputType.number,
+inputFormatters: [
+  FilteringTextInputFormatter.digitsOnly,
+  LengthLimitingTextInputFormatter(4),
+  _TimeTextInputFormatter(),
+],
                 initialValue: _lunchEnd,
                 style: const TextStyle(color: Colors.white),
                 decoration: _timeInputDecoration('Bitiş'),
@@ -1549,6 +1849,33 @@ class UserManagementPage extends StatefulWidget {
   @override
   State<UserManagementPage> createState() => _UserManagementPageState();
 }
+class _TimeTextInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+
+    if (digits.length > 4) {
+      digits = digits.substring(0, 4);
+    }
+
+    final buffer = StringBuffer();
+
+    for (int i = 0; i < digits.length; i++) {
+      if (i == 2) buffer.write(':');
+      buffer.write(digits[i]);
+    }
+
+    final formatted = buffer.toString();
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+}
 
 class _UserManagementPageState extends State<UserManagementPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -1566,6 +1893,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
   ];
 
   bool _isLoading = false;
+  String _userSearchQuery = '';
 
   @override
   Widget build(BuildContext context) {
@@ -1606,6 +1934,28 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 ),
               ),
             ),
+            Padding(
+  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+  child: TextField(
+    style: const TextStyle(color: Colors.white),
+    decoration: InputDecoration(
+      hintText: 'Kullanıcı ara...',
+      hintStyle: const TextStyle(color: Colors.white54),
+      prefixIcon: const Icon(Icons.search, color: Colors.white70),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.10),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(20),
+        borderSide: BorderSide.none,
+      ),
+    ),
+    onChanged: (value) {
+      setState(() {
+        _userSearchQuery = value.trim().toLowerCase();
+      });
+    },
+  ),
+),
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
                 stream: _firestore.collection('users').snapshots(),
@@ -1625,7 +1975,27 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     );
                   }
 
-                  final users = snapshot.data!.docs;
+                 final allUsers = snapshot.data!.docs;
+
+final users = allUsers.where((doc) {
+  final data = doc.data() as Map<String, dynamic>;
+
+  final searchable = [
+    data['fullName'],
+    data['name'],
+    data['surname'],
+    data['email'],
+    data['role'],
+    data['username'],
+    data['className'],
+    data['branch'],
+    data['department'],
+    if (data['subjects'] is List) (data['subjects'] as List).join(' '),
+  ].where((e) => e != null).join(' ').toLowerCase();
+
+  return _userSearchQuery.isEmpty ||
+      searchable.contains(_userSearchQuery);
+}).toList();
 
                   return ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
@@ -2013,6 +2383,7 @@ String username = existingData?['username'] ?? '';
 
     await _firestore.collection('users').doc(uid).update(updates);
   }
+  
 
   Future<void> _deleteUser(String uid, String email) async {
     final confirm = await showDialog<bool>(
