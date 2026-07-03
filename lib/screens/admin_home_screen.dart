@@ -315,6 +315,7 @@ Future<void> _showPdfReportDialog() async {
                   label: const Text('Başlangıç Tarihi Seç'),
                   onPressed: () async {
                     final picked = await showDatePicker(
+                      locale: const Locale('tr', 'TR'),
                       context: context,
                       firstDate: DateTime(2024),
                       lastDate: DateTime.now(),
@@ -333,6 +334,7 @@ Future<void> _showPdfReportDialog() async {
                   label: const Text('Bitiş Tarihi Seç'),
                   onPressed: () async {
                     final picked = await showDatePicker(
+                      locale: const Locale('tr', 'TR'),
                       context: context,
                       firstDate: DateTime(2024),
                       lastDate: DateTime.now(),

@@ -9,6 +9,7 @@ import 'package:zumre_net/screens/student_home_screen.dart';
 import 'package:zumre_net/screens/teacher_home_screen.dart';
 import 'package:zumre_net/auth/auth_service.dart';
 import 'package:zumre_net/screens/login_screen.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +56,16 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthService()),
       ],
 child: MaterialApp(
+  locale: const Locale('tr', 'TR'),
+supportedLocales: const [
+  Locale('tr', 'TR'),
+  Locale('en', 'US'),
+],
+localizationsDelegates: const [
+  GlobalMaterialLocalizations.delegate,
+  GlobalWidgetsLocalizations.delegate,
+  GlobalCupertinoLocalizations.delegate,
+],
   title: 'ZümreNet',
   theme: AppTheme.theme,        debugShowCheckedModeBanner: false,
 
