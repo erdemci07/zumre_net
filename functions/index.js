@@ -22,7 +22,10 @@ exports.analyzeEdesisFile = onCall(async (request) => {
   const rows = readFileRows({ fileBase64, fileName });
 
   if (rows.length < 2) {
-    throw new HttpsError("invalid-argument", "Dosyada aktarılacak kayıt bulunamadı.");
+    throw new HttpsError(
+      "invalid-argument",
+      "Dosyada aktarılacak kayıt bulunamadı."
+    );
   }
 
   const headers = rows[0];
@@ -63,7 +66,10 @@ exports.importEdesisFile = onCall(async (request) => {
   const rows = readFileRows({ fileBase64, fileName });
 
   if (rows.length < 2) {
-    throw new HttpsError("invalid-argument", "Dosyada aktarılacak kayıt bulunamadı.");
+    throw new HttpsError(
+      "invalid-argument",
+      "Dosyada aktarılacak kayıt bulunamadı."
+    );
   }
 
   const headers = rows[0];
@@ -94,4 +100,49 @@ exports.importEdesisFile = onCall(async (request) => {
     invalidPreview: invalidRows.slice(0, 20),
     importSummary,
   };
+});
+
+exports.updateUserPassword = onCall(async (request) => {
+  try {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
+    }
+
+    const adminDoc = await admin
+      .firestore()
+      .collection("users")
+      .doc(request.auth.uid)
+      .get();
+
+    if (!adminDoc.exists || adminDoc.data().role !== "admin") {
+      throw new HttpsError("permission-denied", "Bu işlem için yetkiniz yok.");
+    }
+
+    const { uid, password } = request.data;
+
+    if (!uid || !password || password.length < 6) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Şifre en az 6 karakter olmalıdır."
+      );
+    }
+
+    await admin.auth().updateUser(uid, { password });
+
+    return {
+      success: true,
+      message: "Şifre güncellendi.",
+    };
+  } catch (error) {
+    console.error("updateUserPassword error:", error);
+
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+
+    throw new HttpsError(
+      "internal",
+      error.message || "Şifre güncellenemedi."
+    );
+  }
 });

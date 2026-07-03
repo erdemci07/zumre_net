@@ -781,6 +781,8 @@ Future<void> _generatePdfReport({
 
       final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
       final analyzeCallable = functions.httpsCallable('analyzeEdesisFile');
+      
+      
 
       final analyzeResult = await analyzeCallable.call({
         'fileBase64': fileBase64,
@@ -2114,6 +2116,7 @@ final users = allUsers.where((doc) {
 
     String email = existingData?['email'] ?? '';
     String password = '';
+    String newPassword = '';
     String name = existingData?['fullName'] ?? existingData?['name'] ?? '';
     String role = existingData?['role'] ?? 'student';
     String className = existingData?['className'] ?? '';
@@ -2155,6 +2158,22 @@ String username = existingData?['username'] ?? '';
                             : null,
                       ),
                     ],
+                    if (isEditing) ...[
+  const SizedBox(height: 8),
+  TextFormField(
+    decoration: const InputDecoration(
+      labelText: 'Yeni Şifre',
+      helperText: 'Boş bırakırsanız şifre değişmez',
+    ),
+    obscureText: true,
+    onChanged: (val) => newPassword = val,
+    validator: (val) {
+      if (val == null || val.isEmpty) return null;
+      if (val.length < 6) return 'Şifre en az 6 karakter olmalı';
+      return null;
+    },
+  ),
+],
                     const SizedBox(height: 8),
                     TextFormField(
                       initialValue: name,
@@ -2243,7 +2262,14 @@ String username = existingData?['username'] ?? '';
                         department,
                         studentNo,
                       );
-                    } else {
+                      if (newPassword.trim().isNotEmpty) {
+  await _updateUserPassword(
+    uid: editingUid,
+    password: newPassword.trim(),
+  );
+}
+                    }
+                    if (!isEditing) {
                       await _createUser(
                         email,
                         password,
@@ -2285,6 +2311,18 @@ String username = existingData?['username'] ?? '';
       ),
     );
   }
+  Future<void> _updateUserPassword({
+  required String uid,
+  required String password,
+}) async {
+  final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+  final callable = functions.httpsCallable('updateUserPassword');
+
+  await callable.call({
+    'uid': uid,
+    'password': password,
+  });
+}
 
   Future<void> _createUser(
     String email,

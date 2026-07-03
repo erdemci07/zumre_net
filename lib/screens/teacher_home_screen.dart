@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/services.dart';
 
 class TeacherHomeScreen extends StatefulWidget {
   const TeacherHomeScreen({super.key});
@@ -9,7 +10,33 @@ class TeacherHomeScreen extends StatefulWidget {
   @override
   State<TeacherHomeScreen> createState() => _TeacherHomeScreenState();
 }
+class _TimeTextInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
 
+    if (digits.length > 4) {
+      digits = digits.substring(0, 4);
+    }
+
+    final buffer = StringBuffer();
+
+    for (int i = 0; i < digits.length; i++) {
+      if (i == 2) buffer.write(':');
+      buffer.write(digits[i]);
+    }
+
+    final formatted = buffer.toString();
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+}
 class _TeacherHomeScreenState extends State<TeacherHomeScreen>
     with SingleTickerProviderStateMixin {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -462,9 +489,9 @@ Future<void> _showAvailabilityDialog() async {
                                   child: Row(
                                     children: [
                                       Expanded(
-                                        child: _timePickerBox(
+                                        child: _teacherTimeField(
                                           label: 'Başlangıç',
-                                          value: slot['start'] ?? '09:00',
+                                          initialValue: slot['start'] ?? '09:00',
                                           onChanged: (value) {
                                             setDialogState(() {
                                               slot['start'] = value;
@@ -474,9 +501,9 @@ Future<void> _showAvailabilityDialog() async {
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
-                                        child: _timePickerBox(
+                                        child: _teacherTimeField(
                                           label: 'Bitiş',
-                                          value: slot['end'] ?? '10:00',
+                                          initialValue: slot['end'] ?? '10:00',
                                           onChanged: (value) {
                                             setDialogState(() {
                                               slot['end'] = value;
@@ -1486,64 +1513,21 @@ Future<void> _resetAndTransferQueue({
       ),
     );
   }
-  Widget _timePickerBox({
+  Widget _teacherTimeField({
   required String label,
-  required String value,
+  required String initialValue,
   required void Function(String value) onChanged,
 }) {
-  return InkWell(
-    borderRadius: BorderRadius.circular(16),
-    onTap: () async {
-      final parts = value.split(':');
-      final initialHour = int.tryParse(parts.first) ?? 9;
-      final initialMinute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
-
-      final picked = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay(hour: initialHour, minute: initialMinute),
-        builder: (context, child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: const ColorScheme.dark(
-                primary: Colors.greenAccent,
-                surface: Color(0xFF06312E),
-              ),
-            ),
-            child: child!,
-          );
-        },
-      );
-
-      if (picked == null) return;
-
-      final formatted =
-          '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
-
-      onChanged(formatted);
-    },
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.white60, fontSize: 12)),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 17,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-    ),
+  return TextFormField(
+    initialValue: initialValue,
+    keyboardType: TextInputType.number,
+    inputFormatters: [
+      FilteringTextInputFormatter.digitsOnly,
+      LengthLimitingTextInputFormatter(4),
+      _TimeTextInputFormatter(),
+    ],
+    style: const TextStyle(color: Colors.white),
+    onChanged: onChanged,
   );
 }
 
