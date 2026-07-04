@@ -17,6 +17,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String? _studentName;
   String? _selectedSubject;
   String? _selectedTeacherId;
+  String? _selectedTeacherName;
   List<Map<String, dynamic>> _teachersForSubject = [];
 
   bool _isLoadingTeachers = false;
@@ -24,11 +25,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   bool _shownInProgressPopup = false;
   bool _isZumreOpenNow = false;
   bool _isLunchNow = false;
+  bool _useSmartTeacherSelection = true;
   String _zumreMessage = 'Zümre saati kontrol ediliyor...';
   String? _currentQueueId;
   String? _currentTeacherName;
   int _queuePosition = 0;
   int _selectedQuestionCount = 1;
+  String _nextZumreText = '';
 
 int _estimatedMinutesForQuestionCount(int count) {
   switch (count) {
@@ -79,6 +82,85 @@ bool _isNowInSlots(DateTime now, List<Map<String, dynamic>> slots) {
 
   return false;
 }
+Future<Map<String, dynamic>?> _findBestAvailableTeacher(String subject) async {
+  final teachersSnapshot = await _firestore
+      .collection('users')
+      .where('role', isEqualTo: 'teacher')
+      .where('teacherStatus', isEqualTo: 'available')
+      .where('subjects', arrayContains: subject)
+      .get();
+
+  if (teachersSnapshot.docs.isEmpty) return null;
+
+  final now = DateTime.now();
+  final todayStart = DateTime(now.year, now.month, now.day);
+
+  final queuesSnapshot = await _firestore
+      .collection('queues')
+      .where('status', whereIn: ['waiting', 'in_progress'])
+      .get();
+
+  final todayCompletedSnapshot = await _firestore
+      .collection('queues')
+      .where('status', isEqualTo: 'completed')
+      .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
+      .get();
+
+  final Map<String, int> teacherScore = {};
+
+  for (final teacher in teachersSnapshot.docs) {
+    teacherScore[teacher.id] = 0;
+  }
+
+  for (final queue in queuesSnapshot.docs) {
+    final data = queue.data();
+    final teacherId = data['teacherId'];
+    final status = data['status'];
+
+    if (teacherId == null || !teacherScore.containsKey(teacherId)) continue;
+
+    if (status == 'in_progress') {
+      teacherScore[teacherId] = teacherScore[teacherId]! + 3;
+    } else if (status == 'waiting') {
+      teacherScore[teacherId] = teacherScore[teacherId]! + 1;
+    }
+  }
+
+  final Map<String, int> todaySolved = {};
+
+  for (final doc in todayCompletedSnapshot.docs) {
+    final data = doc.data();
+    final teacherId = data['teacherId'];
+
+    if (teacherId == null || !teacherScore.containsKey(teacherId)) continue;
+
+    todaySolved[teacherId] = (todaySolved[teacherId] ?? 0) + 1;
+  }
+
+  for (final entry in todaySolved.entries) {
+    teacherScore[entry.key] =
+        (teacherScore[entry.key] ?? 0) + (entry.value ~/ 10);
+  }
+
+  final teachers = teachersSnapshot.docs.toList();
+
+  teachers.shuffle();
+
+  teachers.sort((a, b) {
+    final aScore = teacherScore[a.id] ?? 0;
+    final bScore = teacherScore[b.id] ?? 0;
+    return aScore.compareTo(bScore);
+  });
+
+  final bestTeacher = teachers.first;
+  final data = bestTeacher.data();
+
+  return {
+    'id': bestTeacher.id,
+    'name': data['fullName'] ?? data['name'] ?? data['email'] ?? 'Öğretmen',
+    'score': teacherScore[bestTeacher.id] ?? 0,
+  };
+}
 
 Future<void> _checkZumreAvailability() async {
   final now = DateTime.now();
@@ -111,6 +193,30 @@ Future<void> _checkZumreAvailability() async {
   }
 
   String message;
+  String nextZumreText = '';
+
+if (!isZumreOpen && slots.isNotEmpty) {
+  final nowMinutes = now.hour * 60 + now.minute;
+
+  final futureSlots = slots.where((slot) {
+    final start = _timeToMinutes('${slot['start']}');
+    return start > nowMinutes;
+  }).toList();
+
+  if (futureSlots.isNotEmpty) {
+    futureSlots.sort((a, b) {
+      final aStart = _timeToMinutes('${a['start']}');
+      final bStart = _timeToMinutes('${b['start']}');
+      return aStart.compareTo(bStart);
+    });
+
+    nextZumreText = 'Başlangıç: ${futureSlots.first['start']}';
+  } else {
+    nextZumreText = isWeekend
+        ? 'Bugünkü zümre tamamlandı'
+        : 'Sonraki zümre yarın';
+  }
+}
 
   if (isLunch) {
     message = 'Şu an öğle arası. Zümre sırası geçici olarak kapalı.';
@@ -126,6 +232,7 @@ Future<void> _checkZumreAvailability() async {
     _isZumreOpenNow = isZumreOpen;
     _isLunchNow = isLunch;
     _zumreMessage = message;
+    _nextZumreText = nextZumreText;
   });
 }
 
@@ -402,52 +509,89 @@ await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
     }
   }
 
-  Future<void> _loadTeachersForSubject(String subject) async {
-    if (subject.isEmpty) return;
+Future<void> _loadTeachersForSubject(String subject) async {
+  if (subject.isEmpty) return;
 
-    setState(() {
-      _isLoadingTeachers = true;
-      _teachersForSubject = [];
-      _selectedTeacherId = null;
-    });
+  setState(() {
+    _isLoadingTeachers = true;
+    _teachersForSubject = [];
+    _selectedTeacherId = null;
+    _selectedTeacherName = null;
+    _useSmartTeacherSelection = true;
+  });
 
-    try {
-  final snapshot = await _firestore
-      .collection('users')
-      .where('role', isEqualTo: 'teacher')
-      .where('teacherStatus', isEqualTo: 'available')
-      .where('subjects', arrayContains: subject)
-      .get();
+  try {
+    final snapshot = await _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'teacher')
+        .where('teacherStatus', isEqualTo: 'available')
+        .where('subjects', arrayContains: subject)
+        .get();
 
-      final teachers = snapshot.docs.where((doc) {
-  final data = doc.data();
-  return data['teacherStatus'] == 'available';
-}).map((doc) => doc.data()).toList();
+    final teachers = snapshot.docs.map((doc) {
+      final data = doc.data();
 
-      if (mounted) {
-        setState(() {
-          _teachersForSubject = teachers;
-        });
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Öğretmenler yüklenemedi: $e')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingTeachers = false;
-        });
-      }
+      return {
+        'id': doc.id,
+        'name': data['fullName'] ??
+            data['name'] ??
+            data['email'] ??
+            'Öğretmen',
+      };
+    }).toList();
+
+    if (mounted) {
+      setState(() {
+        _teachersForSubject = teachers;
+      });
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Öğretmenler yüklenemedi: $e')),
+    );
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isLoadingTeachers = false;
+      });
     }
   }
+}
 
   Future<void> _joinQueue() async {
     if (_remainingCooldownSeconds > 0 ||
         DateTime.now().millisecondsSinceEpoch < _cooldownUntil) {
       return;
     }
+String? finalTeacherId = _selectedTeacherId;
+String? finalTeacherName = _selectedTeacherName;
 
+if (_useSmartTeacherSelection) {
+  _showSmartTeacherLoadingDialog();
+
+  try {
+    final bestTeacher =
+        await _findBestAvailableTeacher(_selectedSubject!);
+
+    if (bestTeacher == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Şu an müsait öğretmen bulunamadı.'),
+        ),
+      );
+      return;
+    }
+
+    finalTeacherId = bestTeacher['id'];
+    finalTeacherName = bestTeacher['name'];
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Sıra alınamadı: $e')),
+    );
+  } finally {
+    _hideSmartTeacherLoadingDialog();
+  }
+}
     if (_selectedSubject == null ||
         _selectedSubject!.isEmpty ||
         (_teachersForSubject.isEmpty &&
@@ -473,11 +617,7 @@ await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
       return;
     }
 
-    String teacherId;
-
-    if (_selectedTeacherId != null && _selectedTeacherId!.isNotEmpty) {
-      teacherId = _selectedTeacherId!;
-    } else {
+    if (finalTeacherId == null || finalTeacherId.isEmpty) {
       final teachersSnapshot = await _firestore
           .collection('users')
           .where('role', isEqualTo: 'teacher')
@@ -504,14 +644,19 @@ await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
 
       final randomIndex =
           DateTime.now().millisecondsSinceEpoch % availableTeachers.length;
-
-      teacherId = availableTeachers[randomIndex].id;
+      final selectedTeacherDoc = availableTeachers[randomIndex];
+      finalTeacherId = selectedTeacherDoc.id;
+      finalTeacherName = selectedTeacherDoc.data()['name'] ??
+          selectedTeacherDoc.data()['teacherName'] ??
+          selectedTeacherDoc.data()['displayName'] ??
+          finalTeacherName;
     }
 
     try {
       final newQueue = {
+        'teacherName': finalTeacherName,
         'studentId': userId,
-        'teacherId': teacherId,
+        'teacherId': finalTeacherId,
         'subject': _selectedSubject,
         'status': 'waiting',
         'studentName': _studentName,
@@ -543,7 +688,7 @@ if (!_isZumreOpenNow || _isLunchNow) {
       }
 
       _listenToQueue(docRef.id);
-      _getCurrentTeacherName(teacherId);
+      _getCurrentTeacherName(finalTeacherId);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sıranız alındı! Lütfen bekleyin.')),
@@ -614,6 +759,51 @@ if (!_isZumreOpenNow || _isLunchNow) {
       }
     }
   }
+  void _showSmartTeacherLoadingDialog() {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [
+              Color(0xFF1A1240),
+              Color(0xFF2B1768),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: Color(0xFF7C4DFF)),
+            SizedBox(width: 18),
+            Expanded(
+              child: Text(
+                'En uygun öğretmen belirleniyor...\nLütfen bekleyin.',
+                style: TextStyle(
+                  color: Colors.white70,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+void _hideSmartTeacherLoadingDialog() {
+  if (mounted && Navigator.canPop(context)) {
+    Navigator.pop(context);
+  }
+}
 
   void _showTeacherStartedPopup() {
     if (!mounted) return;
@@ -896,6 +1086,73 @@ if (!_isZumreOpenNow || _isLunchNow) {
 
     return '$remainingSeconds sn';
   }
+Widget _compactZumreInfoBadge() {
+  final active = _isZumreOpenNow && !_isLunchNow;
+
+  if (active) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.greenAccent.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: Colors.greenAccent.withOpacity(0.35),
+        ),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.circle,
+            size: 8,
+            color: Colors.greenAccent,
+          ),
+          SizedBox(width: 5),
+          Text(
+            'Zümre Aktif',
+            style: TextStyle(
+              color: Colors.greenAccent,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: Colors.orangeAccent.withOpacity(0.14),
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(
+        color: Colors.orangeAccent.withOpacity(0.35),
+      ),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.schedule_rounded,
+          size: 14,
+          color: Colors.orangeAccent,
+        ),
+        const SizedBox(width: 5),
+        Text(
+          _nextZumreText.isEmpty
+              ? 'Zümre Kapalı'
+              : 'Sonraki Zümre: $_nextZumreText',
+          style: const TextStyle(
+            color: Colors.orangeAccent,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    ),
+  );
+}
   Widget _buildSubjectGrid() {
   return GridView.count(
     shrinkWrap: true,
@@ -906,8 +1163,8 @@ if (!_isZumreOpenNow || _isLunchNow) {
     childAspectRatio: 1.8,
     children: [
       _subjectCard('Matematik', Icons.calculate, const Color(0xFF6C3DFF)),
-      _subjectCard('Fizik', Icons.science, const Color(0xFF0099FF)),
-      _subjectCard('Kimya', Icons.biotech, const Color(0xFFFF8A00)),
+      _subjectCard('Fizik', Icons.biotech, const Color(0xFF0099FF)),
+      _subjectCard('Kimya', Icons.science, const Color(0xFFFF8A00)),
       _subjectCard('Biyoloji', Icons.eco, const Color(0xFF00C878)),
       _subjectCard('Türkçe', Icons.menu_book, const Color(0xFFE91E63)),
       _subjectCard('Tarih', Icons.history_edu, const Color(0xFFFFC107)),
@@ -1190,31 +1447,49 @@ Widget _buildWelcomeCard() {
               ),
             ),
             const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Merhaba 👋',
-                    style: TextStyle(color: Colors.white60, fontSize: 14),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _studentName ?? 'Öğrenci',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 25,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Sorunu seç, sıranı al ve öğretmenine ulaş.',
-                    style: TextStyle(color: Colors.white60, fontSize: 12),
-                  ),
-                ],
-              ),
+    Expanded(
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Merhaba 👋',
+        style: TextStyle(
+          color: Colors.white60,
+          fontSize: 14,
+        ),
+      ),
+      const SizedBox(height: 4),
+
+      Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            _studentName ?? 'Öğrenci',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 25,
+              fontWeight: FontWeight.bold,
             ),
+          ),
+
+          _compactZumreInfoBadge(),
+        ],
+      ),
+
+      const SizedBox(height: 6),
+
+      const Text(
+        'Dersini seç, sıranı al ve öğretmenine ulaş.',
+        style: TextStyle(
+          color: Colors.white60,
+          fontSize: 12,
+        ),
+      ),
+    ],
+  ),
+),
             IconButton(
               tooltip: 'Çıkış Yap',
               onPressed: () async {
@@ -1242,34 +1517,58 @@ Widget _buildTeacherSelector() {
     );
   }
 
-  return Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(24),
+ return Container(
+  padding: const EdgeInsets.all(18),
+  decoration: BoxDecoration(
+    color: Colors.white.withOpacity(0.08),
+    borderRadius: BorderRadius.circular(24),
+  ),
+  child: DropdownButtonFormField<String>(
+    value: _useSmartTeacherSelection ? 'smart' : _selectedTeacherId,
+    dropdownColor: const Color(0xFF1A1F3A),
+    style: const TextStyle(color: Colors.white),
+    decoration: const InputDecoration(
+      labelText: 'Öğretmen Seç',
+      labelStyle: TextStyle(color: Colors.white70),
     ),
-    child: DropdownButtonFormField<String>(
-      dropdownColor: const Color(0xFF1A1F3A),
-      style: const TextStyle(color: Colors.white),
-      decoration: const InputDecoration(
-        labelText: 'Öğretmen Seç',
-        labelStyle: TextStyle(color: Colors.white70),
+    items: [
+      const DropdownMenuItem<String>(
+        value: 'smart',
+        child: Text('✨ En Uygun Öğretmene Yönlendir'),
       ),
-      items: _teachersForSubject.map<DropdownMenuItem<String>>((t) {
-        final id = (t['id'] ?? '') as String;
-        final name = (t['name'] ?? '') as String;
+
+      ..._teachersForSubject.map<DropdownMenuItem<String>>((teacher) {
         return DropdownMenuItem<String>(
-          value: id,
-          child: Text(name),
+          value: teacher['id'].toString(),
+          child: Text(
+  (teacher['name'] ?? 'Öğretmen').toString(),
+),
         );
-      }).toList(),
-      onChanged: (val) {
-        setState(() {
-          _selectedTeacherId = val;
-        });
-      },
-    ),
-  );
+      }),
+    ],
+
+    onChanged: (value) {
+      setState(() {
+        if (value == 'smart') {
+          _useSmartTeacherSelection = true;
+          _selectedTeacherId = null;
+          _selectedTeacherName = null;
+          return;
+        }
+
+        _useSmartTeacherSelection = false;
+        _selectedTeacherId = value;
+
+        final teacher = _teachersForSubject.firstWhere(
+          (t) => t['id'] == value,
+        );
+
+        _selectedTeacherName =
+    (teacher['name'] ?? 'Öğretmen').toString();
+      });
+    },
+  ),
+);
 }
 
 

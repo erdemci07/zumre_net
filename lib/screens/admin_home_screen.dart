@@ -288,89 +288,286 @@ Future<void> _showPdfReportDialog() async {
   DateTime? startDate;
   DateTime? endDate;
 
+  String dateText(DateTime? date) {
+    if (date == null) return 'Tarih seçilmedi';
+    return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
+  }
+
   await showDialog(
     context: context,
     builder: (ctx) {
       return StatefulBuilder(
         builder: (context, setDialogState) {
-          return AlertDialog(
-            title: const Text('PDF Rapor Oluştur'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.today),
-                    label: const Text('Bugünün Raporu'),
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      await _generateDailyPdfReport();
-                    },
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 22),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 540),
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: const Color(0xFF071A3A),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.30),
+                    blurRadius: 24,
+                    offset: const Offset(0, 12),
                   ),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.date_range),
-                  label: const Text('Başlangıç Tarihi Seç'),
-                  onPressed: () async {
-                    final picked = await showDatePicker(
-                      locale: const Locale('tr', 'TR'),
-                      context: context,
-                      firstDate: DateTime(2024),
-                      lastDate: DateTime.now(),
-                      initialDate: startDate ?? DateTime.now(),
-                    );
-                    if (picked != null) {
-                      setDialogState(() => startDate = picked);
-                    }
-                  },
-                ),
-                if (startDate != null)
-                  Text('Başlangıç: ${startDate!.day}.${startDate!.month}.${startDate!.year}'),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.event),
-                  label: const Text('Bitiş Tarihi Seç'),
-                  onPressed: () async {
-                    final picked = await showDatePicker(
-                      locale: const Locale('tr', 'TR'),
-                      context: context,
-                      firstDate: DateTime(2024),
-                      lastDate: DateTime.now(),
-                      initialDate: endDate ?? startDate ?? DateTime.now(),
-                    );
-                    if (picked != null) {
-                      setDialogState(() => endDate = picked);
-                    }
-                  },
-                ),
-                if (endDate != null)
-                  Text('Bitiş: ${endDate!.day}.${endDate!.month}.${endDate!.year}'),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('İptal'),
+                ],
               ),
-              ElevatedButton(
-                onPressed: startDate == null || endDate == null
-                    ? null
-                    : () async {
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent.withOpacity(0.16),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.redAccent.withOpacity(0.35),
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.picture_as_pdf_rounded,
+                          color: Colors.redAccent,
+                          size: 31,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'PDF Rapor Oluştur',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Günlük veya tarih aralıklı rapor hazırlayın.',
+                              style: TextStyle(
+                                color: Colors.white60,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 22),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.today_rounded),
+                      label: const Text(
+                        'Bugünün Raporunu Oluştur',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      onPressed: () async {
                         Navigator.pop(ctx);
-                        await _generatePdfReportForRange(
-                          startDate: startDate!,
-                          endDate: endDate!,
-                        );
+                        await _generateDailyPdfReport();
                       },
-                child: const Text('Tarih Aralığı Raporu'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Tarih Aralığı Raporu',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        _pdfDateButton(
+                          icon: Icons.date_range_rounded,
+                          title: 'Başlangıç Tarihi',
+                          value: dateText(startDate),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              locale: const Locale('tr', 'TR'),
+                              firstDate: DateTime(2024),
+                              lastDate: DateTime.now(),
+                              initialDate: startDate ?? DateTime.now(),
+                            );
+
+                            if (picked != null) {
+                              setDialogState(() => startDate = picked);
+                            }
+                          },
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        _pdfDateButton(
+                          icon: Icons.event_rounded,
+                          title: 'Bitiş Tarihi',
+                          value: dateText(endDate),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              locale: const Locale('tr', 'TR'),
+                              firstDate: DateTime(2024),
+                              lastDate: DateTime.now(),
+                              initialDate: endDate ?? startDate ?? DateTime.now(),
+                            );
+
+                            if (picked != null) {
+                              setDialogState(() => endDate = picked);
+                            }
+                          },
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.download_rounded),
+                            label: const Text(
+                              'Tarih Aralığı Raporu Oluştur',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: startDate == null || endDate == null
+                                ? null
+                                : () async {
+                                    Navigator.pop(ctx);
+                                    await _generatePdfReportForRange(
+                                      startDate: startDate!,
+                                      endDate: endDate!,
+                                    );
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.lightBlueAccent,
+                              foregroundColor: const Color(0xFF071A3A),
+                              disabledBackgroundColor:
+                                  Colors.white.withOpacity(0.12),
+                              disabledForegroundColor: Colors.white38,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                        side: const BorderSide(color: Colors.white24),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: const Text('Vazgeç'),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           );
         },
       );
     },
+  );
+}
+Widget _pdfDateButton({
+  required IconData icon,
+  required String title,
+  required String value,
+  required VoidCallback onTap,
+}) {
+  final selected = value != 'Tarih seçilmedi';
+
+  return InkWell(
+    borderRadius: BorderRadius.circular(18),
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: selected
+              ? Colors.lightBlueAccent.withOpacity(0.40)
+              : Colors.white12,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            color: selected ? Colors.lightBlueAccent : Colors.white54,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: selected ? Colors.white : Colors.white54,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right, color: Colors.white38),
+        ],
+      ),
+    ),
   );
 }
 
@@ -1172,7 +1369,7 @@ type == 'student'
                           child: _quickActionCard(
                             icon: Icons.school_rounded,
                             title: 'Öğrenci Aktar',
-                            subtitle: 'Edesis Öğrenci Excel dosyası',
+                            subtitle: 'Edesis Öğrenci Excel dosyası seçilir',
                             color: Colors.orangeAccent,
                             onTap: () => _pickEdesisFile('student'),
                           ),
@@ -1182,7 +1379,7 @@ type == 'student'
                           child: _quickActionCard(
                             icon: Icons.badge_rounded,
                             title: 'Öğretmen Aktar',
-                            subtitle: 'Edesis Öğretmen Excel dosyası',
+                            subtitle: 'Edesis Öğretmen Excel dosyası seçilir',
                             color: Colors.greenAccent,
                             onTap: () => _pickEdesisFile('teacher'),
                           ),
@@ -1193,7 +1390,7 @@ type == 'student'
                     _quickActionCard(
   icon: Icons.picture_as_pdf_rounded,
   title: 'PDF Rapor Oluştur',
-  subtitle: 'Bugün veya tarih aralığı',
+  subtitle: 'Günlük veya tarih aralığına göre PDF raporu oluşturulur',
   color: Colors.redAccent,
   onTap: _showPdfReportDialog,
 ),  
@@ -1201,7 +1398,7 @@ type == 'student'
                     _quickActionCard(
                       icon: Icons.schedule_rounded,
                       title: 'Zümre Saatleri',
-                      subtitle: 'Hafta içi, hafta sonu ve öğle arası',
+                      subtitle: 'Hafta içi, hafta sonu ve öğle arası vakitleri ayarlanır',
                       color: Colors.purpleAccent,
                       onTap: _showZumreScheduleDialog,
                     ),
@@ -1524,13 +1721,20 @@ inputFormatters: [
                     ),
                   ),
                   const SizedBox(width: 10),
+                  
                   Expanded(
                     child: TextFormField(
-                      initialValue: slot['end'],
-                      style: const TextStyle(color: Colors.white),
-                      decoration: _timeInputDecoration('Bitiş'),
-                      onChanged: (value) => slot['end'] = value,
-                    ),
+  initialValue: slot['end'],
+  keyboardType: TextInputType.number,
+  inputFormatters: [
+    FilteringTextInputFormatter.digitsOnly,
+    LengthLimitingTextInputFormatter(4),
+    _TimeTextInputFormatter(),
+  ],
+  style: const TextStyle(color: Colors.white),
+  decoration: _timeInputDecoration('Bitiş'),
+  onChanged: (value) => slot['end'] = value,
+),
                   ),
                   IconButton(
                     onPressed: () => onDelete(index),
@@ -1573,29 +1777,37 @@ Widget _lunchSection() {
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(
-              child: TextFormField(
-                initialValue: _lunchStart,
-                style: const TextStyle(color: Colors.white),
-                decoration: _timeInputDecoration('Başlangıç'),
-                onChanged: (value) => _lunchStart = value,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextFormField(
-                keyboardType: TextInputType.number,
-inputFormatters: [
-  FilteringTextInputFormatter.digitsOnly,
-  LengthLimitingTextInputFormatter(4),
-  _TimeTextInputFormatter(),
-],
-                initialValue: _lunchEnd,
-                style: const TextStyle(color: Colors.white),
-                decoration: _timeInputDecoration('Bitiş'),
-                onChanged: (value) => _lunchEnd = value,
-              ),
-            ),
+   Expanded(
+  child: TextFormField(
+    initialValue: _lunchStart,
+    keyboardType: TextInputType.number,
+    inputFormatters: [
+      FilteringTextInputFormatter.digitsOnly,
+      LengthLimitingTextInputFormatter(4),
+      _TimeTextInputFormatter(),
+    ],
+    style: const TextStyle(color: Colors.white),
+    decoration: _timeInputDecoration('Başlangıç'),
+    onChanged: (value) => _lunchStart = value,
+  ),
+),
+
+const SizedBox(width: 10),
+
+Expanded(
+  child: TextFormField(
+    initialValue: _lunchEnd,
+    keyboardType: TextInputType.number,
+    inputFormatters: [
+      FilteringTextInputFormatter.digitsOnly,
+      LengthLimitingTextInputFormatter(4),
+      _TimeTextInputFormatter(),
+    ],
+    style: const TextStyle(color: Colors.white),
+    decoration: _timeInputDecoration('Bitiş'),
+    onChanged: (value) => _lunchEnd = value,
+  ),
+),
           ],
         ),
       ],

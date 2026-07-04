@@ -1073,8 +1073,6 @@ const SizedBox(height: 12),
 
             final className = data['className'] ?? '';
             final department = data['department'] ?? '';
-            final username = data['username'] ?? '';
-
             final selected = selectedStudentId == doc.id;
 
             return ListTile(
@@ -1090,7 +1088,7 @@ const SizedBox(height: 12),
                 style: const TextStyle(color: Colors.white),
               ),
               subtitle: Text(
-                '$className • $department\n$username',
+                '$className • $department',
                 style: const TextStyle(
                   color: Colors.white60,
                   fontSize: 12,
