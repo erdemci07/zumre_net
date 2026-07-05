@@ -22,7 +22,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   bool _isLoadingTeachers = false;
   bool _isInQueue = false;
-  bool _shownInProgressPopup = false;
   bool _isZumreOpenNow = false;
   bool _isLunchNow = false;
   bool _useSmartTeacherSelection = true;
@@ -410,10 +409,6 @@ void _listenToQueue(String queueId) {
           _getCurrentTeacherName(data['teacherId']);
         }
 
-        if (!_shownInProgressPopup) {
-          _shownInProgressPopup = true;
-          _showTeacherStartedPopup();
-        }
 
         return;
       }
@@ -422,7 +417,6 @@ void _listenToQueue(String queueId) {
 await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
     'activeQueueId': FieldValue.delete(),
   });
-  _shownInProgressPopup = false;
   
 
   if (mounted) {
@@ -448,7 +442,6 @@ await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
 }
 
       if (status == 'cancelled') {
-        _shownInProgressPopup = false;
 
         if (mounted) {
           setState(() {
@@ -738,7 +731,6 @@ if (!_isZumreOpenNow || _isLunchNow) {
         if (mounted) {
           setState(() {
             _isInQueue = false;
-            _shownInProgressPopup = false;
             _cooldownUntil = cooldownDate.millisecondsSinceEpoch;
             _remainingCooldownSeconds = 120;
             _currentQueueId = null;
@@ -803,85 +795,6 @@ void _hideSmartTeacherLoadingDialog() {
     Navigator.pop(context);
   }
 }
-
-  void _showTeacherStartedPopup() {
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          child: Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.16),
-                  blurRadius: 18,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 74,
-                  height: 74,
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade100,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.support_agent,
-                    size: 40,
-                    color: Colors.green.shade700,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Sıranız Geldi 🎉',
-                  style: TextStyle(
-                    fontSize: 21,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  '${_currentTeacherName ?? "Öğretmen"} sorunuzla ilgilenmeye başladı.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    color: Colors.black87,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 22),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: const Text('Tamam'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   void _showRatingDialog(String queueId) {
   int rating = 5;
   String comment = '';
@@ -1733,6 +1646,7 @@ return Center(
                   ],
                 ),
               ),
+              
             ],
 
             const SizedBox(height: 24),
@@ -1792,13 +1706,52 @@ return Center(
                 ),
               ),
             ),
-          ],
+            if (!isTeacherWorking) ...[
+  const SizedBox(height: 14),
+
+  Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(
+      horizontal: 14,
+      vertical: 10,
+    ),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.06),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(
+        color: Colors.white.withOpacity(0.08),
+      ),
+    ),
+    child: const Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '💡',
+          style: TextStyle(fontSize: 16),
+        ),
+        SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Sıranız gelene kadar çözemediğiniz soruları ve takıldığınız noktaları hazırlayın. Böylece öğretmeniniz size daha hızlı yardımcı olabilir.',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 12.5,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    ),
+  ),
+
+  const SizedBox(height: 14),
+]
+          ]
         ),
       ),
     ),
   );
 }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
