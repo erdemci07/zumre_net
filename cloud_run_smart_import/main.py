@@ -4,10 +4,18 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import auth, firestore
+from fastapi.middleware.cors import CORSMiddleware
 
 from smart_import_engine import analyze_excel
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 if not firebase_admin._apps:
     firebase_admin.initialize_app()

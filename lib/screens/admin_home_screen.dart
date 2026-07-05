@@ -960,6 +960,10 @@ Future<void> _generatePdfReport({
       );
     }
   }
+  Map<String, dynamic> _parseUtf8JsonResponse(http.Response response) {
+  final body = utf8.decode(response.bodyBytes);
+  return Map<String, dynamic>.from(jsonDecode(body));
+}
 
   Future<void> _pickEdesisFile(String type) async {
   const smartImportBaseUrl =
@@ -995,9 +999,7 @@ Future<void> _generatePdfReport({
     if (response.statusCode != 200) {
       throw Exception('Smart Import analiz hatası: ${response.body}');
     }
-
-    final analyzeData =
-        Map<String, dynamic>.from(jsonDecode(response.body));
+final analyzeData = _parseUtf8JsonResponse(response);
 
     if (!mounted) return;
     setState(() => _isImporting = false);
@@ -1032,9 +1034,7 @@ Future<void> _generatePdfReport({
     if (importResponse.statusCode != 200) {
       throw Exception('Smart Import aktarım hatası: ${importResponse.body}');
     }
-
-    final importData =
-        Map<String, dynamic>.from(jsonDecode(importResponse.body));
+final importData = _parseUtf8JsonResponse(importResponse);
 
     final summary = {
       'totalValid': importData['totalValid'] ?? 0,
