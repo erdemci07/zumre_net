@@ -749,7 +749,7 @@ Future<void> _loadTeacherAvailability() async {
       case 'break':
         return 'Molada';
       case 'absent':
-        return 'Gelmedi';
+        return 'Kurumda Değil';
       default:
         return 'Bilinmeyen';
     }
@@ -800,7 +800,7 @@ Future<void> _loadTeacherAvailability() async {
               ? 'Durumunuz müsait olarak güncellendi'
               : status == 'break'
                   ? 'Durumunuz molada olarak güncellendi'
-                  : 'Durumunuz gelmedi olarak güncellendi',
+                  : 'Durumunuz kurumda değil olarak güncellendi',
         ),
       ),
     );
@@ -1577,7 +1577,6 @@ Future<void> _resetAndTransferQueue({
         final estimatedMinutes = _toInt(data['estimatedMinutes'], fallback: 4);
         final extraMinutes = _toInt(data['extraMinutes']);
         final startedAt = data['startedAt'] as Timestamp?;
-        final isManual = data['isManual'] == true;
 
         _startActiveQuestionTimer(
           queueId: doc.id,
@@ -1586,190 +1585,152 @@ Future<void> _resetAndTransferQueue({
           extraMinutes: extraMinutes,
         );
 
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.10),
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: Colors.white.withOpacity(0.16)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 58,
-                    height: 58,
-                    decoration: BoxDecoration(
-                      color: Colors.greenAccent.withOpacity(0.16),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.support_agent,
-                      color: Colors.greenAccent,
-                      size: 32,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Aktif Soru',
-                          style: TextStyle(color: Colors.white70, fontSize: 14),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          data['studentName'] ?? 'Öğrenci',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          data['subject'] ?? 'Ders',
-                          style: const TextStyle(color: Colors.white60),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-
-SizedBox(
+       return Container(
   width: double.infinity,
-  height: 50,
-  child: OutlinedButton.icon(
-    onPressed: () async {
-      await _showTransferDialog(
-        queueId: doc.id,
-        subject: data['subject'] ?? 'Ders',
-        studentName: data['studentName'] ?? 'Öğrenci',
-      );
-    },
-    icon: const Icon(Icons.swap_horiz_rounded),
-    label: const Text('Devret'),
-    style: OutlinedButton.styleFrom(
-      foregroundColor: Colors.lightBlueAccent,
-      side: const BorderSide(color: Colors.lightBlueAccent),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-    ),
+  margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+  padding: const EdgeInsets.all(18),
+  decoration: BoxDecoration(
+    color: Colors.white.withOpacity(0.10),
+    borderRadius: BorderRadius.circular(24),
+    border: Border.all(color: Colors.white.withOpacity(0.15)),
   ),
-),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _miniTimeBox(
-                      title: 'Soru',
-                      value: '$questionCount',
-                      icon: Icons.menu_book,
-                    ),
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.greenAccent.withOpacity(0.16),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.support_agent,
+              color: Colors.greenAccent,
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Aktif Soru',
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+                Text(
+                  data['studentName'] ?? 'Öğrenci',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 19,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _miniTimeBox(
-                      title: 'Tahmini',
-                      value: '${estimatedMinutes + extraMinutes} dk',
-                      icon: Icons.timer,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _miniTimeBox(
-                      title: 'Geçen',
-                      value: _formatElapsed(_elapsedSeconds),
-                      icon: Icons.access_time,
-                    ),
-                  ),
-                ],
-              ),
-              if (isManual) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.18),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Text(
-                    'Öğretmen tarafından eklendi',
-                    style: TextStyle(
-                      color: Colors.orangeAccent,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                ),
+                Text(
+                  data['subject'] ?? 'Ders',
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
                 ),
               ],
-              const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-  final confirm = await _confirmAction(
-    title: 'Soru çözüldü mü?',
-    message: 'Bu öğrencinin sorusunu çözüldü olarak işaretlemek istiyor musunuz?',
-    confirmText: 'Çözüldü',
-  );
-
-  if (confirm) {
-    await _markAsSolved(doc.id);
-  }
-},
-                  icon: const Icon(Icons.check),
-                  label: const Text(
-                    'Çözüldü',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: OutlinedButton.icon(
-                 onPressed: () async {
-  final confirm = await _confirmAction(
-    title: 'Soru iptal edilsin mi?',
-    message: 'Bu aktif soruyu iptal etmek istiyor musunuz?',
-    confirmText: 'İptal Et',
-  );
-
-  if (confirm) {
-    await _cancelQueue(doc.id);
-  }
-},
-                  icon: const Icon(Icons.close),
-                  label: const Text('İptal Et'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.redAccent,
-                    side: const BorderSide(color: Colors.redAccent),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
-        );
+        ],
+      ),
+
+      const SizedBox(height: 14),
+
+      Row(
+        children: [
+          Expanded(
+            child: _miniTimeBox(
+              title: 'Soru',
+              value: '$questionCount',
+              icon: Icons.menu_book,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _miniTimeBox(
+              title: 'Tahmini',
+              value: '${estimatedMinutes + extraMinutes} dk',
+              icon: Icons.timer,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _miniTimeBox(
+              title: 'Geçen',
+              value: _formatElapsed(_elapsedSeconds),
+              icon: Icons.access_time,
+            ),
+          ),
+        ],
+      ),
+
+      const SizedBox(height: 16),
+
+      Row(
+        children: [
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final confirm = await _confirmAction(
+                  title: 'Soru çözüldü mü?',
+                  message:
+                      'Bu öğrencinin sorusunu çözüldü olarak işaretlemek istiyor musunuz?',
+                  confirmText: 'Çözüldü',
+                );
+
+                if (confirm) {
+                  await _markAsSolved(doc.id);
+                }
+              },
+              icon: const Icon(Icons.check, size: 18),
+              label: const Text('Çözüldü'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _compactQueueAction(
+            icon: Icons.swap_horiz_rounded,
+            color: Colors.lightBlueAccent,
+            tooltip: 'Devret',
+            onTap: () async {
+              await _showTransferDialog(
+                queueId: doc.id,
+                subject: data['subject'] ?? 'Ders',
+                studentName: data['studentName'] ?? 'Öğrenci',
+              );
+            },
+          ),
+          _compactQueueAction(
+            icon: Icons.close_rounded,
+            color: Colors.redAccent,
+            tooltip: 'İptal',
+            onTap: () async {
+              final confirm = await _confirmAction(
+                title: 'Soru iptal edilsin mi?',
+                message: 'Bu aktif soruyu iptal etmek istiyor musunuz?',
+                confirmText: 'İptal Et',
+              );
+
+              if (confirm) {
+                await _cancelQueue(doc.id);
+              }
+            },
+          ),
+        ],
+      ),
+    ],
+  ),
+);
       },
     );
   }
@@ -1949,6 +1910,7 @@ SizedBox(
                       children: [
                         ElevatedButton(
                           onPressed: () async {
+                            print('Başlat butonuna basıldı: ${doc.id}');
                             await _firestore
                                 .collection('queues')
                                 .doc(doc.id)
@@ -1956,6 +1918,7 @@ SizedBox(
                               'status': 'in_progress',
                               'startedAt': Timestamp.now(),
                             });
+                            print('Soru başlatıldı: ${doc.id}');
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
@@ -2020,6 +1983,29 @@ OutlinedButton.icon(
       },
     );
   }
+Widget _compactQueueAction({
+  required IconData icon,
+  required Color color,
+  required String tooltip,
+  required VoidCallback onTap,
+}) {
+  return Container(
+    width: 34,
+    height: 34,
+    margin: const EdgeInsets.only(left: 4),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.12),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: color.withOpacity(0.25)),
+    ),
+    child: IconButton(
+      padding: EdgeInsets.zero,
+      tooltip: tooltip,
+      icon: Icon(icon, color: color, size: 18),
+      onPressed: onTap,
+    ),
+  );
+}
 
   Widget _buildWaitingQueues() {
   return ListView(

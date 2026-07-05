@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pandas
+openpyxl
+rapidfuzz
+unidecode
+python-multipart
+firebase-admin

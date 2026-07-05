@@ -210,8 +210,7 @@ if (!isZumreOpen && slots.isNotEmpty) {
       return aStart.compareTo(bStart);
     });
 
-    nextZumreText = 'Başlangıç: ${futureSlots.first['start']}';
-  } else {
+nextZumreText = '${futureSlots.first['start']}';  } else {
     nextZumreText = isWeekend
         ? 'Bugünkü zümre tamamlandı'
         : 'Sonraki zümre yarın';
@@ -1091,7 +1090,7 @@ Widget _compactZumreInfoBadge() {
 
   if (active) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.greenAccent.withOpacity(0.14),
         borderRadius: BorderRadius.circular(999),
@@ -1112,7 +1111,7 @@ Widget _compactZumreInfoBadge() {
             'Zümre Aktif',
             style: TextStyle(
               color: Colors.greenAccent,
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -1122,7 +1121,7 @@ Widget _compactZumreInfoBadge() {
   }
 
   return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
       color: Colors.orangeAccent.withOpacity(0.14),
       borderRadius: BorderRadius.circular(999),
@@ -1141,11 +1140,11 @@ Widget _compactZumreInfoBadge() {
         const SizedBox(width: 5),
         Text(
           _nextZumreText.isEmpty
-              ? 'Zümre Kapalı'
-              : 'Sonraki Zümre: $_nextZumreText',
+    ? 'Zümre Kapalı'
+    : 'Sonraki: $_nextZumreText',
           style: const TextStyle(
             color: Colors.orangeAccent,
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -1158,8 +1157,8 @@ Widget _compactZumreInfoBadge() {
     shrinkWrap: true,
     physics: const NeverScrollableScrollPhysics(),
     crossAxisCount: 2,
-    crossAxisSpacing: 12,
-    mainAxisSpacing: 12,
+    crossAxisSpacing: 9,
+    mainAxisSpacing: 9,
     childAspectRatio: 1.8,
     children: [
       _subjectCard('Matematik', Icons.calculate, const Color(0xFF6C3DFF)),

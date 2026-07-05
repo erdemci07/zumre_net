@@ -962,81 +962,106 @@ Future<void> _generatePdfReport({
   }
 
   Future<void> _pickEdesisFile(String type) async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['csv', 'txt', 'xls', 'xlsx'],
-        withData: true,
-      );
+  const smartImportBaseUrl =
+      'https://zumrenet-smart-import-542741706921.us-central1.run.app';
 
-      if (result == null || result.files.single.bytes == null) return;
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv', 'txt', 'xls', 'xlsx'],
+      withData: true,
+    );
 
-      final file = result.files.single;
-      final fileBase64 = base64Encode(file.bytes!);
+    if (result == null || result.files.single.bytes == null) return;
 
-      if (!mounted) return;
+    final file = result.files.single;
+    final fileBase64 = base64Encode(file.bytes!);
 
-      setState(() => _isImporting = true);
+    if (!mounted) return;
+    setState(() => _isImporting = true);
 
-      final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
-      final analyzeCallable = functions.httpsCallable('analyzeEdesisFile');
-      
-      
-
-      final analyzeResult = await analyzeCallable.call({
+    final response = await http.post(
+      Uri.parse('$smartImportBaseUrl/analyze'),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
         'fileBase64': fileBase64,
         'fileName': file.name,
         'type': type,
-      });
+      }),
+    );
 
-      final analyzeData = Map<String, dynamic>.from(analyzeResult.data);
-
-      if (!mounted) return;
-
-      setState(() => _isImporting = false);
-
-      final confirm = await _showImportAnalysisDialog(
-        type: type,
-        data: analyzeData,
-      );
-
-      if (confirm != true) return;
-
-      if (!mounted) return;
-      setState(() => _isImporting = true);
-
-      final importCallable = functions.httpsCallable('importEdesisFile');
-
-      final importResult = await importCallable.call({
-        'fileBase64': fileBase64,
-        'fileName': file.name,
-        'type': type,
-      });
-
-      final importData = Map<String, dynamic>.from(importResult.data);
-      final summary =
-          Map<String, dynamic>.from(importData['importSummary'] ?? {});
-
-      if (!mounted) return;
-
-      setState(() => _isImporting = false);
-
-      await _showImportResultDialog(
-        importData: importData,
-        summary: summary,
-      );
-
-      await _loadStats();
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() => _isImporting = false);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Aktarım hatası: $e')),
-      );
+    if (response.statusCode != 200) {
+      throw Exception('Smart Import analiz hatası: ${response.body}');
     }
+
+    final analyzeData =
+        Map<String, dynamic>.from(jsonDecode(response.body));
+
+    if (!mounted) return;
+    setState(() => _isImporting = false);
+
+    final confirm = await _showImportAnalysisDialog(
+      type: type,
+      data: analyzeData,
+    );
+
+    if (confirm != true) return;
+
+    final validRows = List.from(analyzeData['validRows'] ?? []);
+
+    if (validRows.isEmpty) {
+      throw Exception('Aktarılacak geçerli kayıt bulunamadı.');
+    }
+
+    if (!mounted) return;
+    setState(() => _isImporting = true);
+
+    final importResponse = await http.post(
+      Uri.parse('$smartImportBaseUrl/import'),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'type': analyzeData['type'],
+        'validRows': validRows,
+      }),
+    );
+
+    if (importResponse.statusCode != 200) {
+      throw Exception('Smart Import aktarım hatası: ${importResponse.body}');
+    }
+
+    final importData =
+        Map<String, dynamic>.from(jsonDecode(importResponse.body));
+
+    final summary = {
+      'totalValid': importData['totalValid'] ?? 0,
+      'created': importData['created'] ?? 0,
+      'updated': importData['updated'] ?? 0,
+      'failed': importData['failed'] ?? 0,
+    };
+
+    if (!mounted) return;
+    setState(() => _isImporting = false);
+
+    await _showImportResultDialog(
+      importData: importData,
+      summary: summary,
+    );
+
+    await _loadStats();
+  } catch (e) {
+    if (!mounted) return;
+
+    setState(() => _isImporting = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Aktarım hatası: $e')),
+    );
   }
+}
 
   Future<bool?> _showImportAnalysisDialog({
     required String type,
@@ -2322,11 +2347,13 @@ final users = allUsers.where((doc) {
   }
 
   Future<void> _showUserDialog({
+    
     String? editingUid,
     Map<String, dynamic>? existingData,
   }) async {
     final isEditing = editingUid != null;
     final formKey = GlobalKey<FormState>();
+    const String domain = '@bilimkalesi.com';
 
     String email = existingData?['email'] ?? '';
     String password = '';
@@ -2355,12 +2382,23 @@ String username = existingData?['username'] ?? '';
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     TextFormField(
-                      initialValue: email,
-                      decoration: const InputDecoration(labelText: 'E-posta'),
-                      onChanged: (val) => email = val,
-                      validator: (val) =>
-                          val == null || val.isEmpty ? 'Email gerekli' : null,
-                    ),
+  initialValue: username,
+  decoration: const InputDecoration(
+    labelText: 'Kullanıcı Adı',
+    helperText: 'Girişte kullanılacak kullanıcı adıdır. E-posta otomatik oluşturulur.',
+    suffixText: '@bilimkalesi.com',
+  ),
+  onChanged: (val) {
+    username = val.trim().replaceAll(' ', '').toLowerCase();
+    email = '$username$domain';
+  },
+  validator: (val) {
+    if (val == null || val.trim().isEmpty) {
+      return 'Kullanıcı adı zorunlu';
+    }
+    return null;
+  },
+),
                     if (!isEditing) ...[
                       const SizedBox(height: 8),
                       TextFormField(
@@ -2411,6 +2449,32 @@ String username = existingData?['username'] ?? '';
                         setStateDialog(() => role = val);
                       },
                     ),
+                    if (role == 'student') ...[
+  const SizedBox(height: 8),
+  TextFormField(
+    initialValue: className,
+    decoration: const InputDecoration(labelText: 'Sınıf'),
+    onChanged: (val) => className = val.trim(),
+  ),
+  const SizedBox(height: 8),
+  TextFormField(
+    initialValue: branch,
+    decoration: const InputDecoration(labelText: 'Şube'),
+    onChanged: (val) => branch = val.trim(),
+  ),
+  const SizedBox(height: 8),
+  TextFormField(
+    initialValue: department,
+    decoration: const InputDecoration(labelText: 'Alan / Bölüm'),
+    onChanged: (val) => department = val.trim(),
+  ),
+  const SizedBox(height: 8),
+  TextFormField(
+    initialValue: studentNo,
+    decoration: const InputDecoration(labelText: 'Öğrenci No'),
+    onChanged: (val) => studentNo = val.trim(),
+  ),
+],
                     if (role == 'teacher') ...[
                       const SizedBox(height: 8),
                       Container(

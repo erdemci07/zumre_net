@@ -49,7 +49,7 @@ function hasRequiredFields(mapping, type) {
   const required =
     type === "teacher"
       ? ["name", "surname", "username", "password", "subjects"]
-      : ["name", "surname", "username", "password", "className", "subjects"];
+      : ["name", "surname", "username", "password", "className"];
 
   const missing = required.filter((field) => mapping[field] === undefined);
 
