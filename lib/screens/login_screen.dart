@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../auth/auth_service.dart';
@@ -46,6 +47,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final auth = Provider.of<AuthService>(context, listen: false);
     await auth.signIn(fullEmail, password);
+    TextInput.finishAutofillContext(shouldSave: true);
+
   } catch (e) {
     await FirebaseAuth.instance.signOut();
 
@@ -245,55 +248,74 @@ Widget build(BuildContext context) {
                   ),
                 ),
 
-                const SizedBox(height: 28),
+               const SizedBox(height: 28),
 
-                TextField(
-                  controller: _usernameController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'Kullanıcı Adı',
-                    labelStyle: const TextStyle(color: Colors.white70),
-                    suffixText: _domain,
-                    suffixStyle: const TextStyle(
-                      color: Colors.white38,
-                      fontStyle: FontStyle.italic,
-                    ),
-                    prefixIcon: const Icon(
-                      Icons.person_outline,
-                      color: Colors.white70,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.10),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  autocorrect: false,
-                ),
+AutofillGroup(
+  child: Column(
+    children: [
+      TextField(
+        controller: _usernameController,
+        autofillHints: const [
+          AutofillHints.username,
+          AutofillHints.email,
+        ],
+        keyboardType: TextInputType.emailAddress,
+        textInputAction: TextInputAction.next,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          labelText: 'Kullanıcı Adı',
+          labelStyle: const TextStyle(color: Colors.white70),
+          suffixText: _domain,
+          suffixStyle: const TextStyle(
+            color: Colors.white38,
+            fontStyle: FontStyle.italic,
+          ),
+          prefixIcon: const Icon(
+            Icons.person_outline,
+            color: Colors.white70,
+          ),
+          filled: true,
+          fillColor: Colors.white.withOpacity(0.10),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide.none,
+          ),
+        ),
+        autocorrect: false,
+        enableSuggestions: false,
+      ),
 
-                const SizedBox(height: 16),
+      const SizedBox(height: 16),
 
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'Şifre',
-                    labelStyle: const TextStyle(color: Colors.white70),
-                    prefixIcon: const Icon(
-                      Icons.lock_outline,
-                      color: Colors.white70,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.10),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-
+      TextField(
+        controller: _passwordController,
+        autofillHints: const [
+          AutofillHints.password,
+        ],
+        obscureText: true,
+        enableSuggestions: false,
+        autocorrect: false,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _login(),
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          labelText: 'Şifre',
+          labelStyle: const TextStyle(color: Colors.white70),
+          prefixIcon: const Icon(
+            Icons.lock_outline,
+            color: Colors.white70,
+          ),
+          filled: true,
+          fillColor: Colors.white.withOpacity(0.10),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    ],
+  ),
+),
                 const SizedBox(height: 24),
 
                 SizedBox(
