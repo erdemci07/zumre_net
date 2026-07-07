@@ -254,6 +254,35 @@ String _lunchEnd = '13:00';
   String _dateKey(DateTime date) {
     return '${date.day}/${date.month}';
   }
+  void _showExcelLoadingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        content: Row(
+          children: const [
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(),
+            ),
+            SizedBox(width: 18),
+            Expanded(
+              child: Text(
+                'Excel dosyası okunuyor...\n'
+                'Veri yoğunluğuna bağlı olarak bu işlem birkaç saniye sürebilir.',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  void _hideExcelLoadingDialog() {
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+  }
   void _showPdfLoadingDialog() {
   showDialog(
     context: context,
@@ -882,7 +911,7 @@ Future<void> _generatePdfReport({
 }
 
   Future<void> _loadStats() async {
-    if (mounted) setState(() => _isLoading = true);
+    //if (mounted) setState(() => _isLoading = true);
 
     try {
       final now = DateTime.now();
@@ -982,7 +1011,7 @@ Future<void> _generatePdfReport({
     final fileBase64 = base64Encode(file.bytes!);
 
     if (!mounted) return;
-    setState(() => _isImporting = true);
+    _showExcelLoadingDialog();
 
     final response = await http.post(
       Uri.parse('$smartImportBaseUrl/analyze'),
@@ -1002,7 +1031,7 @@ Future<void> _generatePdfReport({
 final analyzeData = _parseUtf8JsonResponse(response);
 
     if (!mounted) return;
-    setState(() => _isImporting = false);
+    _hideExcelLoadingDialog();
 
     final confirm = await _showImportAnalysisDialog(
       type: type,
@@ -1018,7 +1047,7 @@ final analyzeData = _parseUtf8JsonResponse(response);
     }
 
     if (!mounted) return;
-    setState(() => _isImporting = true);
+    _showExcelLoadingDialog();
 
     final importResponse = await http.post(
       Uri.parse('$smartImportBaseUrl/import'),
@@ -1044,7 +1073,7 @@ final importData = _parseUtf8JsonResponse(importResponse);
     };
 
     if (!mounted) return;
-    setState(() => _isImporting = false);
+    _hideExcelLoadingDialog();
 
     await _showImportResultDialog(
       importData: importData,
@@ -1055,7 +1084,7 @@ final importData = _parseUtf8JsonResponse(importResponse);
   } catch (e) {
     if (!mounted) return;
 
-    setState(() => _isImporting = false);
+    _hideExcelLoadingDialog();
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Aktarım hatası: $e')),
