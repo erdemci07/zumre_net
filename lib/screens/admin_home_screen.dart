@@ -241,6 +241,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
   bool _isImporting = false;
   final List<Map<String, String>> _weekdaySlots = [];
 final List<Map<String, String>> _weekendSlots = [];
+final List<Map<String, String>> _weekdayStudySlots = [];
+final List<Map<String, String>> _weekendStudySlots = [];
 
 String _lunchStart = '12:20';
 String _lunchEnd = '13:00';
@@ -1456,6 +1458,7 @@ type == 'student'
                       color: Colors.purpleAccent,
                       onTap: _showZumreScheduleDialog,
                     ),
+                    
                   ],
                 ),         
         ),
@@ -1484,6 +1487,7 @@ type == 'student'
       ],
     );
   }
+  
 
   Widget _sectionTitle(String title) {
     return Text(
@@ -1576,11 +1580,15 @@ type == 'student'
 
   _weekdaySlots.clear();
   _weekendSlots.clear();
+  _weekdayStudySlots.clear();
+_weekendStudySlots.clear();
 
   if (doc.exists) {
     final data = doc.data() ?? {};
     final weekday = List.from(data['weekdaySlots'] ?? []);
     final weekend = List.from(data['weekendSlots'] ?? []);
+    final weekdayStudy = List.from(data['weekdayStudySlots'] ?? []);
+final weekendStudy = List.from(data['weekendStudySlots'] ?? []);
     final lunch = Map<String, dynamic>.from(data['lunchBreak'] ?? {});
 
     _weekdaySlots.addAll(
@@ -1589,6 +1597,14 @@ type == 'student'
 
     _weekendSlots.addAll(
       weekend.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
+    );
+
+    _weekdayStudySlots.addAll(
+      weekdayStudy.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
+    );
+
+    _weekendStudySlots.addAll(
+      weekendStudy.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
     );
 
     _lunchStart = lunch['start'] ?? '12:20';
@@ -1617,7 +1633,7 @@ type == 'student'
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Zümre Saatleri Ayarı',
+                      'Saat Ayarları',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 22,
@@ -1657,6 +1673,36 @@ type == 'student'
                         setDialogState(() => _weekendSlots.removeAt(index));
                       },
                     ),
+                    
+_scheduleSection(
+  title: 'Hafta İçi Etüt Saatleri',
+  slots: _weekdayStudySlots,
+  color: Colors.cyanAccent,
+  onAdd: () {
+    setDialogState(() {
+      _weekdayStudySlots.add({'start': '17:00', 'end': '18:00'});
+    });
+  },
+  onDelete: (index) {
+    setDialogState(() => _weekdayStudySlots.removeAt(index));
+  },
+),
+
+const SizedBox(height: 16),
+
+_scheduleSection(
+  title: 'Hafta Sonu Etüt Saatleri',
+  slots: _weekendStudySlots,
+  color: Colors.pinkAccent,
+  onAdd: () {
+    setDialogState(() {
+      _weekendStudySlots.add({'start': '15:00', 'end': '16:00'});
+    });
+  },
+  onDelete: (index) {
+    setDialogState(() => _weekendStudySlots.removeAt(index));
+  },
+),
                     const SizedBox(height: 16),
                     _lunchSection(),
                     const SizedBox(height: 22),
@@ -1675,27 +1721,30 @@ type == 'student'
                               await _firestore
                                   .collection('settings')
                                   .doc('zumreSchedule')
-                                  .set({
-                                'weekdaySlots': _weekdaySlots,
-                                'weekendSlots': _weekendSlots,
-                                'lunchBreak': {
-                                  'start': _lunchStart,
-                                  'end': _lunchEnd,
-                                },
-                                'updatedAt': FieldValue.serverTimestamp(),
-                              });
+                                 .set({
+  'weekdaySlots': _weekdaySlots,
+  'weekendSlots': _weekendSlots,
+  'weekdayStudySlots': _weekdayStudySlots,
+  'weekendStudySlots': _weekendStudySlots,
+  'lunchBreak': {
+    'start': _lunchStart,
+    'end': _lunchEnd,
+  },
+  'updatedAt': FieldValue.serverTimestamp(),
+});
 
                               if (ctx.mounted) Navigator.pop(ctx);
 
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Zümre saatleri güncellendi'),
+                                  content: Text('Saatler güncellendi'),
                                 ),
                               );
                             },
                             child: const Text('Kaydet'),
                           ),
                         ),
+                        const SizedBox(height: 16),
                       ],
                     ),
                   ],
@@ -1802,6 +1851,7 @@ inputFormatters: [
     ),
   );
 }
+
 
 Widget _lunchSection() {
   return Container(
@@ -2150,7 +2200,21 @@ class _TimeTextInputFormatter extends TextInputFormatter {
 class _UserManagementPageState extends State<UserManagementPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  final List<String> _roles = ['admin', 'teacher', 'student'];
+  final List<String> _roles = ['admin', 'teacher', 'student', 'studyGuard'];
+  String _roleLabel(String role) {
+  switch (role) {
+    case 'admin':
+      return 'Yönetici';
+    case 'teacher':
+      return 'Öğretmen';
+    case 'student':
+      return 'Öğrenci';
+    case 'study_guard':
+      return 'Etüt Görevlisi';
+    default:
+      return role;
+  }
+}
   final List<String> _allSubjects = [
     'Matematik',
     'Fizik',
@@ -2331,7 +2395,7 @@ final users = allUsers.where((doc) {
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
-                                    '$role',
+                                    _roleLabel(role),
                                     style: TextStyle(
                                       color: roleColor,
                                       fontWeight: FontWeight.w600,

@@ -20,6 +20,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String? _selectedTeacherName;
   List<Map<String, dynamic>> _teachersForSubject = [];
 
+bool _isInStudySession = false;
   bool _isLoadingTeachers = false;
   bool _isInQueue = false;
   bool _isZumreOpenNow = false;
@@ -269,6 +270,7 @@ void dispose() {
         if (data['teacherId'] != null) {
           _getCurrentTeacherName(data['teacherId']);
         }
+        
 
         _listenToQueue(activeQueueId);
         return;
@@ -295,6 +297,7 @@ void dispose() {
 
       setState(() {
         _studentName = data?['name'] ?? data?['email'] ?? 'Öğrenci';
+        _isInStudySession = data?['isInStudySession'] == true;
       });
 
       final cooldownTimestamp = data?['cooldownUntil'] as Timestamp?;
@@ -520,17 +523,20 @@ Future<void> _loadTeachersForSubject(String subject) async {
         .where('subjects', arrayContains: subject)
         .get();
 
-    final teachers = snapshot.docs.map((doc) {
-      final data = doc.data();
+final teachers = snapshot.docs.where((doc) {
+  final data = doc.data();
 
-      return {
-        'id': doc.id,
-        'name': data['fullName'] ??
-            data['name'] ??
-            data['email'] ??
-            'Öğretmen',
-      };
-    }).toList();
+  if (data['activeStudyDutyId'] != null) return false;
+
+  return true;
+}).map((doc) {
+  final data = doc.data();
+
+  return {
+    'id': doc.id,
+    'name': data['fullName'] ?? data['name'] ?? 'Öğretmen',
+  };
+}).toList();
 
     if (mounted) {
       setState(() {
@@ -583,6 +589,23 @@ if (_useSmartTeacherSelection) {
   } finally {
     _hideSmartTeacherLoadingDialog();
   }
+}
+final studentDoc = await _firestore
+    .collection('users')
+    .doc(_auth.currentUser!.uid)
+    .get();
+
+final studentData = studentDoc.data() ?? {};
+
+if (studentData['isInStudySession'] == true) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text(
+        'Şu anda etütte görünüyorsunuz. Etüt bitince zümre sırası alabilirsiniz.',
+      ),
+    ),
+  );
+  return;
 }
     if (_selectedSubject == null ||
         _selectedSubject!.isEmpty ||
@@ -1290,6 +1313,23 @@ Widget _subjectCard(String title, IconData icon, Color color) {
 
         const SizedBox(height: 12),
 
+        if (_isInStudySession) ...[
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.orangeAccent.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.orangeAccent.withOpacity(0.25)),
+            ),
+            child: const Text(
+              'Şu anda etütte görünüyorsunuz. Etüt bitince zümre sırası alabilirsiniz.',
+              style: TextStyle(color: Colors.white70, fontSize: 12.5),
+            ),
+          ),
+        ],
+
         const Text(
           "Ders Seç",
           style: TextStyle(
@@ -1483,13 +1523,13 @@ Widget _buildTeacherSelector() {
 );
 }
 
-
 Widget _buildJoinQueueButton() {
- final canJoinQueue =
-    _selectedSubject != null &&
-    _remainingCooldownSeconds <= 0 &&
-    _isZumreOpenNow &&
-    !_isLunchNow;
+  final canJoinQueue =
+      _selectedSubject != null &&
+      _remainingCooldownSeconds <= 0 &&
+      _isZumreOpenNow &&
+      !_isLunchNow &&
+      !_isInStudySession;
 
   return SizedBox(
     width: double.infinity,
@@ -1514,6 +1554,7 @@ Widget _buildJoinQueueButton() {
     ),
   );
 }
+
 Widget _buildQueueView() {
   final bool isTeacherWorking = _queuePosition == 0;
 Container(

@@ -10,6 +10,7 @@ import 'package:zumre_net/screens/teacher_home_screen.dart';
 import 'package:zumre_net/auth/auth_service.dart';
 import 'package:zumre_net/screens/login_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:zumre_net/screens/study_guard_home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,6 +45,8 @@ class MyApp extends StatelessWidget {
       return const TeacherHomeScreen();
     } else if (role == 'admin') {
       return const AdminHomeScreen();
+    } else if (role == 'studyGuard') {
+      return const StudyGuardHomeScreen();
     } else {
       return const StudentHomeScreen();
     }

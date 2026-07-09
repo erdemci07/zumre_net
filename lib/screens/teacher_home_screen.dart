@@ -751,7 +751,7 @@ Future<void> _loadTeacherAvailability() async {
       case 'absent':
         return 'Kurumda Değil';
       default:
-        return 'Bilinmeyen';
+        return 'Etütte';
     }
   }
 
@@ -925,15 +925,17 @@ if (!canAddStudent) {
     final now = DateTime.now();
 
     final availableStudents = studentsSnapshot.docs.where((doc) {
-      final data = doc.data();
-      final cooldownUntil = data['cooldownUntil'] as Timestamp?;
-      final isInCooldown =
-          cooldownUntil != null && cooldownUntil.toDate().isAfter(now);
+  final data = doc.data();
 
-      final isInActiveQueue = activeStudentIds.contains(doc.id);
+  final cooldownUntil = data['cooldownUntil'] as Timestamp?;
+  final isInCooldown =
+      cooldownUntil != null && cooldownUntil.toDate().isAfter(now);
 
-      return !isInActiveQueue && !isInCooldown;
-    }).toList();
+  final isInActiveQueue = activeStudentIds.contains(doc.id);
+  final isInStudySession = data['isInStudySession'] == true;
+
+  return !isInActiveQueue && !isInCooldown && !isInStudySession;
+}).toList();
 
     if (availableStudents.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
