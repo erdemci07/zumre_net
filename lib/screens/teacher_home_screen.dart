@@ -1912,7 +1912,6 @@ Future<void> _resetAndTransferQueue({
                       children: [
                         ElevatedButton(
                           onPressed: () async {
-                            print('Başlat butonuna basıldı: ${doc.id}');
                             await _firestore
                                 .collection('queues')
                                 .doc(doc.id)
@@ -1920,7 +1919,6 @@ Future<void> _resetAndTransferQueue({
                               'status': 'in_progress',
                               'startedAt': Timestamp.now(),
                             });
-                            print('Soru başlatıldı: ${doc.id}');
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
@@ -2394,16 +2392,19 @@ _headerActionButton(
                           ),
                         ),
                         const SizedBox(height: 3),
-                        Text(
-                          _teacherName ?? 'Öğretmen',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: isNarrow ? 22 : 24,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                    FittedBox(
+  fit: BoxFit.scaleDown,
+  alignment: Alignment.centerLeft,
+  child: Text(
+    _teacherName ?? 'Öğretmen',
+    maxLines: 1,
+    style: const TextStyle(
+      color: Colors.white,
+      fontSize: 24,
+      fontWeight: FontWeight.bold,
+    ),
+  ),
+),
                         const SizedBox(height: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(

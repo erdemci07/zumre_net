@@ -1417,14 +1417,19 @@ Widget _buildWelcomeCard() {
         runSpacing: 6,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Text(
-            _studentName ?? 'Öğrenci',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 25,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+   FittedBox(
+  fit: BoxFit.scaleDown,
+  alignment: Alignment.centerLeft,
+  child: Text(
+    _studentName ?? 'Öğrenci',
+    maxLines: 1,
+    style: const TextStyle(
+      color: Colors.white,
+      fontSize: 25,
+      fontWeight: FontWeight.bold,
+    ),
+  ),
+),
 
           _compactZumreInfoBadge(),
         ],

@@ -1659,7 +1659,7 @@ final weekendStudy = List.from(data['weekendStudySlots'] ?? []);
                         setDialogState(() => _weekdaySlots.removeAt(index));
                       },
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
                     _scheduleSection(
                       title: 'Hafta Sonu Zümre Saatleri',
                       slots: _weekendSlots,
@@ -1688,7 +1688,7 @@ _scheduleSection(
   },
 ),
 
-const SizedBox(height: 16),
+const SizedBox(height: 20),
 
 _scheduleSection(
   title: 'Hafta Sonu Etüt Saatleri',

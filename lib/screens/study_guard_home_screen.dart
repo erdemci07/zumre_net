@@ -243,16 +243,19 @@ Future<void> _ensureActiveSession() async {
     try {
       final uid = _auth.currentUser!.uid;
 
-      final docRef = await _firestore.collection('studySessions').add({
-        'staffId': uid,
-        'staffName': _staffName ?? 'Etüt Görevlisi',
-        'staffRole': _staffRole ?? '',
-        'status': 'active',
-        'startedAt': Timestamp.now(),
-        'endedAt': null,
-        'studentCount': 0,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+final docRef = await _firestore.collection('studySessions').add({
+  'staffId': uid,
+  'staffName': _staffName ?? 'Etüt Görevlisi',
+  'staffRole': _staffRole ?? '',
+  'status': 'active',
+  'startedAt': Timestamp.now(),
+  'endedAt': null,
+  'studentCount': 0,
+  'dutyTeacherId': null,
+  'dutyTeacherName': null,
+  'dutyTeacherPreviousStatus': null,
+  'createdAt': FieldValue.serverTimestamp(),
+});
       if (!mounted) return;
 
       setState(() {
@@ -298,11 +301,18 @@ Future<void> _finishStudySessionSilently({
   });
 
   try {
-    final studentsSnapshot = await _firestore
-        .collection('studySessions')
-        .doc(sessionId)
-        .collection('students')
-        .get();
+    final sessionRef =
+        _firestore.collection('studySessions').doc(sessionId);
+
+    final sessionDoc = await sessionRef.get();
+    final sessionData = sessionDoc.data() ?? {};
+
+    final dutyTeacherId = sessionData['dutyTeacherId'];
+    final previousStatus =
+        sessionData['dutyTeacherPreviousStatus'] ?? 'available';
+
+    final studentsSnapshot =
+        await sessionRef.collection('students').get();
 
     final batch = _firestore.batch();
 
@@ -313,25 +323,26 @@ Future<void> _finishStudySessionSilently({
       });
     }
 
-    batch.update(_firestore.collection('studySessions').doc(sessionId), {
+    if (dutyTeacherId != null) {
+      batch.update(
+        _firestore.collection('users').doc(dutyTeacherId),
+        {
+          'teacherStatus': previousStatus,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+      );
+    }
+
+    batch.update(sessionRef, {
       'status': 'completed',
       'endedAt': Timestamp.now(),
       'autoEnded': autoEnded,
       'dutyTeacherId': null,
       'dutyTeacherName': null,
+      'dutyTeacherPreviousStatus': null,
       'studentCount': 0,
       'updatedAt': FieldValue.serverTimestamp(),
     });
-
-    if (_selectedDutyTeacherId != null) {
-      batch.update(
-        _firestore.collection('users').doc(_selectedDutyTeacherId),
-        {
-          'teacherStatus': 'available',
-          'updatedAt': FieldValue.serverTimestamp(),
-        },
-      );
-    }
 
     await batch.commit();
 
@@ -459,75 +470,120 @@ Future<void> _finishStudySessionSilently({
       SnackBar(content: Text(message)),
     );
   }
-  Widget _header() {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(22),
-      decoration: _cardDecoration(),
-      child: Row(
-        children: [
-          Container(
-            width: 62,
-            height: 62,
-            decoration: BoxDecoration(
-              color: Colors.cyanAccent.withOpacity(0.16),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.cyanAccent.withOpacity(0.35)),
-            ),
-            child: const Icon(
-              Icons.fact_check_rounded,
-              color: Colors.cyanAccent,
-              size: 32,
-            ),
+Widget _header() {
+  return Container(
+    margin: const EdgeInsets.all(16),
+    padding: const EdgeInsets.all(22),
+    decoration: _cardDecoration(),
+    child: Row(
+      children: [
+        Container(
+          width: 62,
+          height: 62,
+          decoration: BoxDecoration(
+            color: Colors.cyanAccent.withOpacity(0.16),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.cyanAccent.withOpacity(0.35)),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Hoş geldiniz',
-                  style: TextStyle(color: Colors.white60, fontSize: 13),
-                ),
-                Text(
+          child: const Icon(
+            Icons.fact_check_rounded,
+            color: Colors.cyanAccent,
+            size: 32,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Hoş geldiniz',
+                style: TextStyle(color: Colors.white60, fontSize: 13),
+              ),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
                   _staffName ?? 'Etüt Görevlisi',
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 23,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Etüt yoklaması ve öğrenci takibi',
-                  style: TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Etüt yoklaması ve öğrenci takibi',
+                style: TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              _studyStatusBadge(),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Column(
+          children: [
+            Tooltip(
+              message:
+                  'Kurumda branş öğretmeniyseniz seçiniz. Değilseniz boş bırakınız.',
+              child: InkWell(
+                onTap: _activeSessionId == null ? null : _showDutyTeacherDialog,
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: _selectedDutyTeacherId == null
+                        ? Colors.white.withOpacity(0.10)
+                        : Colors.cyanAccent.withOpacity(0.20),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _selectedDutyTeacherId == null
+                          ? Colors.white24
+                          : Colors.cyanAccent.withOpacity(0.50),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.supervisor_account_rounded,
+                    color: _selectedDutyTeacherId == null
+                        ? Colors.white70
+                        : Colors.cyanAccent,
+                  ),
                 ),
-                const SizedBox(height: 8),
-                _studyStatusBadge(),
-              ],
+              ),
             ),
+            const SizedBox(height: 6),
+            const Text(
+              'Öğretmen',
+              style: TextStyle(
+                color: Colors.white60,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: 'Çıkış Yap',
+          onPressed: () async => _auth.signOut(),
+          icon: const Icon(Icons.logout, color: Colors.white70),
+        ),
+        const Text(
+          'Çıkış',
+          style: TextStyle(
+            color: Colors.white60,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
           ),
-          IconButton(
-  tooltip: 'Etüt Öğretmeni Seç',
-  onPressed: _activeSessionId == null ? null : _showDutyTeacherDialog,
-  icon: Icon(
-    Icons.supervisor_account_rounded,
-    color: _selectedDutyTeacherId == null
-        ? Colors.white70
-        : Colors.cyanAccent,
-  ),
-),
-          IconButton(
-            tooltip: 'Çıkış Yap',
-            onPressed: () async => _auth.signOut(),
-            icon: const Icon(Icons.logout, color: Colors.white70),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _studyStatusBadge() {
     final active = _isStudyOpenNow;
@@ -999,20 +1055,33 @@ Future<void> _saveDutyTeacher({
 
     final batch = _firestore.batch();
 
-    // Önce eski seçili öğretmeni müsait yap
+    // Eski seçili öğretmeni eski durumuna döndür.
     if (_selectedDutyTeacherId != null &&
         _selectedDutyTeacherId != teacherId) {
+      final sessionDoc = await sessionRef.get();
+      final sessionData = sessionDoc.data() ?? {};
+      final previousStatus =
+          sessionData['dutyTeacherPreviousStatus'] ?? 'available';
+
       batch.update(
         _firestore.collection('users').doc(_selectedDutyTeacherId),
         {
-          'teacherStatus': 'available',
+          'teacherStatus': previousStatus,
           'updatedAt': FieldValue.serverTimestamp(),
         },
       );
     }
 
-    // Yeni öğretmen seçildiyse etüt görevlisi yap
+    String? previousStatus;
+
+    // Yeni öğretmen seçildiyse mevcut durumunu sakla, sonra studyGuard yap.
     if (teacherId != null) {
+      final teacherDoc =
+          await _firestore.collection('users').doc(teacherId).get();
+
+      final teacherData = teacherDoc.data() ?? {};
+      previousStatus = teacherData['teacherStatus'] ?? 'available';
+
       batch.update(
         _firestore.collection('users').doc(teacherId),
         {
@@ -1025,6 +1094,7 @@ Future<void> _saveDutyTeacher({
     batch.update(sessionRef, {
       'dutyTeacherId': teacherId,
       'dutyTeacherName': teacherName,
+      'dutyTeacherPreviousStatus': previousStatus,
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
@@ -1046,7 +1116,6 @@ Future<void> _saveDutyTeacher({
     _showSnack('Etüt öğretmeni kaydedilemedi: $e');
   }
 }
-
   Widget _inactiveInfoCard() {
     return Container(
       width: double.infinity,
@@ -1106,6 +1175,44 @@ Future<void> _saveDutyTeacher({
       ),
     );
   }
+  Widget _dutyTeacherReminderCard() {
+  if (!_isStudyOpenNow || _activeSessionId == null) {
+    return const SizedBox.shrink();
+  }
+
+  return Container(
+    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: Colors.cyanAccent.withOpacity(0.09),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.cyanAccent.withOpacity(0.22)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(
+          Icons.info_outline_rounded,
+          color: Colors.cyanAccent,
+          size: 20,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            _selectedDutyTeacherName == null
+                ? 'Kurumda branş öğretmeniyseniz üstteki öğretmen ikonundan kendinizi seçiniz. Öğretmen değilseniz ya da adınız listede yoksa boş bırakabilirsiniz.'
+                : 'Görevli öğretmen olarak $_selectedDutyTeacherName seçili. Gerekirse üstteki öğretmen ikonundan değiştirilebilir veya kaldırılabilir.',
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12.5,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
 Widget _studentSearch() {
   if (!_isStudyOpenNow || _activeSessionId == null) {
@@ -1467,43 +1574,54 @@ Widget _dialogStudentTile(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
-              ),
-              const SizedBox(height: 12),
-              ...students.map((doc) {
-                final data = doc.data() as Map<String, dynamic>;
+              ),const SizedBox(height: 12),
 
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: ListTile(
-                    leading: const Icon(
-                      Icons.check_circle,
-                      color: Colors.greenAccent,
-                    ),
-                    title: Text(
-                      data['studentName'] ?? 'Öğrenci',
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                    subtitle: Text(
-                      '${data['className'] ?? ''}-${data['branch'] ?? ''} • ${data['department'] ?? ''}',
-                      style: const TextStyle(color: Colors.white60),
-                    ),
-                    trailing: IconButton(
-                      icon: const Icon(
-                        Icons.close_rounded,
-                        color: Colors.redAccent,
-                      ),
-                      onPressed: _isProcessing
-                          ? null
-                          : () => _removeStudentFromStudy(doc.id),
-                    ),
-                  ),
-                );
-              }),
+SizedBox(
+  height: 260,
+  child: ListView.builder(
+    itemCount: students.length,
+    itemBuilder: (context, index) {
+      final doc = students[index];
+      final data = doc.data() as Map<String, dynamic>;
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: ListTile(
+          leading: const Icon(
+            Icons.check_circle,
+            color: Colors.greenAccent,
+          ),
+          title: Text(
+            data['studentName'] ?? 'Öğrenci',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white),
+          ),
+          subtitle: Text(
+            '${data['className'] ?? ''}-${data['branch'] ?? ''} • ${data['department'] ?? ''}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white60),
+          ),
+          trailing: IconButton(
+            icon: const Icon(
+              Icons.close_rounded,
+              color: Colors.redAccent,
+            ),
+            onPressed: _isProcessing
+                ? null
+                : () => _removeStudentFromStudy(doc.id),
+          ),
+        ),
+      );
+    },
+  ),
+),
             ],
           ),
         );
@@ -1548,6 +1666,7 @@ Widget _dialogStudentTile(
             children: [
               _header(),
               _sessionCard(),
+              _dutyTeacherReminderCard(),
               _studentSearch(),
               _currentStudents(),
             ],
