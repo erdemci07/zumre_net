@@ -10,6 +10,16 @@ from unidecode import unidecode
 
 
 DOMAIN = "@bilimkalesi.com"
+SUBJECT_MAP = {
+    "matematik": "MATEMATİK",
+    "fizik": "FİZİK",
+    "kimya": "KİMYA",
+    "biyoloji": "BİYOLOJİ",
+    "turkce": "TÜRKÇE",
+    "tarih": "TARİH",
+    "cografya": "COĞRAFYA",
+    "geometri": "GEOMETRİ",
+}
 
 
 STUDENT_ALIASES = {
@@ -179,10 +189,22 @@ def normalize_subjects(value: Any) -> List[str]:
     raw_parts = re.split(r"[,;/|]", text)
 
     subjects = []
+
     for part in raw_parts:
         item = part.strip()
-        if item:
-            subjects.append(item)
+
+        if not item:
+            continue
+
+        normalized_key = normalize_text(item)
+
+        standard_subject = SUBJECT_MAP.get(
+            normalized_key,
+            item,
+        )
+
+        if standard_subject not in subjects:
+            subjects.append(standard_subject)
 
     return subjects
 

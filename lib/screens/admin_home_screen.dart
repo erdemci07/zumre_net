@@ -27,7 +27,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   ];
 
   final List<String> _titles = const [
-    'Dashboard',
+    'Genel Bakış',
     'Kullanıcılar',
   ];
 
@@ -160,7 +160,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             _navItem(
               index: 0,
               icon: Icons.dashboard_rounded,
-              label: 'Dashboard',
+              label: 'Genel Bakış',
             ),
             _navItem(
               index: 1,
@@ -272,7 +272,7 @@ String _lunchEnd = '13:00';
             Expanded(
               child: Text(
                 'Excel dosyası okunuyor...\n'
-                'Veri yoğunluğuna bağlı olarak bu işlem birkaç saniye sürebilir.',
+                'Veri yoğunluğuna bağlı olarak bu işlem biraz sürebilir.',
               ),
             ),
           ],
@@ -301,7 +301,7 @@ String _lunchEnd = '13:00';
           Expanded(
             child: Text(
               'PDF raporu hazırlanıyor...\n'
-              'Veri yoğunluğuna bağlı olarak bu işlem birkaç saniye sürebilir.',
+              'Veri yoğunluğuna bağlı olarak bu işlem biraz sürebilir.',
             ),
           ),
         ],
@@ -644,11 +644,31 @@ Future<void> _generatePdfReport({
       .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
       .where('completedAt', isLessThan: Timestamp.fromDate(endDateExclusive))
       .get();
+      final studySnapshot = await _firestore
+    .collection('studySessions')
+    .where(
+      'startedAt',
+      isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
+    )
+    .where(
+      'startedAt',
+      isLessThan: Timestamp.fromDate(endDateExclusive),
+    )
+    .get();
 
   final Map<String, Map<String, dynamic>> studentMap = {};
   final Map<String, int> subjectTotals = {};
   final Set<String> teacherIds = {};
   final List<Map<String, dynamic>> historyRows = [];
+  final Map<String, Set<String>> subjectStudentIds = {};
+  final Map<String, Set<String>> subjectTeacherIds = {};  
+  final Set<String> uniqueStudyStudentIds = {};
+  final Map<String, int> studyAttendanceByStudent = {};
+  final Map<String, Map<String, dynamic>> studyStudentInfo = {};
+  final Map<String, int> studyHourlyDensity = {};
+  final List<Map<String, dynamic>> studySessionRows = [];
+
+int totalStudyAttendances = 0;
 
   String formatDate(DateTime date) {
     const months = [
@@ -704,6 +724,13 @@ Future<void> _generatePdfReport({
     studentMap[studentId]!['lastCompleted'] = completedAt;
 
     subjectTotals[subject] = (subjectTotals[subject] ?? 0) + questionCount;
+    subjectStudentIds.putIfAbsent(subject, () => <String>{});
+subjectStudentIds[subject]!.add(studentId);
+
+if (teacherId != null) {
+  subjectTeacherIds.putIfAbsent(subject, () => <String>{});
+  subjectTeacherIds[subject]!.add('$teacherId');
+}
 
     historyRows.add({
       'completedAt': completedAt,
@@ -722,9 +749,131 @@ Future<void> _generatePdfReport({
     if (bt is! Timestamp) return -1;
     return at.toDate().compareTo(bt.toDate());
   });
+  for (final sessionDoc in studySnapshot.docs) {
+  final sessionData = sessionDoc.data();
+
+  final startedAt = sessionData['startedAt'];
+  final endedAt = sessionData['endedAt'];
+  final dutyTeacherName =
+      sessionData['dutyTeacherName']?.toString() ?? '-';
+
+  final studentsSnapshot = await _firestore
+      .collection('studySessions')
+      .doc(sessionDoc.id)
+      .collection('students')
+      .get();
+
+  final sessionStudentCount = studentsSnapshot.docs.length;
+  totalStudyAttendances += sessionStudentCount;
+
+  if (startedAt is Timestamp) {
+    final startDateTime = startedAt.toDate();
+    final startHour = startDateTime.hour;
+    final endHour = (startHour + 1) % 24;
+
+    final hourLabel =
+        '${startHour.toString().padLeft(2, '0')}:00 - '
+        '${endHour.toString().padLeft(2, '0')}:00';
+
+    studyHourlyDensity[hourLabel] =
+        (studyHourlyDensity[hourLabel] ?? 0) + sessionStudentCount;
+  }
+
+  studySessionRows.add({
+    'startedAt': startedAt,
+    'endedAt': endedAt,
+    'studentCount': sessionStudentCount,
+    'dutyTeacherName': dutyTeacherName,
+  });
+
+  for (final studentDoc in studentsSnapshot.docs) {
+    final studentData = studentDoc.data();
+
+    final studentId =
+        studentData['studentId']?.toString() ?? studentDoc.id;
+
+    final studentName =
+        studentData['studentName']?.toString() ?? 'Öğrenci';
+
+    uniqueStudyStudentIds.add(studentId);
+
+    studyAttendanceByStudent[studentId] =
+        (studyAttendanceByStudent[studentId] ?? 0) + 1;
+
+    studyStudentInfo[studentId] = {
+      'studentName': studentName,
+      'className': studentData['className'] ?? '',
+      'branch': studentData['branch'] ?? '',
+      'department': studentData['department'] ?? '',
+    };
+  }
+}
 
   final totalQuestions = subjectTotals.values.fold<int>(0, (a, b) => a + b);
   final average = studentMap.isEmpty ? 0 : totalQuestions / studentMap.length;
+  final totalStudySessions = studySessionRows.length;
+
+final averageStudentsPerStudy = totalStudySessions == 0
+    ? 0.0
+    : totalStudyAttendances / totalStudySessions;
+
+String busiestStudyHour = '-';
+
+if (studyHourlyDensity.isNotEmpty) {
+  final busiestEntry = studyHourlyDensity.entries.reduce(
+    (a, b) => a.value >= b.value ? a : b,
+  );
+
+  busiestStudyHour = busiestEntry.key;
+}
+
+// Zümre + etüt birleşik öğrenci aktivitesi
+final Set<String> allActiveStudentIds = {
+  ...studentMap.keys,
+  ...studyAttendanceByStudent.keys,
+};
+
+final List<Map<String, dynamic>> activeStudentRows =
+    allActiveStudentIds.map((studentId) {
+  final queueStudent = studentMap[studentId];
+  final studyStudent = studyStudentInfo[studentId];
+
+  final solvedQuestions =
+      (queueStudent?['total'] as num?)?.toInt() ?? 0;
+
+  final studyCount = studyAttendanceByStudent[studentId] ?? 0;
+
+  return {
+    'studentId': studentId,
+    'studentName':
+        queueStudent?['studentName'] ??
+        studyStudent?['studentName'] ??
+        'Öğrenci',
+    'className':
+        queueStudent?['className'] ??
+        studyStudent?['className'] ??
+        '',
+    'branch':
+        queueStudent?['branch'] ??
+        studyStudent?['branch'] ??
+        '',
+    'department':
+        queueStudent?['department'] ??
+        studyStudent?['department'] ??
+        '',
+    'solvedQuestions': solvedQuestions,
+    'studyCount': studyCount,
+    'activityScore': solvedQuestions + studyCount,
+  };
+}).toList();
+
+activeStudentRows.sort(
+  (a, b) => (b['activityScore'] as int)
+      .compareTo(a['activityScore'] as int),
+);
+final sortedStudyHourlyEntries =
+    studyHourlyDensity.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
 
   final pdf = pw.Document(
     theme: pw.ThemeData.withFont(base: regularFont, bold: boldFont),
@@ -798,6 +947,56 @@ Future<void> _generatePdfReport({
       ),
     );
   }
+  pw.Widget studyDensityBar(String hour, int value) {
+  final maxValue = studyHourlyDensity.values.isEmpty
+      ? 1
+      : studyHourlyDensity.values.reduce(
+          (a, b) => a > b ? a : b,
+        );
+
+  final percent = maxValue == 0 ? 0.0 : value / maxValue;
+
+  return pw.Padding(
+    padding: const pw.EdgeInsets.only(bottom: 8),
+    child: pw.Row(
+      children: [
+        pw.SizedBox(
+          width: 90,
+          child: pw.Text(
+            hour,
+            style: const pw.TextStyle(fontSize: 8),
+          ),
+        ),
+        pw.Expanded(
+          child: pw.LayoutBuilder(
+            builder: (context, constraints) {
+              return pw.Container(
+                height: 10,
+                color: PdfColors.teal50,
+                child: pw.Align(
+                  alignment: pw.Alignment.centerLeft,
+                  child: pw.Container(
+                    width: constraints!.maxWidth * percent,
+                    height: 10,
+                    color: PdfColors.teal600,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        pw.SizedBox(width: 8),
+        pw.Text(
+          '$value',
+          style: pw.TextStyle(
+            fontSize: 9,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   final fileName =
       '${fileNamePrefix}_${startDate.year}_${startDate.month}_${startDate.day}.pdf';
@@ -858,6 +1057,203 @@ Future<void> _generatePdfReport({
           pw.Text('Bu tarih aralığında çözülen soru bulunamadı.')
         else
           ...subjectTotals.entries.map((e) => subjectBar(e.key, e.value)),
+
+pw.Text(
+  'Etüt Analizi',
+  style: pw.TextStyle(
+    fontSize: 20,
+    fontWeight: pw.FontWeight.bold,
+    color: PdfColors.teal800,
+  ),
+),
+
+pw.SizedBox(height: 14),
+
+pw.Row(
+  children: [
+    pw.Expanded(
+      child: statBox(
+        'Etüt Oturumu',
+        '$totalStudySessions',
+      ),
+    ),
+    pw.SizedBox(width: 8),
+    pw.Expanded(
+      child: statBox(
+        'Farklı Öğrenci',
+        '${uniqueStudyStudentIds.length}',
+      ),
+    ),
+    pw.SizedBox(width: 8),
+    pw.Expanded(
+      child: statBox(
+        'Toplam Katılım',
+        '$totalStudyAttendances',
+      ),
+    ),
+    pw.SizedBox(width: 8),
+    pw.Expanded(
+      child: statBox(
+        'Ort. Öğrenci',
+        averageStudentsPerStudy.toStringAsFixed(1),
+      ),
+    ),
+  ],
+),
+
+pw.SizedBox(height: 18),
+
+pw.Container(
+  width: double.infinity,
+  padding: const pw.EdgeInsets.all(12),
+  decoration: pw.BoxDecoration(
+    color: PdfColors.teal50,
+    borderRadius: pw.BorderRadius.circular(8),
+    border: pw.Border.all(color: PdfColors.teal200),
+  ),
+  child: pw.Row(
+    children: [
+      pw.Text(
+        'En yoğun saat: ',
+        style: pw.TextStyle(
+          fontWeight: pw.FontWeight.bold,
+          color: PdfColors.teal900,
+        ),
+      ),
+      pw.Text(
+        busiestStudyHour,
+        style: const pw.TextStyle(
+          color: PdfColors.teal900,
+        ),
+      ),
+    ],
+  ),
+),
+
+pw.SizedBox(height: 20),
+
+pw.Text(
+  'Saatlere Göre Etüt Yoğunluğu',
+  style: pw.TextStyle(
+    fontSize: 16,
+    fontWeight: pw.FontWeight.bold,
+  ),
+),
+
+pw.SizedBox(height: 10),
+
+if (sortedStudyHourlyEntries.isEmpty)
+  pw.Text(
+    'Bu tarih aralığında etüt kaydı bulunamadı.',
+    style: const pw.TextStyle(fontSize: 10),
+  )
+else
+  ...sortedStudyHourlyEntries.map(
+    (entry) => studyDensityBar(
+      entry.key,
+      entry.value,
+    ),
+  ),
+
+pw.SizedBox(height: 20),
+
+pw.Text(
+  'Etüt Oturumları',
+  style: pw.TextStyle(
+    fontSize: 16,
+    fontWeight: pw.FontWeight.bold,
+  ),
+),
+
+pw.SizedBox(height: 8),
+
+if (studySessionRows.isEmpty)
+  pw.Text('Etüt oturumu bulunamadı.')
+else
+  pw.Table.fromTextArray(
+    headers: [
+      'Başlangıç',
+      'Bitiş',
+      'Öğrenci',
+      'Görevli Öğretmen',
+    ],
+    data: studySessionRows.map((session) {
+      return [
+        shortDateTime(session['startedAt']),
+        shortDateTime(session['endedAt']),
+        '${session['studentCount']}',
+        session['dutyTeacherName'],
+      ];
+    }).toList(),
+    headerDecoration: const pw.BoxDecoration(
+      color: PdfColors.teal100,
+    ),
+    headerStyle: pw.TextStyle(
+      fontWeight: pw.FontWeight.bold,
+      fontSize: 8,
+    ),
+    cellStyle: const pw.TextStyle(fontSize: 7.5),
+    cellPadding: const pw.EdgeInsets.all(5),
+  ),
+  pw.SizedBox(height: 20),
+
+pw.Text(
+  'Öğrenci Aktivite Analizi',
+  style: pw.TextStyle(
+    fontSize: 20,
+    fontWeight: pw.FontWeight.bold,
+    color: PdfColors.blue900,
+  ),
+),
+
+pw.SizedBox(height: 6),
+
+pw.Text(
+  'Zümre soru çözümü ve etüt katılımının birlikte özeti',
+  style: const pw.TextStyle(
+    fontSize: 10,
+    color: PdfColors.blueGrey700,
+  ),
+),
+
+pw.SizedBox(height: 14),
+
+if (activeStudentRows.isEmpty)
+  pw.Text('Bu tarih aralığında öğrenci aktivitesi bulunamadı.')
+else
+  pw.Table.fromTextArray(
+    headers: [
+      'Öğrenci',
+      'Sınıf',
+      'Alan',
+      'Çözülen Soru',
+      'Etüt',
+      'Aktivite',
+    ],
+    data: activeStudentRows.take(25).map((student) {
+      final classText =
+          '${student['className']}'
+          '${student['branch'].toString().isNotEmpty ? '-${student['branch']}' : ''}';
+
+      return [
+        student['studentName'],
+        classText,
+        student['department'],
+        '${student['solvedQuestions']}',
+        '${student['studyCount']}',
+        '${student['activityScore']}',
+      ];
+    }).toList(),
+    headerDecoration: const pw.BoxDecoration(
+      color: PdfColors.blueGrey100,
+    ),
+    headerStyle: pw.TextStyle(
+      fontWeight: pw.FontWeight.bold,
+      fontSize: 8,
+    ),
+    cellStyle: const pw.TextStyle(fontSize: 7.5),
+    cellPadding: const pw.EdgeInsets.all(5),
+  ),
         pw.SizedBox(height: 22),
         pw.Text('Öğrenci Kullanım Özeti',
             style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
@@ -913,8 +1309,6 @@ Future<void> _generatePdfReport({
 }
 
   Future<void> _loadStats() async {
-    //if (mounted) setState(() => _isLoading = true);
-
     try {
       final now = DateTime.now();
       final todayStart = DateTime(now.year, now.month, now.day);
@@ -1453,7 +1847,7 @@ type == 'student'
                                         const SizedBox(height: 12),
                     _quickActionCard(
                       icon: Icons.schedule_rounded,
-                      title: 'Zümre Saatleri',
+                      title: 'Çalışma Saatleri',
                       subtitle: 'Hafta içi, hafta sonu ve öğle arası vakitleri ayarlanır',
                       color: Colors.purpleAccent,
                       onTap: _showZumreScheduleDialog,
@@ -1633,7 +2027,7 @@ final weekendStudy = List.from(data['weekendStudySlots'] ?? []);
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Saat Ayarları',
+                      'Zaman Yönetimi',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 22,
@@ -1642,7 +2036,7 @@ final weekendStudy = List.from(data['weekendStudySlots'] ?? []);
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Öğrenci sıra alma ve öğretmen öğrenci ekleme bu saatlere göre çalışır.',
+                      'Zümre, etüt ve öğle arası vakitlerini yönetin',
                       style: TextStyle(color: Colors.white60),
                     ),
                     const SizedBox(height: 20),
@@ -1673,6 +2067,7 @@ final weekendStudy = List.from(data['weekendStudySlots'] ?? []);
                         setDialogState(() => _weekendSlots.removeAt(index));
                       },
                     ),
+                    const SizedBox(height: 20),
                     
 _scheduleSection(
   title: 'Hafta İçi Etüt Saatleri',
@@ -2216,16 +2611,15 @@ class _UserManagementPageState extends State<UserManagementPage> {
   }
 }
   final List<String> _allSubjects = [
-    'Matematik',
-    'Fizik',
-    'Kimya',
-    'Biyoloji',
-    'Türkçe',
-    'Tarih',
-    'Coğrafya',
-    'Geometri',
+    'MATEMATİK',
+    'FİZİK',
+    'KİMYA',
+    'BİYOLOJİ',
+    'TÜRKÇE',
+    'TARİH',
+    'COĞRAFYA',
+    'GEOMETRİ',
   ];
-
   bool _isLoading = false;
   String _userSearchQuery = '';
 
@@ -2467,33 +2861,40 @@ String role =
 if (!_roles.contains(role)) {
   role = 'student';
 }
-
 final List<String> selectedSubjects = [];
 
 final rawSubjects = existingData?['subjects'];
 
 if (rawSubjects is List) {
-  selectedSubjects.addAll(
-    rawSubjects
-        .map((e) => e.toString().trim())
-        .where((e) => e.isNotEmpty),
-  );
+  for (final item in rawSubjects) {
+    final value = item.toString().trim();
+
+    if (value.isNotEmpty) {
+      selectedSubjects.add((value),
+      );
+    }
+  }
 } else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
-  selectedSubjects.addAll(
-    rawSubjects
-        .split(RegExp(r'[,;/|]'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty),
-  );
+  final parts = rawSubjects.split(RegExp(r'[,;/|]'));
+
+  for (final item in parts) {
+    final value = item.trim();
+
+    if (value.isNotEmpty) {
+      selectedSubjects.add((value)
+      );
+    }
+  }
 }
 
-final legacyBranch = existingData?['branch']?.toString().trim();
+final String? legacyBranch = existingData?['branch']?.toString().trim();
 
 if (role == 'teacher' &&
     selectedSubjects.isEmpty &&
     legacyBranch != null &&
     legacyBranch.isNotEmpty) {
-  selectedSubjects.add(legacyBranch);
+  selectedSubjects.add(legacyBranch
+  );
 }
     await showDialog(
       context: context,
@@ -2656,34 +3057,22 @@ if (role == 'teacher') ...[
         ),
         const SizedBox(height: 8),
         ..._allSubjects.map((final subject) {
-          final normalizedSubject =
-              subject.trim().toLowerCase();
-
-          final isSelected = selectedSubjects.any(
-            (selected) =>
-                selected.trim().toLowerCase() ==
-                normalizedSubject,
-          );
 
           return CheckboxListTile(
             contentPadding: EdgeInsets.zero,
             dense: true,
             controlAffinity: ListTileControlAffinity.leading,
             title: Text(subject),
-            value: isSelected,
-            onChanged: (checked) {
-              setStateDialog(() {
-                selectedSubjects.removeWhere(
-                  (selected) =>
-                      selected.trim().toLowerCase() ==
-                      normalizedSubject,
-                );
-
-                if (checked == true) {
-                  selectedSubjects.add(subject);
-                }
-              });
-            },
+            value: selectedSubjects.contains(subject),
+onChanged: (checked) {
+  setStateDialog(() {
+    if (checked == true) {
+      selectedSubjects.add(subject);
+    } else {
+      selectedSubjects.remove(subject);
+    }
+  });
+},
           );
         }),
       ],

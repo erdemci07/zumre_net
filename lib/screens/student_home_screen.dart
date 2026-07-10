@@ -75,7 +75,7 @@ bool _isNowInSlots(DateTime now, List<Map<String, dynamic>> slots) {
     final start = _timeToMinutes('${slot['start']}');
     final end = _timeToMinutes('${slot['end']}');
 
-    if (nowMinutes >= start && nowMinutes <= end) {
+    if (nowMinutes >= start && nowMinutes < end) {
       return true;
     }
   }
@@ -213,7 +213,7 @@ if (!isZumreOpen && slots.isNotEmpty) {
 nextZumreText = '${futureSlots.first['start']}';  } else {
     nextZumreText = isWeekend
         ? 'Bugünkü zümre tamamlandı'
-        : 'Sonraki zümre yarın';
+        : 'Yarın zümre ${slots.first['start']}\'te başlıyor';
   }
 }
 

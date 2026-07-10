@@ -121,7 +121,7 @@ bool _isNowInSlots(
   continue;
 }
 
-if (nowMinutes >= start && nowMinutes <= end) {
+if (nowMinutes >= start && nowMinutes < end) {
   return true;
 }
   }

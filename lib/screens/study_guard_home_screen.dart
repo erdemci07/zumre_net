@@ -39,10 +39,16 @@ String _studyScheduleMessage = 'Etüt saatleri yönetici panelindeki programa g�
   Future<void> _initPage() async {
     await _loadStaffInfo();
     await _checkStudySchedule();
+    if (_isStudyOpenNow){
+      await _loadActiveSession();
+      await _ensureActiveSession();
+    } else {
+      await _finishStudySessionSilently(autoEnded: true);
+    }
     await _loadActiveSession();
 
     _scheduleTimer = Timer.periodic(
-      const Duration(seconds: 10),
+      const Duration(seconds: 4),
       (_) => _checkStudySchedule(),
     );
   }
@@ -107,25 +113,25 @@ String _studyScheduleMessage = 'Etüt saatleri yönetici panelindeki programa g�
     return hour * 60 + minute;
   }
 
-  bool _isNowInSlots(
-    DateTime now,
-    List<Map<String, dynamic>> slots,
-  ) {
-    final nowMinutes = now.hour * 60 + now.minute;
+bool _isNowInSlots(
+  DateTime now,
+  List<Map<String, dynamic>> slots,
+) {
+  final nowMinutes = now.hour * 60 + now.minute;
 
-    for (final slot in slots) {
-      final start = _timeToMinutes('${slot['start']}');
-      final end = _timeToMinutes('${slot['end']}');
+  for (final slot in slots) {
+    final start = _timeToMinutes('${slot['start']}');
+    final end = _timeToMinutes('${slot['end']}');
 
-      if (end <= start) continue;
+    if (end <= start) continue;
 
-      if (nowMinutes >= start && nowMinutes <= end) {
-        return true;
-      }
+    if (nowMinutes >= start && nowMinutes < end) {
+      return true;
     }
-
-    return false;
   }
+
+  return false;
+}
 
 Future<void> _checkStudySchedule() async {
   try {
@@ -168,12 +174,13 @@ for (final slot in slots) {
   final endMin = _timeToMinutes(end);
   final nowMin = now.hour * 60 + now.minute;
 
-  if (endMin > startMin && nowMin >= startMin && nowMin <= endMin) {
+  if (endMin > startMin &&
+      nowMin >= startMin &&
+      nowMin < endMin) {
     slotText = '$start - $end';
     break;
   }
 }
-    
 
     if (!mounted) return;
 
@@ -316,12 +323,22 @@ Future<void> _finishStudySessionSilently({
 
     final batch = _firestore.batch();
 
-    for (final doc in studentsSnapshot.docs) {
-      batch.update(_firestore.collection('users').doc(doc.id), {
-        'isInStudySession': false,
-        'activeStudySessionId': null,
-      });
-    }
+for (final doc in studentsSnapshot.docs) {
+  final data = doc.data();
+  final status = data['status']?.toString() ?? 'present';
+
+  batch.update(_firestore.collection('users').doc(doc.id), {
+    'isInStudySession': false,
+    'activeStudySessionId': null,
+  });
+
+  if (status == 'present') {
+    batch.update(doc.reference, {
+      'status': 'completed',
+      'checkedOutAt': Timestamp.now(),
+    });
+  }
+}
 
     if (dutyTeacherId != null) {
       batch.update(
@@ -340,7 +357,6 @@ Future<void> _finishStudySessionSilently({
       'dutyTeacherId': null,
       'dutyTeacherName': null,
       'dutyTeacherPreviousStatus': null,
-      'studentCount': 0,
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
@@ -446,13 +462,17 @@ Future<void> _finishStudySessionSilently({
       'activeStudySessionId': null,
     });
 
-    batch.delete(
-      _firestore
-          .collection('studySessions')
-          .doc(sessionId)
-          .collection('students')
-          .doc(studentId),
-    );
+batch.update(
+  _firestore
+      .collection('studySessions')
+      .doc(sessionId)
+      .collection('students')
+      .doc(studentId),
+  {
+    'status': 'left',
+    'checkedOutAt': Timestamp.now(),
+  },
+);
 
     batch.update(_firestore.collection('studySessions').doc(sessionId), {
       'studentCount': FieldValue.increment(-1),
@@ -566,6 +586,7 @@ Widget _header() {
             ),
           ],
         ),
+        const SizedBox(width: 10),
 Column(
   children: [
     Tooltip(
@@ -643,7 +664,9 @@ Column(
   }
 
   Widget _sessionCard() {
-    final active = _activeSessionId != null;
+    final active =
+    _isStudyOpenNow &&
+    _activeSessionId != null;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -1074,7 +1097,6 @@ Future<void> _saveDutyTeacher({
 
     final batch = _firestore.batch();
 
-    // Eski seçili öğretmeni eski durumuna döndür.
     if (_selectedDutyTeacherId != null &&
         _selectedDutyTeacherId != teacherId) {
       final sessionDoc = await sessionRef.get();
@@ -1566,6 +1588,7 @@ Widget _dialogStudentTile(
         if (!snapshot.hasData) return const SizedBox.shrink();
 
         final students = snapshot.data!.docs;
+        
 
         if (students.isEmpty) {
           return Container(

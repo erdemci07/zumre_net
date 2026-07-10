@@ -240,7 +240,7 @@ Widget build(BuildContext context) {
                 const SizedBox(height: 6),
 
                 const Text(
-                  'Bilim Kalesi Eğitim Kurumları için\nakıllı zümre sıra sistemi',
+                  'Bilim Kalesi Eğitim Kurumları için\nAkıllı Zümre ve Etüt Yönetim Sistemi',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white70,
