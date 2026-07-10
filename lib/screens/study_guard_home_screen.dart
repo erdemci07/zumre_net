@@ -566,20 +566,39 @@ Widget _header() {
             ),
           ],
         ),
-        const SizedBox(width: 8),
-        IconButton(
-          tooltip: 'Çıkış Yap',
-          onPressed: () async => _auth.signOut(),
-          icon: const Icon(Icons.logout, color: Colors.white70),
-        ),
-        const Text(
-          'Çıkış',
-          style: TextStyle(
-            color: Colors.white60,
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
+Column(
+  children: [
+    Tooltip(
+      message: 'Çıkış Yap',
+      child: InkWell(
+        onTap: () async => _auth.signOut(),
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: const Icon(
+            Icons.logout_rounded,
+            color: Colors.white70,
           ),
         ),
+      ),
+    ),
+    const SizedBox(height: 6),
+    const Text(
+      'Çıkış Yap',
+      style: TextStyle(
+        color: Colors.white60,
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  ],
+),
       ],
     ),
   );
@@ -1201,10 +1220,10 @@ Future<void> _saveDutyTeacher({
           child: Text(
             _selectedDutyTeacherName == null
                 ? 'Kurumda branş öğretmeniyseniz üstteki öğretmen ikonundan kendinizi seçiniz. Öğretmen değilseniz ya da adınız listede yoksa boş bırakabilirsiniz.'
-                : 'Görevli öğretmen olarak $_selectedDutyTeacherName seçili. Gerekirse üstteki öğretmen ikonundan değiştirilebilir veya kaldırılabilir.',
+                : 'Görevli öğretmen olarak $_selectedDutyTeacherName seçili. Gerekirse üstteki öğretmen ikonundan değiştirilebilir veya kaldırılabilirsiniz.',
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 12.5,
+              fontSize: 14,
               height: 1.35,
             ),
           ),

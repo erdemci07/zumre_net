@@ -2202,14 +2202,14 @@ class _UserManagementPageState extends State<UserManagementPage> {
 
   final List<String> _roles = ['admin', 'teacher', 'student', 'studyGuard'];
   String _roleLabel(String role) {
-  switch (role) {
+  switch (role.trim()) {
     case 'admin':
       return 'Yönetici';
     case 'teacher':
       return 'Öğretmen';
     case 'student':
       return 'Öğrenci';
-    case 'study_guard':
+    case 'studyGuard':
       return 'Etüt Görevlisi';
     default:
       return role;
@@ -2449,19 +2449,52 @@ final users = allUsers.where((doc) {
     const String domain = '@bilimkalesi.com';
 
     String email = existingData?['email'] ?? '';
-    String password = '';
-    String newPassword = '';
-    String name = existingData?['fullName'] ?? existingData?['name'] ?? '';
-    String role = existingData?['role'] ?? 'student';
-    String className = existingData?['className'] ?? '';
-String branch = existingData?['branch'] ?? '';
-String department = existingData?['department'] ?? '';
-String studentNo = existingData?['studentNo'] ?? '';
-String username = existingData?['username'] ?? '';
-    List<String> selectedSubjects = existingData?['subjects'] != null
-        ? List<String>.from(existingData?['subjects'])
-        : [];
+String password = '';
+String newPassword = '';
 
+String firstName = existingData?['name']?.toString() ?? '';
+String surname = existingData?['surname']?.toString() ?? '';
+
+String className = existingData?['className']?.toString() ?? '';
+String branch = existingData?['branch']?.toString() ?? '';
+String department = existingData?['department']?.toString() ?? '';
+String studentNo = existingData?['studentNo']?.toString() ?? '';
+String username = existingData?['username']?.toString() ?? '';
+
+String role =
+    existingData?['role']?.toString().trim() ?? 'student';
+
+if (!_roles.contains(role)) {
+  role = 'student';
+}
+
+final List<String> selectedSubjects = [];
+
+final rawSubjects = existingData?['subjects'];
+
+if (rawSubjects is List) {
+  selectedSubjects.addAll(
+    rawSubjects
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty),
+  );
+} else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
+  selectedSubjects.addAll(
+    rawSubjects
+        .split(RegExp(r'[,;/|]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty),
+  );
+}
+
+final legacyBranch = existingData?['branch']?.toString().trim();
+
+if (role == 'teacher' &&
+    selectedSubjects.isEmpty &&
+    legacyBranch != null &&
+    legacyBranch.isNotEmpty) {
+  selectedSubjects.add(legacyBranch);
+}
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -2520,28 +2553,63 @@ String username = existingData?['username'] ?? '';
   ),
 ],
                     const SizedBox(height: 8),
-                    TextFormField(
-                      initialValue: name,
-                      decoration: const InputDecoration(labelText: 'Ad Soyad'),
-                      onChanged: (val) => name = val,
-                    ),
+                   TextFormField(
+  initialValue: firstName,
+  decoration: const InputDecoration(
+    labelText: 'Ad',
+    hintText: 'Örneğin: Mehmet Ali',
+  ),
+  textCapitalization: TextCapitalization.words,
+  onChanged: (val) => firstName = val.trim(),
+  validator: (val) {
+    if (val == null || val.trim().isEmpty) {
+      return 'Ad zorunludur';
+    }
+    return null;
+  },
+),
+
+const SizedBox(height: 12),
+
+TextFormField(
+  initialValue: surname,
+  decoration: const InputDecoration(
+    labelText: 'Soyad',
+    hintText: 'Örneğin: Yılmaz',
+  ),
+  textCapitalization: TextCapitalization.words,
+  onChanged: (val) => surname = val.trim(),
+  validator: (val) {
+    if (val == null || val.trim().isEmpty) {
+      return 'Soyad zorunludur';
+    }
+    return null;
+  },
+),
                     const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      value: role,
-                      decoration: const InputDecoration(labelText: 'Rol'),
-                      items: _roles
-                          .map(
-                            (r) => DropdownMenuItem(
-                              value: r,
-                              child: Text(r),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (val) {
-                        if (val == null) return;
-                        setStateDialog(() => role = val);
-                      },
-                    ),
+          DropdownButtonFormField<String>(
+  value: role,
+  decoration: const InputDecoration(
+    labelText: 'Rol',
+  ),
+  items: _roles.map((roleValue) {
+    return DropdownMenuItem<String>(
+      value: roleValue,
+      child: Text(_roleLabel(roleValue)),
+    );
+  }).toList(),
+  onChanged: (value) {
+    if (value == null) return;
+
+    setStateDialog(() {
+      role = value;
+
+      if (role != 'teacher') {
+        selectedSubjects.clear();
+      }
+    });
+  },
+),
                     if (role == 'student') ...[
   const SizedBox(height: 8),
   TextFormField(
@@ -2568,46 +2636,66 @@ String username = existingData?['username'] ?? '';
     onChanged: (val) => studentNo = val.trim(),
   ),
 ],
-                    if (role == 'teacher') ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        padding: const EdgeInsets.all(8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Verdiği Dersler'),
-                            Wrap(
-                              children: _allSubjects.map((subject) {
-                                return CheckboxListTile(
-                                  title: Text(subject),
-                                  value: selectedSubjects.contains(subject),
-                                  onChanged: (checked) {
-                                    setStateDialog(() {
-                                      if (checked == true) {
-                                        selectedSubjects.add(subject);
-                                      } else {
-                                        selectedSubjects.remove(subject);
-                                      }
-                                    });
-                                  },
-                                  controlAffinity:
-                                      ListTileControlAffinity.leading,
-                                  dense: true,
-                                );
-                              }).toList(),
-                            ),
+if (role == 'teacher') ...[
+  const SizedBox(height: 12),
+  Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      border: Border.all(color: Colors.grey),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Verdiği Dersler',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ..._allSubjects.map((final subject) {
+          final normalizedSubject =
+              subject.trim().toLowerCase();
+
+          final isSelected = selectedSubjects.any(
+            (selected) =>
+                selected.trim().toLowerCase() ==
+                normalizedSubject,
+          );
+
+          return CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(subject),
+            value: isSelected,
+            onChanged: (checked) {
+              setStateDialog(() {
+                selectedSubjects.removeWhere(
+                  (selected) =>
+                      selected.trim().toLowerCase() ==
+                      normalizedSubject,
+                );
+
+                if (checked == true) {
+                  selectedSubjects.add(subject);
+                }
+              });
+            },
+          );
+        }),
+      ],
+    ),
+  ),
+],
                           ],
                         ),
                       ),
-                    ],
-                  ],
+           
                 ),
-              ),
-            ),
+          
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -2618,43 +2706,55 @@ String username = existingData?['username'] ?? '';
                   if (!formKey.currentState!.validate()) return;
 
                   setState(() => _isLoading = true);
+try {
+  final cleanFirstName =
+      firstName.replaceAll(RegExp(r'\s+'), ' ').trim();
 
-                  try {
-                    if (isEditing) {
-                      await _updateUser(
-                        editingUid,
-                        email,
-                        name,
-                        role,
-                        selectedSubjects,
-                        username,
-                        className,
-                        branch,
-                        department,
-                        studentNo,
-                      );
-                      if (newPassword.trim().isNotEmpty) {
-  await _updateUserPassword(
-    uid: editingUid,
-    password: newPassword.trim(),
-  );
-}
-                    }
-                    if (!isEditing) {
-                      await _createUser(
-                        email,
-                        password,
-                        name,
-                        role,
-                        selectedSubjects,
-                        username,
-                        className,
-                        branch,
-                        department,
-                        studentNo,
-                      );
-                    }
+  final cleanSurname =
+      surname.replaceAll(RegExp(r'\s+'), ' ').trim();
 
+  final fullName = '$cleanFirstName $cleanSurname'
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  if (isEditing) {
+    await _updateUser(
+      editingUid,
+      email,
+      cleanFirstName,
+      cleanSurname,
+      fullName,
+      role,
+      selectedSubjects,
+      username,
+      className,
+      branch,
+      department,
+      studentNo,
+    );
+
+    if (newPassword.trim().isNotEmpty) {
+      await _updateUserPassword(
+        uid: editingUid,
+        password: newPassword.trim(),
+      );
+    }
+  } else {
+    await _createUser(
+      email,
+      password,
+      cleanFirstName,
+      cleanSurname,
+      fullName,
+      role,
+      selectedSubjects,
+      username,
+      className,
+      branch,
+      department,
+      studentNo,
+    );
+  }
                     if (ctx.mounted) Navigator.pop(ctx);
 
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -2696,102 +2796,146 @@ String username = existingData?['username'] ?? '';
 }
 
   Future<void> _createUser(
-    String email,
-    String password,
-    String name,
-    String role,
-    List<String> subjects,
-    String username,
-    String className,
-    String branch,
-    String department,
-    String studentNo,
-  ) async {
-    const apiKey = 'AIzaSyBznoF8WcalY8k-tUexUTrooeDJdZHsM5w';
-    final url = Uri.parse(
-      'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey',
-    );
+  String email,
+  String password,
+  String firstName,
+  String surname,
+  String fullName,
+  String role,
+  List<String> subjects,
+  String username,
+  String className,
+  String branch,
+  String department,
+  String studentNo,
+) async {
+  const apiKey = 'AIzaSyBznoF8WcalY8k-tUexUTrooeDJdZHsM5w';
 
-    final response = await http.post(
-      url,
-      body: jsonEncode({
-        'email': email,
-        'password': password,
-        'returnSecureToken': true,
-      }),
-      headers: {'Content-Type': 'application/json'},
-    );
+  final url = Uri.parse(
+    'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey',
+  );
 
-    if (response.statusCode != 200) {
-      final error = jsonDecode(response.body)['error']['message'];
-      throw Exception('Auth oluşturulamadı: $error');
-    }
-
-    final uid = jsonDecode(response.body)['localId'];
-
-    final parts = name.trim().split(' ');
-    final firstName = parts.isNotEmpty ? parts.first : name;
-    final surname = parts.length > 1 ? parts.sublist(1).join(' ') : '';
-
-    final Map<String, dynamic> userData = {
-      'uid': uid,
+  final response = await http.post(
+    url,
+    body: jsonEncode({
       'email': email,
-      'name': firstName,
-      'surname': surname,
-      'fullName': name,
-      'role': role,
-      'updatedAt': FieldValue.serverTimestamp(),
-      'createdAt': FieldValue.serverTimestamp(),
-    };
+      'password': password,
+      'returnSecureToken': true,
+    }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  );
 
-    if (role == 'teacher') {
-      userData['subjects'] = subjects;
-      userData['teacherStatus'] = 'available';
-    }
+  if (response.statusCode != 200) {
+    final responseData = jsonDecode(response.body);
+    final error =
+        responseData['error']?['message'] ?? 'Bilinmeyen Authentication hatası';
 
-    await _firestore.collection('users').doc(uid).set(userData);
+    throw Exception('Auth oluşturulamadı: $error');
   }
 
-  Future<void> _updateUser(
-    String uid,
-    String newEmail,
-    String newName,
-    String newRole,
-    List<String> subjects,
-    String username,
-    String className,
-    String branch,
-    String department,
-    String studentNo,
-  ) async {
-    final parts = newName.trim().split(' ');
-    final firstName = parts.isNotEmpty ? parts.first : newName;
-    final surname = parts.length > 1 ? parts.sublist(1).join(' ') : '';
+  final responseData = jsonDecode(response.body);
+  final uid = responseData['localId'];
 
-    final Map<String, dynamic> updates = {
-      'name': firstName,
-      'surname': surname,
-      'fullName': newName,
-      'role': newRole,
-      'email': newEmail,
-      'updatedAt': FieldValue.serverTimestamp(),
-      'username': username,
+  if (uid == null) {
+    throw Exception('Firebase kullanıcı kimliği oluşturulamadı.');
+  }
+
+  final Map<String, dynamic> userData = {
+    'uid': uid,
+    'email': email,
+    'username': username,
+    'identityKey': username,
+    'name': firstName,
+    'surname': surname,
+    'fullName': fullName,
+    'role': role,
+    'updatedAt': FieldValue.serverTimestamp(),
+    'createdAt': FieldValue.serverTimestamp(),
+  };
+
+  if (role == 'student') {
+    userData.addAll({
       'className': className,
       'branch': branch,
       'department': department,
       'studentNo': studentNo,
-    };
-
-    if (newRole == 'teacher') {
-      updates['subjects'] = subjects;
-      updates['teacherStatus'] = 'available';
-    } else {
-      updates['subjects'] = FieldValue.delete();
-      updates['teacherStatus'] = FieldValue.delete();
-    }
-
-    await _firestore.collection('users').doc(uid).update(updates);
+      'isInStudySession': false,
+      'activeStudySessionId': null,
+    });
   }
+
+  if (role == 'teacher') {
+    userData.addAll({
+      'subjects': subjects,
+      'branch': subjects.isNotEmpty ? subjects.first : '',
+      'teacherStatus': 'absent',
+      'weeklyAvailability': {},
+    });
+  }
+
+  await _firestore.collection('users').doc(uid).set(userData);
+}
+Future<void> _updateUser(
+  String uid,
+  String newEmail,
+  String firstName,
+  String surname,
+  String fullName,
+  String newRole,
+  List<String> subjects,
+  String username,
+  String className,
+  String branch,
+  String department,
+  String studentNo,
+) async {
+  final Map<String, dynamic> updates = {
+    'email': newEmail,
+    'username': username,
+    'identityKey': username,
+    'name': firstName,
+    'surname': surname,
+    'fullName': fullName,
+    'role': newRole,
+    'updatedAt': FieldValue.serverTimestamp(),
+  };
+
+  if (newRole == 'teacher') {
+    updates.addAll({
+      'subjects': subjects,
+      'branch': subjects.isNotEmpty ? subjects.first : '',
+    });
+
+    updates['className'] = FieldValue.delete();
+    updates['department'] = FieldValue.delete();
+    updates['studentNo'] = FieldValue.delete();
+    updates['isInStudySession'] = FieldValue.delete();
+    updates['activeStudySessionId'] = FieldValue.delete();
+  } else if (newRole == 'student') {
+    updates.addAll({
+      'className': className,
+      'branch': branch,
+      'department': department,
+      'studentNo': studentNo,
+    });
+
+    updates['subjects'] = FieldValue.delete();
+    updates['teacherStatus'] = FieldValue.delete();
+    updates['weeklyAvailability'] = FieldValue.delete();
+  } else {
+    updates['subjects'] = FieldValue.delete();
+    updates['teacherStatus'] = FieldValue.delete();
+    updates['weeklyAvailability'] = FieldValue.delete();
+    updates['className'] = FieldValue.delete();
+    updates['branch'] = FieldValue.delete();
+    updates['department'] = FieldValue.delete();
+    updates['studentNo'] = FieldValue.delete();
+  }
+
+  await _firestore.collection('users').doc(uid).update(updates);
+}
   
 
   Future<void> _deleteUser(String uid, String email) async {
