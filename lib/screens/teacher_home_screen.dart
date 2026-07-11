@@ -894,7 +894,6 @@ if (value == 'available' && !_isTeacherWorkingNow) {
 final canAddStudent =
     _teacherStatus == 'available' &&
     _isZumreOpenNow &&
-    _isTeacherWorkingNow &&
     !_isLunchNow;
 
 if (!canAddStudent) {
@@ -1133,9 +1132,9 @@ const SizedBox(height: 12),
                                   final hasActiveQuestion =
                                       activeSnapshot.docs.isNotEmpty;
 
-                                  final docRef = await _firestore
-                                      .collection('queues')
-                                      .add({
+await _firestore
+    .collection('queues')
+    .add({
                                     'studentId': selectedStudentId,
                                     'studentName': selectedStudentName,
                                     'teacherId': teacherId,
@@ -1152,13 +1151,6 @@ const SizedBox(height: 12),
                                     'startedAt': hasActiveQuestion
                                         ? null
                                         : Timestamp.now(),
-                                  });
-
-                                  await _firestore
-                                      .collection('users')
-                                      .doc(selectedStudentId)
-                                      .update({
-                                    'activeQueueId': docRef.id,
                                   });
 
                                   if (ctx.mounted) Navigator.pop(ctx);
@@ -1232,6 +1224,115 @@ const SizedBox(height: 12),
       'startedAt': Timestamp.now(),
     });
   }
+  Future<void> _startWaitingQueueSafely({
+  required QueryDocumentSnapshot queueDoc,
+  required int queueIndex,
+}) async {
+  final teacherId = _auth.currentUser!.uid;
+  final queueData = queueDoc.data() as Map<String, dynamic>;
+
+  final targetStudentName =
+      queueData['studentName']?.toString() ?? 'Bu öğrenci';
+
+  try {
+    final activeSnapshot = await _firestore
+        .collection('queues')
+        .where('teacherId', isEqualTo: teacherId)
+        .where('status', isEqualTo: 'in_progress')
+        .limit(1)
+        .get();
+
+    QueryDocumentSnapshot? activeQueue;
+
+    if (activeSnapshot.docs.isNotEmpty) {
+      activeQueue = activeSnapshot.docs.first;
+
+      if (activeQueue.id == queueDoc.id) {
+        return;
+      }
+
+      final activeData =
+          activeQueue.data() as Map<String, dynamic>;
+
+      final activeStudentName =
+          activeData['studentName']?.toString() ?? 'Mevcut öğrenci';
+
+      final finishCurrent = await _confirmAction(
+        title: 'Aktif soru bulunuyor',
+        message:
+            '$activeStudentName isimli öğrencinin sorusu hâlâ çözülüyor. '
+            '$targetStudentName isimli öğrenciyi başlatmak için mevcut soru '
+            'çözüldü olarak işaretlenecek. Devam etmek istiyor musunuz?',
+        confirmText: 'Bitir ve Başlat',
+        icon: Icons.warning_amber_rounded,
+        color: Colors.orangeAccent,
+      );
+
+      if (!finishCurrent) return;
+    }
+
+    if (queueIndex > 0) {
+      final skipCount = queueIndex;
+
+      final continueOutOfOrder = await _confirmAction(
+        title: 'Sıra önceliği uyarısı',
+        message:
+            '$targetStudentName isimli öğrencinin önünde '
+            '$skipCount öğrenci bulunuyor. Buna rağmen bu öğrencinin '
+            'sorusunu önce başlatmak istiyor musunuz?',
+        confirmText: 'Yine de Başlat',
+        icon: Icons.low_priority_rounded,
+        color: Colors.orangeAccent,
+      );
+
+      if (!continueOutOfOrder) return;
+    }
+
+    final batch = _firestore.batch();
+
+    if (activeQueue != null) {
+      batch.update(activeQueue.reference, {
+        'status': 'completed',
+        'completedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    batch.update(queueDoc.reference, {
+      'status': 'in_progress',
+      'startedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+
+    _resetActiveQuestionTimer();
+
+    if (!mounted) return;
+
+    if (activeQueue != null) {
+      setState(() {
+        _todaySolved++;
+      });
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$targetStudentName isimli öğrencinin sorusu başlatıldı.',
+        ),
+      ),
+    );
+  } catch (e) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Soru başlatılamadı: $e'),
+      ),
+    );
+  }
+}
 
   Future<void> _markAsSolved(String queueId) async {
     try {
@@ -1281,204 +1382,338 @@ const SizedBox(height: 12),
       );
     }
   }
-  Future<void> _showTransferDialog({
+Future<void> _showTransferDialog({
   required String queueId,
-  required String subject,
-  required String studentName,
+  required String subject, required studentName,
 }) async {
   final currentTeacherId = _auth.currentUser!.uid;
 
-  final teachersSnapshot = await _firestore
-      .collection('users')
-      .where('role', isEqualTo: 'teacher')
-      .where('teacherStatus', isEqualTo: 'available')
-      .where('subjects', arrayContains: subject)
-      .get();
-
-  final availableTeachers = teachersSnapshot.docs
-      .where((doc) => doc.id != currentTeacherId)
-      .toList();
-
-  if (availableTeachers.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Devredilebilecek müsait öğretmen bulunamadı.'),
-      ),
-    );
-    return;
+  String normalizeValue(dynamic value) {
+    return value
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll('ı', 'i')
+        .replaceAll('ş', 's')
+        .replaceAll('ğ', 'g')
+        .replaceAll('ü', 'u')
+        .replaceAll('ö', 'o')
+        .replaceAll('ç', 'c');
   }
 
-  await showDialog(
-    context: context,
-    builder: (ctx) {
-      return Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 520),
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF06312E),
-                Color(0xFF008A5C),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: Colors.white24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 54,
-                    height: 54,
-                    decoration: BoxDecoration(
-                      color: Colors.lightBlueAccent.withOpacity(0.18),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.swap_horiz_rounded,
-                      color: Colors.lightBlueAccent,
-                      size: 32,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'Öğrenciyi Devret',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white70),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
+  try {
+    final teachersSnapshot = await _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'teacher')
+        .get();
 
-              const SizedBox(height: 12),
+    final normalizedSubject = normalizeValue(subject);
 
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '$studentName isimli öğrenciyi aynı branştaki müsait bir öğretmene devredebilirsiniz.',
-                  style: const TextStyle(color: Colors.white70, height: 1.35),
-                ),
-              ),
+    final availableTeachers = teachersSnapshot.docs.where((doc) {
+      if (doc.id == currentTeacherId) return false;
 
-              const SizedBox(height: 16),
+      final data = doc.data();
 
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: availableTeachers.length,
-                  itemBuilder: (context, index) {
-                    final teacherDoc = availableTeachers[index];
-                    final teacherData = teacherDoc.data();
+      final status =
+          data['teacherStatus']?.toString().trim() ?? 'absent';
 
-                    final teacherName =
-                        teacherData['fullName'] ??
-                        teacherData['name'] ??
-                        teacherData['email'] ??
-                        'Öğretmen';
+      if (status != 'available') return false;
 
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.09),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: Colors.white12),
-                      ),
-                      child: ListTile(
-                        leading: const CircleAvatar(
-                          backgroundColor: Colors.green,
-                          child: Icon(Icons.person, color: Colors.white),
-                        ),
-                        title: Text(
-                          '$teacherName',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        subtitle: Text(
-                          subject,
-                          style: const TextStyle(color: Colors.white60),
-                        ),
-                        trailing: const Icon(
-                          Icons.chevron_right,
-                          color: Colors.white70,
-                        ),
-                        onTap: () async {
-                          final confirm = await _confirmAction(
-                            title: 'Devretme onayı',
-                            message:
-                                '$studentName isimli öğrenci $teacherName öğretmenine devredilsin mi?',
-                            confirmText: 'Devret',
-                            icon: Icons.swap_horiz_rounded,
-                            color: Colors.lightBlueAccent,
-                          );
+      final List<String> teacherSubjects = [];
 
-                          if (!confirm) return;
+      final rawSubjects = data['subjects'];
 
-                          await _resetAndTransferQueue(
-                            queueId: queueId,
-                            newTeacherId: teacherDoc.id,
-                            newTeacherName: '$teacherName',
-                          );
+      if (rawSubjects is List) {
+        teacherSubjects.addAll(
+          rawSubjects
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty),
+        );
+      } else if (rawSubjects is String &&
+          rawSubjects.trim().isNotEmpty) {
+        teacherSubjects.addAll(
+          rawSubjects
+              .split(RegExp(r'[,;/|]'))
+              .map((item) => item.trim())
+              .where((item) => item.isNotEmpty),
+        );
+      }
 
-                          if (ctx.mounted) Navigator.pop(ctx);
+      final legacyBranch =
+          data['branch']?.toString().trim() ?? '';
 
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Öğrenci $teacherName öğretmenine devredildi.',
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+      final legacySubject =
+          data['subject']?.toString().trim() ?? '';
+
+      if (legacyBranch.isNotEmpty) {
+        teacherSubjects.add(legacyBranch);
+      }
+
+      if (legacySubject.isNotEmpty) {
+        teacherSubjects.add(legacySubject);
+      }
+
+      return teacherSubjects.any(
+        (teacherSubject) =>
+            normalizeValue(teacherSubject) == normalizedSubject,
+      );
+    }).toList();
+
+    if (!mounted) return;
+
+    if (availableTeachers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$subject branşında devredilebilecek müsait öğretmen bulunamadı.',
           ),
         ),
       );
-    },
-  );
+      return;
+    }
+
+    final selectedTeacher =
+        await showDialog<QueryDocumentSnapshot<Map<String, dynamic>>>(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            constraints: const BoxConstraints(
+              maxWidth: 520,
+              maxHeight: 560,
+            ),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF123C69),
+                  Color(0xFF1E6B50),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.swap_horiz_rounded,
+                      color: Colors.greenAccent,
+                      size: 30,
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Soruyu Devret',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 21,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(
+                        Icons.close,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '$subject branşındaki müsait öğretmenlerden birini seçiniz.',
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 12.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: availableTeachers.length,
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final teacher = availableTeachers[index];
+                      final data = teacher.data();
+
+                      final name = data['fullName'] ??
+                          data['name'] ??
+                          data['email'] ??
+                          'Öğretmen';
+
+                      final subjects = data['subjects'] is List
+                          ? (data['subjects'] as List).join(', ')
+                          : subject;
+
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: () => Navigator.pop(ctx, teacher),
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.09),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Row(
+                            children: [
+                              const CircleAvatar(
+                                backgroundColor: Colors.green,
+                                child: Icon(
+                                  Icons.person,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '$name',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      subjects,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white60,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(
+                                Icons.chevron_right,
+                                color: Colors.white54,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selectedTeacher == null) return;
+
+    final selectedData = selectedTeacher.data();
+
+    final selectedTeacherName = selectedData['fullName'] ??
+        selectedData['name'] ??
+        selectedData['email'] ??
+        'Öğretmen';
+
+    final confirm = await _confirmAction(
+      title: 'Soru devredilsin mi?',
+      message:
+          'Bu soru $selectedTeacherName isimli öğretmene devredilecek. Devam etmek istiyor musunuz?',
+      confirmText: 'Devret',
+      icon: Icons.swap_horiz_rounded,
+      color: Colors.green,
+    );
+
+    if (!confirm) return;
+
+    await _firestore.collection('queues').doc(queueId).update({
+      'teacherId': selectedTeacher.id,
+      'teacherName': selectedTeacherName,
+      'status': 'waiting',
+      'transferredAt': FieldValue.serverTimestamp(),
+      'transferredFromTeacherId': currentTeacherId,
+      'transferredFromTeacherName': _teacherName,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Soru $selectedTeacherName isimli öğretmene devredildi.',
+        ),
+      ),
+    );
+  } catch (e) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Soru devredilemedi: $e'),
+      ),
+    );
+  }
 }
-Future<void> _resetAndTransferQueue({
-  required String queueId,
-  required String newTeacherId,
-  required String newTeacherName,
+Future<bool> _confirmLogout({
+  required Color color,
 }) async {
-  _resetActiveQuestionTimer();
-
-  final currentTeacherId = _auth.currentUser!.uid;
-
-  await _firestore.collection('queues').doc(queueId).update({
-    'teacherId': newTeacherId,
-    'teacherName': newTeacherName,
-    'status': 'waiting',
-    'startedAt': null,
-    'transferredAt': Timestamp.now(),
-    'transferredFromTeacherId': currentTeacherId,
-    'transferredFromTeacherName': _teacherName ?? 'Öğretmen',
-  });
-
-  await _takeNextWaitingQueue();
+  return await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            title: Row(
+              children: [
+                Icon(
+                  Icons.logout_rounded,
+                  color: color,
+                ),
+                const SizedBox(width: 10),
+                const Text("Çıkış Yap"),
+              ],
+            ),
+            content: const Text(
+              "Oturumu kapatmak istediğinize emin misiniz?",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Vazgeç"),
+              ),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: color,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => Navigator.pop(context, true),
+                icon: const Icon(Icons.logout),
+                label: const Text("Çıkış Yap"),
+              ),
+            ],
+          );
+        },
+      ) ??
+      false;
 }
-
   Widget _miniTimeBox({
     required String title,
     required String value,
@@ -1910,16 +2145,13 @@ Future<void> _resetAndTransferQueue({
                     ),
                     Column(
                       children: [
-                        ElevatedButton(
-                          onPressed: () async {
-                            await _firestore
-                                .collection('queues')
-                                .doc(doc.id)
-                                .update({
-                              'status': 'in_progress',
-                              'startedAt': Timestamp.now(),
-                            });
-                          },
+                      ElevatedButton(
+  onPressed: () async {
+    await _startWaitingQueueSafely(
+      queueDoc: doc,
+      queueIndex: queues.indexOf(doc),
+    );
+  },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
@@ -2519,8 +2751,13 @@ _headerActionButton(
                 subtitle: 'Hesaptan çık',
                 color: Colors.redAccent,
                 onTap: () async {
-                  await _auth.signOut();
-                },
+final logout = await _confirmLogout(
+  color: Colors.green,
+);
+
+if (!logout) return;
+
+await _auth.signOut();                },
               );
 
               if (isNarrow) {

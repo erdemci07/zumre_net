@@ -2704,11 +2704,22 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   }
 
                  final allUsers = snapshot.data!.docs;
+String normalizeForSearch(String str) {
+  return str
+      .toLowerCase()
+      .replaceAll('ı', 'i')
+      .replaceAll('ğ', 'g')
+      .replaceAll('ü', 'u')
+      .replaceAll('ş', 's')
+      .replaceAll('ö', 'o')
+      .replaceAll('ç', 'c')
+      .replaceAll('İ', 'i');
+}
 
 final users = allUsers.where((doc) {
   final data = doc.data() as Map<String, dynamic>;
 
-  final searchable = [
+  final searchableRaw = [
     data['fullName'],
     data['name'],
     data['surname'],
@@ -2719,10 +2730,12 @@ final users = allUsers.where((doc) {
     data['branch'],
     data['department'],
     if (data['subjects'] is List) (data['subjects'] as List).join(' '),
-  ].where((e) => e != null).join(' ').toLowerCase();
+  ].where((e) => e != null).join(' ');
 
-  return _userSearchQuery.isEmpty ||
-      searchable.contains(_userSearchQuery);
+  final searchable = normalizeForSearch(searchableRaw);
+  final query = normalizeForSearch(_userSearchQuery);
+
+  return _userSearchQuery.isEmpty || searchable.contains(query);
 }).toList();
 
                   return ListView.builder(

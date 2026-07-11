@@ -714,7 +714,53 @@ if (!_isZumreOpenNow || _isLunchNow) {
       );
     }
   }
-
+Future<bool> _confirmLogout({
+  required Color color,
+}) async {
+  return await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            title: Row(
+              children: [
+                Icon(
+                  Icons.logout_rounded,
+                  color: color,
+                ),
+                const SizedBox(width: 10),
+                const Text("Çıkış Yap"),
+              ],
+            ),
+            content: const Text(
+              "Oturumu kapatmak istediğinize emin misiniz?",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Vazgeç"),
+              ),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: color,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => Navigator.pop(context, true),
+                icon: const Icon(Icons.logout),
+                label: const Text("Çıkış Yap"),
+              ),
+            ],
+          );
+        },
+      ) ??
+      false;
+}
   Future<void> _cancelQueue() async {
     if (_currentQueueId == null) return;
 
@@ -1450,8 +1496,13 @@ Widget _buildWelcomeCard() {
             IconButton(
               tooltip: 'Çıkış Yap',
               onPressed: () async {
-                await _auth.signOut();
-              },
+final logout = await _confirmLogout(
+  color: Colors.indigo,
+);
+
+if (!logout) return;
+
+await _auth.signOut();              },
               icon: const Icon(
                 Icons.logout,
                 color: Colors.white,
