@@ -3063,29 +3063,31 @@ if (role == 'teacher') ...[
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Verdiği Dersler',
+          'Verdiği Ders',
           style: TextStyle(
             fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 8),
         ..._allSubjects.map((final subject) {
+          final groupValue = selectedSubjects.isNotEmpty
+              ? selectedSubjects.first
+              : null;
 
-          return CheckboxListTile(
+          return RadioListTile<String>(
             contentPadding: EdgeInsets.zero,
             dense: true,
-            controlAffinity: ListTileControlAffinity.leading,
+            value: subject,
+            groupValue: groupValue,
             title: Text(subject),
-            value: selectedSubjects.contains(subject),
-onChanged: (checked) {
-  setStateDialog(() {
-    if (checked == true) {
-      selectedSubjects.add(subject);
-    } else {
-      selectedSubjects.remove(subject);
-    }
-  });
-},
+            onChanged: (value) {
+              if (value == null) return;
+              setStateDialog(() {
+                selectedSubjects
+                  ..clear()
+                  ..add(value);
+              });
+            },
           );
         }),
       ],

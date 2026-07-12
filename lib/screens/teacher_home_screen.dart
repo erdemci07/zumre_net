@@ -2766,8 +2766,12 @@ _headerActionButton(
               );
 
               final solved = Container(
-                width: isNarrow ? double.infinity : 96,
-                padding: const EdgeInsets.symmetric(vertical: 10),
+                constraints: const BoxConstraints(
+                  minWidth: 60,
+                  maxWidth: 82,
+                  minHeight: 60,
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.greenAccent.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -2776,28 +2780,30 @@ _headerActionButton(
                   ),
                 ),
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(
                       Icons.bar_chart_rounded,
                       color: Colors.greenAccent,
-                      size: 22,
+                      size: 18,
                     ),
                     const SizedBox(height: 4),
                     Text(
                       '$_todaySolved',
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 26,
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    const SizedBox(height: 2),
                     const Text(
-                      'çözüm',
+                      'Bugün çözülen',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white60,
-                        fontSize: 11,
+                        fontSize: 10,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -2805,21 +2811,16 @@ _headerActionButton(
                 ),
               );
 
-              if (isNarrow) {
-                return Column(
-                  children: [
-                    info,
-                    const SizedBox(height: 12),
-                    solved,
-                  ],
-                );
-              }
-
               return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: info),
-                  const SizedBox(width: 12),
-                  solved,
+                  Flexible(child: info),
+                  const SizedBox(width: 10),
+                  Column(
+                    children: [
+                      solved,
+                    ],
+                  ),
                 ],
               );
             },

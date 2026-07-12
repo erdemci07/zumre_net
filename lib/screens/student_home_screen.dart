@@ -332,49 +332,64 @@ void dispose() {
   _cooldownTimer?.cancel();
   super.dispose();
 }
-  Future<void> _findAndListenActiveQueue() async {
+Future<void> _findAndListenActiveQueue() async {
   final userId = _auth.currentUser!.uid;
 
-  final userDoc = await _firestore.collection('users').doc(userId).get();
+  try {
+    final snapshot = await _firestore
+        .collection('queues')
+        .where('studentId', isEqualTo: userId)
+        .where(
+          'status',
+          whereIn: ['waiting', 'in_progress'],
+        )
+        .limit(1)
+        .get();
 
-  final activeQueueId = userDoc.data()?['activeQueueId'];
+    if (snapshot.docs.isEmpty) {
+      if (!mounted) return;
 
-  if (activeQueueId != null && activeQueueId.toString().isNotEmpty) {
-    final queueDoc =
-        await _firestore.collection('queues').doc(activeQueueId).get();
+      setState(() {
+        _isInQueue = false;
+        _currentQueueId = null;
+        _currentTeacherName = null;
+        _queuePosition = 0;
+      });
 
-    if (queueDoc.exists) {
-      final data = queueDoc.data()!;
-      final status = data['status'];
-
-      if (status == 'waiting' ||
-          status == 'in_progress' ||
-          status == 'completed') {
-        if (mounted && status != 'completed') {
-          setState(() {
-            _isInQueue = true;
-            _currentQueueId = activeQueueId;
-          });
-        }
-
-        if (data['teacherId'] != null) {
-          _getCurrentTeacherName(data['teacherId']);
-        }
-        
-
-        _listenToQueue(activeQueueId);
-        return;
-      }
+      return;
     }
-  }
 
-  if (mounted) {
+    final queueDoc = snapshot.docs.first;
+    final data = queueDoc.data();
+
+    if (!mounted) return;
+
     setState(() {
-      _isInQueue = false;
-      _currentQueueId = null;
-      _currentTeacherName = null;
-      _queuePosition = 0;
+      _isInQueue = true;
+      _currentQueueId = queueDoc.id;
     });
+
+    final teacherName = data['teacherName']?.toString();
+
+    if (teacherName != null && teacherName.isNotEmpty) {
+      setState(() {
+        _currentTeacherName = teacherName;
+      });
+    } else if (data['teacherId'] != null) {
+      await _getCurrentTeacherName(
+        data['teacherId'].toString(),
+      );
+    }
+
+    _listenToQueue(queueDoc.id);
+  } catch (e) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Aktif sıra kontrol edilemedi: $e'),
+      ),
+    );
   }
 }
 
@@ -473,62 +488,86 @@ void _listenToQueue(String queueId) {
       final data = snapshot.data()!;
       final status = data['status'];
 
-      if (status == 'waiting') {
-        if (mounted) {
-          setState(() {
-            _isInQueue = true;
-            _currentQueueId = queueId;
-          });
-        }
+if (status == 'waiting') {
+  final teacherNameFromQueue =
+      data['teacherName']?.toString();
 
-        await _updatePosition(queueId);
-        return;
-      }
-
-      if (status == 'in_progress') {
-        final teacherNameFromQueue = data['teacherName'];
-
-        if (mounted) {
-          setState(() {
-            _isInQueue = true;
-            _currentQueueId = queueId;
-            _queuePosition = 0;
-
-            if (teacherNameFromQueue != null) {
-              _currentTeacherName = teacherNameFromQueue;
-            }
-          });
-        }
-
-        if (data['teacherId'] != null) {
-          _getCurrentTeacherName(data['teacherId']);
-        }
-
-
-        return;
-      }
-
-      if (status == 'completed') {
-await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
-    'activeQueueId': FieldValue.delete(),
-  });
-  
+  final teacherIdFromQueue =
+      data['teacherId']?.toString();
 
   if (mounted) {
     setState(() {
-      _isInQueue = false;
-      _currentQueueId = null;
-      _currentTeacherName = null;
-      _queuePosition = 0;
-      
+      _isInQueue = true;
+      _currentQueueId = queueId;
+
+      if (teacherNameFromQueue != null &&
+          teacherNameFromQueue.isNotEmpty) {
+        _currentTeacherName = teacherNameFromQueue;
+      }
     });
   }
 
+  if ((teacherNameFromQueue == null ||
+          teacherNameFromQueue.isEmpty) &&
+      teacherIdFromQueue != null &&
+      teacherIdFromQueue.isNotEmpty) {
+    await _getCurrentTeacherName(teacherIdFromQueue);
+  }
+
+  await _updatePosition(queueId);
+  return;
+}
+
+if (status == 'in_progress') {
+  final teacherNameFromQueue =
+      data['teacherName']?.toString();
+
+  final teacherIdFromQueue =
+      data['teacherId']?.toString();
+
+  if (mounted) {
+    setState(() {
+      _isInQueue = true;
+      _currentQueueId = queueId;
+      _queuePosition = 0;
+
+      if (teacherNameFromQueue != null &&
+          teacherNameFromQueue.isNotEmpty) {
+        _currentTeacherName = teacherNameFromQueue;
+      }
+    });
+  }
+
+  if ((teacherNameFromQueue == null ||
+          teacherNameFromQueue.isEmpty) &&
+      teacherIdFromQueue != null &&
+      teacherIdFromQueue.isNotEmpty) {
+    await _getCurrentTeacherName(teacherIdFromQueue);
+  }
+
+  return;
+}
+
+if (status == 'completed') {
   await _queueSubscription?.cancel();
   _queueSubscription = null;
 
+  if (!mounted) return;
+
+  setState(() {
+    _isInQueue = false;
+    _currentQueueId = null;
+    _currentTeacherName = null;
+    _queuePosition = 0;
+  });
+
   Future.delayed(const Duration(milliseconds: 400), () {
-    if (mounted) {
+    if (!mounted) return;
+
+    final ratingPopupClosed =
+        data['ratingPopupClosed'] == true;
+
+    if (!ratingPopupClosed) {
       _showRatingDialog(queueId);
     }
   });
@@ -669,8 +708,18 @@ Future<void> _loadTeachersForSubject(String subject) async {
         DateTime.now().millisecondsSinceEpoch < _cooldownUntil) {
       return;
     }
-String? finalTeacherId = _selectedTeacherId;
-String? finalTeacherName = _selectedTeacherName;
+
+    await _checkZumreAvailability();
+
+    if (!_isZumreOpenNow || _isLunchNow) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_zumreMessage)),
+      );
+      return;
+    }
+
+    String? finalTeacherId = _selectedTeacherId;
+    String? finalTeacherName = _selectedTeacherName;
 
 if (_useSmartTeacherSelection) {
   _showSmartTeacherLoadingDialog();
@@ -724,18 +773,6 @@ if (_selectedSubject == null ||
   );
   return;
 }
-
-if (!_useSmartTeacherSelection &&
-    (_selectedTeacherId == null ||
-        _selectedTeacherId!.trim().isEmpty)) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text('Lütfen bir öğretmen seçin.'),
-    ),
-  );
-  return;
-}
-
 if (!_useSmartTeacherSelection &&
     (_selectedTeacherId == null ||
         _selectedTeacherId!.trim().isEmpty)) {
@@ -797,19 +834,9 @@ if (finalTeacherId == null ||
 'extraMinutes': 0,
         'createdAt': FieldValue.serverTimestamp(),
       };
-      await _checkZumreAvailability();
 
-if (!_isZumreOpenNow || _isLunchNow) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(_zumreMessage)),
-  );
-  return;
-}
 
       final docRef = await _firestore.collection('queues').add(newQueue);
-      await _firestore.collection('users').doc(userId).update({
-  'activeQueueId': docRef.id,
-});
 
       if (mounted) {
         setState(() {
@@ -829,7 +856,7 @@ if (!_isZumreOpenNow || _isLunchNow) {
   if (mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Öğretmen belirlenemedi: $e'),
+        content: Text('Sıra alınamadı: $e'),
       ),
     );
   }
@@ -912,10 +939,11 @@ Future<bool> _confirmLogout({
       try {
         final cooldownDate = DateTime.now().add(const Duration(minutes: 2));
 
-        await _firestore.collection('queues').doc(_currentQueueId).update({
-          'status': 'cancelled',
-          'cancelledAt': FieldValue.serverTimestamp(),
-        });
+await _firestore.collection('queues').doc(_currentQueueId).update({
+  'status': 'cancelled',
+  'cancelledAt': FieldValue.serverTimestamp(),
+  'updatedAt': FieldValue.serverTimestamp(),
+});
 
         await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
           'cooldownUntil': Timestamp.fromDate(cooldownDate),
@@ -1047,17 +1075,22 @@ void _hideSmartTeacherLoadingDialog() {
                             Icons.close,
                             color: Colors.white70,
                           ),
-                          onPressed: () async {
-                            await _firestore
-                                .collection('queues')
-                                .doc(queueId)
-                                .update({
-                              'ratingPopupClosed': true,
-                            });
+                     onPressed: () async {
+  Navigator.pop(ctx);
 
-                            Navigator.pop(ctx);
-                          },
-                        ),
+  try {
+    await _firestore
+        .collection('queues')
+        .doc(queueId)
+        .update({
+      'ratingPopupClosed': true,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    debugPrint('Rating penceresi kapatma kaydı yazılamadı: $e');
+  }
+},
+                        )
                     ],
                   ),
 
@@ -1132,16 +1165,20 @@ void _hideSmartTeacherLoadingDialog() {
                     child: ElevatedButton.icon(
                       onPressed: () async {
                         try {
-                          await _firestore
-                              .collection('queues')
-                              .doc(queueId)
-                              .update({
-                            'rating': rating,
-                            'comment': comment,
-                            'ratingPopupClosed': true,
-                          });
+                   await _firestore
+    .collection('queues')
+    .doc(queueId)
+    .update({
+  'rating': rating,
+  'comment': comment.trim(),
+  'ratingPopupClosed': true,
+  'ratedAt': FieldValue.serverTimestamp(),
+  'updatedAt': FieldValue.serverTimestamp(),
+});
 
-                          Navigator.pop(ctx);
+if (ctx.mounted) {
+  Navigator.pop(ctx);
+}
 
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -1151,6 +1188,7 @@ void _hideSmartTeacherLoadingDialog() {
                             ),
                           );
                         } catch (e) {
+                          if (!ctx.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
