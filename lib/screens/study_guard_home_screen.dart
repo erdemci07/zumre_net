@@ -27,7 +27,7 @@ String _activeStudySlotText = 'Etüt saati';
 String _studyScheduleMessage = 'Etüt saatleri yönetici panelindeki programa göre otomatik takip edilir.';
   Timer? _elapsedTimer;
   Timer? _scheduleTimer;
-
+final Set<String> _removingStudentIds = {};
   bool _isProcessing = false;
 
   @override
@@ -36,22 +36,15 @@ String _studyScheduleMessage = 'Etüt saatleri yönetici panelindeki programa g�
     _initPage();
   }
 
-  Future<void> _initPage() async {
-    await _loadStaffInfo();
-    await _checkStudySchedule();
-    if (_isStudyOpenNow){
-      await _loadActiveSession();
-      await _ensureActiveSession();
-    } else {
-      await _finishStudySessionSilently(autoEnded: true);
-    }
-    await _loadActiveSession();
+Future<void> _initPage() async {
+  await _loadStaffInfo();
+  await _checkStudySchedule();
 
-    _scheduleTimer = Timer.periodic(
-      const Duration(seconds: 4),
-      (_) => _checkStudySchedule(),
-    );
-  }
+  _scheduleTimer = Timer.periodic(
+    const Duration(seconds: 4),
+    (_) => _checkStudySchedule(),
+  );
+}
 
   @override
   void dispose() {
@@ -74,31 +67,6 @@ String _studyScheduleMessage = 'Etüt saatleri yönetici panelindeki programa g�
       _staffRole = data['role'];
       _selectedDutyTeacherId = data['dutyTeacherId'] as String?;
       _selectedDutyTeacherName = data['dutyTeacherName'] as String?;
-    });
-  }
-
-  Future<void> _loadActiveSession() async {
-    final uid = _auth.currentUser!.uid;
-
-    final snapshot = await _firestore
-        .collection('studySessions')
-        .where('staffId', isEqualTo: uid)
-        .where('status', isEqualTo: 'active')
-        .limit(1)
-        .get();
-
-    if (snapshot.docs.isEmpty) return;
-
-    final doc = snapshot.docs.first;
-    final data = doc.data();
-
-    if (!mounted) return;
-
-    setState(() {
-      _activeSessionId = doc.id;
-      _selectedDutyTeacherId = data['dutyTeacherId'] as String?;
-      _selectedDutyTeacherName = data['dutyTeacherName'] as String?;
-      
     });
   }
 
@@ -213,7 +181,6 @@ for (final slot in slots) {
     });
   }
 }
-
 Future<void> _ensureActiveSession() async {
   if (!_isStudyOpenNow) return;
   if (_activeSessionId != null) return;
@@ -229,12 +196,19 @@ Future<void> _ensureActiveSession() async {
 
   if (snapshot.docs.isNotEmpty) {
     final doc = snapshot.docs.first;
+    final data = doc.data();
 
     if (!mounted) return;
 
     setState(() {
       _activeSessionId = doc.id;
+      _selectedDutyTeacherId =
+          data['dutyTeacherId']?.toString();
+      _selectedDutyTeacherName =
+          data['dutyTeacherName']?.toString();
     });
+
+    return; // Bu satır kritik
   }
 
   await _startStudySession();
@@ -258,6 +232,7 @@ final docRef = await _firestore.collection('studySessions').add({
   'startedAt': Timestamp.now(),
   'endedAt': null,
   'studentCount': 0,
+  'activeStudentCount': 0,
   'dutyTeacherId': null,
   'dutyTeacherName': null,
   'dutyTeacherPreviousStatus': null,
@@ -350,15 +325,16 @@ for (final doc in studentsSnapshot.docs) {
       );
     }
 
-    batch.update(sessionRef, {
-      'status': 'completed',
-      'endedAt': Timestamp.now(),
-      'autoEnded': autoEnded,
-      'dutyTeacherId': null,
-      'dutyTeacherName': null,
-      'dutyTeacherPreviousStatus': null,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+batch.update(sessionRef, {
+  'status': 'completed',
+  'endedAt': Timestamp.now(),
+  'autoEnded': autoEnded,
+  'activeStudentCount': 0,
+  'dutyTeacherId': null,
+  'dutyTeacherName': null,
+  'dutyTeacherPreviousStatus': null,
+  'updatedAt': FieldValue.serverTimestamp(),
+});
 
     await batch.commit();
 
@@ -412,36 +388,83 @@ for (final doc in studentsSnapshot.docs) {
         .doc(sessionId)
         .collection('students')
         .doc(doc.id);
+final existing = await sessionStudentRef.get();
+final batch = _firestore.batch();
 
-    final existing = await sessionStudentRef.get();
+if (existing.exists) {
+  final existingData = existing.data() ?? {};
+  final existingStatus =
+      existingData['status']?.toString() ?? 'present';
 
-    if (existing.exists) {
-      _showSnack('Bu öğrenci zaten bu etütte.');
-      return;
-    }
+  if (existingStatus == 'present') {
+    _showSnack('Bu öğrenci zaten etütte görünüyor.');
+    return;
+  }
 
-    final batch = _firestore.batch();
+  // Öğrenci daha önce çıkmışsa tekrar aktif etüte alınır.
+  batch.update(sessionStudentRef, {
+    'status': 'present',
+    'checkedAt': FieldValue.serverTimestamp(),
+    'checkedOutAt': null,
+    'rejoinedAt': FieldValue.serverTimestamp(),
+  });
 
-    batch.set(sessionStudentRef, {
-      'studentId': doc.id,
-      'studentName': data['fullName'] ?? data['name'] ?? 'Öğrenci',
-      'className': data['className'] ?? '',
-      'branch': data['branch'] ?? '',
-      'department': data['department'] ?? '',
-      'username': data['username'] ?? '',
-      'checkedAt': Timestamp.now(),
-      'status': 'present',
-    });
-
-    batch.update(_firestore.collection('users').doc(doc.id), {
+  batch.update(
+    _firestore.collection('users').doc(doc.id),
+    {
       'isInStudySession': true,
       'activeStudySessionId': sessionId,
-    });
+    },
+  );
 
-    batch.update(_firestore.collection('studySessions').doc(sessionId), {
-      'studentCount': FieldValue.increment(1),
+  batch.update(
+    _firestore.collection('studySessions').doc(sessionId),
+    {
+      'activeStudentCount': FieldValue.increment(1),
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+    },
+  );
+} else {
+  batch.set(sessionStudentRef, {
+    'studentId': doc.id,
+    'studentName':
+        data['fullName'] ?? data['name'] ?? 'Öğrenci',
+    'className': data['className'] ?? '',
+    'branch': data['branch'] ?? '',
+    'department': data['department'] ?? '',
+    'username': data['username'] ?? '',
+    'checkedAt': FieldValue.serverTimestamp(),
+    'checkedOutAt': null,
+    'status': 'present',
+  });
+
+  batch.update(
+    _firestore.collection('users').doc(doc.id),
+    {
+      'isInStudySession': true,
+      'activeStudySessionId': sessionId,
+    },
+  );
+
+  batch.update(
+    _firestore.collection('studySessions').doc(sessionId),
+    {
+      'studentCount': FieldValue.increment(1),
+      'activeStudentCount': FieldValue.increment(1),
+      'updatedAt': FieldValue.serverTimestamp(),
+    },
+  );
+}
+
+await batch.commit();
+
+if (!mounted) return;
+
+_showSnack(
+  existing.exists
+      ? 'Öğrenci yeniden etüte alındı.'
+      : 'Öğrenci etüte alındı.',
+);
 
     await batch.commit();
 
@@ -449,40 +472,199 @@ for (final doc in studentsSnapshot.docs) {
 
     _showSnack('Öğrenci etüte alındı.');
   }
+Future<void> _removeStudentFromStudy(
+  String studentId,
+  String studentName,
+) async {
+  if (_activeSessionId == null) return;
+  if (_removingStudentIds.contains(studentId)) return;
 
-  Future<void> _removeStudentFromStudy(String studentId) async {
-    if (_activeSessionId == null) return;
+  final confirm = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 22),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 430),
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF063B3B),
+                    Color(0xFF008A8A),
+                    Color(0xFF05272D),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.28),
+                    blurRadius: 24,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 68,
+                    height: 68,
+                    decoration: BoxDecoration(
+                      color: Colors.orangeAccent.withOpacity(0.16),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.orangeAccent.withOpacity(0.35),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.person_remove_alt_1_rounded,
+                      color: Colors.orangeAccent,
+                      size: 34,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Öğrenci Etütten Çıkarılsın mı?',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 21,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '$studentName isimli öğrenci etütten çıkarılacak ve yeniden zümre sırası alabilecek.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white38),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: const Text('Vazgeç'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          icon: const Icon(Icons.person_remove_rounded),
+                          label: const Text('Etütten Çıkar'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orangeAccent,
+                            foregroundColor: const Color(0xFF063B3B),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ) ??
+      false;
 
+  if (!confirm) return;
+
+  setState(() {
+    _removingStudentIds.add(studentId);
+  });
+
+  try {
     final sessionId = _activeSessionId!;
+
+    final studentRef = _firestore
+        .collection('studySessions')
+        .doc(sessionId)
+        .collection('students')
+        .doc(studentId);
+
+    final userRef = _firestore.collection('users').doc(studentId);
+    final sessionRef =
+        _firestore.collection('studySessions').doc(sessionId);
+        final sessionSnapshot = await sessionRef.get();
+final sessionData = sessionSnapshot.data() ?? {};
+
+final currentActiveCount =
+    (sessionData['activeStudentCount'] as num?)?.toInt() ??
+    (sessionData['studentCount'] as num?)?.toInt() ??
+    0;
 
     final batch = _firestore.batch();
 
-    batch.update(_firestore.collection('users').doc(studentId), {
+    batch.update(studentRef, {
+      'status': 'left',
+      'checkedOutAt': FieldValue.serverTimestamp(),
+    });
+
+    batch.update(userRef, {
       'isInStudySession': false,
       'activeStudySessionId': null,
     });
 
-batch.update(
-  _firestore
-      .collection('studySessions')
-      .doc(sessionId)
-      .collection('students')
-      .doc(studentId),
-  {
-    'status': 'left',
-    'checkedOutAt': Timestamp.now(),
-  },
-);
-
-    batch.update(_firestore.collection('studySessions').doc(sessionId), {
-      'studentCount': FieldValue.increment(-1),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+batch.update(sessionRef, {
+  'activeStudentCount':
+      currentActiveCount > 0 ? currentActiveCount - 1 : 0,
+  'updatedAt': FieldValue.serverTimestamp(),
+});
 
     await batch.commit();
 
-    _showSnack('Öğrenci etütten çıkarıldı.');
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFF008A8A),
+        content: Text(
+          '$studentName etütten çıkarıldı.',
+          style: const TextStyle(color: Colors.white),
+        ),
+      ),
+    );
+  } catch (e) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: Colors.redAccent,
+        content: Text('Öğrenci etütten çıkarılamadı: $e'),
+      ),
+    );
+  } finally {
+    if (mounted) {
+      setState(() {
+        _removingStudentIds.remove(studentId);
+      });
+    }
   }
+}
   void _showSnack(String message) {
     if (!mounted) return;
 
@@ -701,7 +883,13 @@ Column(
                   .collection('students')
                   .snapshots(),
               builder: (context, snapshot) {
-                final count = snapshot.data?.docs.length ?? 0;
+final count = snapshot.data?.docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+
+      return (data['status']?.toString() ?? 'present') ==
+          'present';
+    }).length ??
+    0;
 
                 return Column(
                   children: [
@@ -1587,8 +1775,10 @@ Widget _dialogStudentTile(
 
         if (!snapshot.hasData) return const SizedBox.shrink();
 
-        final students = snapshot.data!.docs;
-        
+final students = snapshot.data!.docs.where((doc) {
+  final data = doc.data() as Map<String, dynamic>;
+  return (data['status']?.toString() ?? 'present') == 'present';
+}).toList();        
 
         if (students.isEmpty) {
           return Container(
@@ -1655,9 +1845,12 @@ SizedBox(
               Icons.close_rounded,
               color: Colors.redAccent,
             ),
-            onPressed: _isProcessing
-                ? null
-                : () => _removeStudentFromStudy(doc.id),
+onPressed: _removingStudentIds.contains(doc.id)
+    ? null
+    : () => _removeStudentFromStudy(
+          doc.id,
+          data['studentName']?.toString() ?? 'Öğrenci',
+        ),
           ),
         ),
       );

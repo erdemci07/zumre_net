@@ -484,46 +484,147 @@ Future<void> _showAvailabilityDialog() async {
                               ...List.generate(slots.length, (index) {
                                 final slot = slots[index];
 
-                                return Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: _teacherTimeField(
-                                          label: 'Başlangıç',
-                                          initialValue: slot['start'] ?? '09:00',
-                                          onChanged: (value) {
-                                            setDialogState(() {
+                                return Row(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Padding(
+                                            padding: EdgeInsets.only(left: 14, bottom: 6),
+                                            child: Text(
+                                              'Başlangıç',
+                                              style: TextStyle(
+                                                color: Colors.white60,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                          TextFormField(
+                                            initialValue: slot['start'],
+                                            keyboardType: TextInputType.number,
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.digitsOnly,
+                                              LengthLimitingTextInputFormatter(4),
+                                              _TimeTextInputFormatter(),
+                                            ],
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            decoration: InputDecoration(
+                                              hintText: '09:00',
+                                              hintStyle: const TextStyle(color: Colors.white38),
+                                              filled: true,
+                                              fillColor: Colors.white.withOpacity(0.09),
+                                              contentPadding: const EdgeInsets.symmetric(
+                                                horizontal: 16,
+                                                vertical: 17,
+                                              ),
+                                              border: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(18),
+                                                borderSide: BorderSide.none,
+                                              ),
+                                              enabledBorder: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(18),
+                                                borderSide: BorderSide(
+                                                  color: Colors.white.withOpacity(0.08),
+                                                ),
+                                              ),
+                                              focusedBorder: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(18),
+                                                borderSide: const BorderSide(
+                                                  color: Colors.greenAccent,
+                                                  width: 1.3,
+                                                ),
+                                              ),
+                                            ),
+                                            onChanged: (value) {
                                               slot['start'] = value;
-                                            });
-                                          },
-                                        ),
+                                            },
+                                          ),
+                                        ],
                                       ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: _teacherTimeField(
-                                          label: 'Bitiş',
-                                          initialValue: slot['end'] ?? '10:00',
-                                          onChanged: (value) {
-                                            setDialogState(() {
+                                    ),
+
+                                    const SizedBox(width: 10),
+
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Padding(
+                                            padding: EdgeInsets.only(left: 14, bottom: 6),
+                                            child: Text(
+                                              'Bitiş',
+                                              style: TextStyle(
+                                                color: Colors.white60,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                          TextFormField(
+                                            initialValue: slot['end'],
+                                            keyboardType: TextInputType.number,
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.digitsOnly,
+                                              LengthLimitingTextInputFormatter(4),
+                                              _TimeTextInputFormatter(),
+                                            ],
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            decoration: InputDecoration(
+                                              hintText: '17:00',
+                                              hintStyle: const TextStyle(color: Colors.white38),
+                                              filled: true,
+                                              fillColor: Colors.white.withOpacity(0.09),
+                                              contentPadding: const EdgeInsets.symmetric(
+                                                horizontal: 16,
+                                                vertical: 17,
+                                              ),
+                                              border: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(18),
+                                                borderSide: BorderSide.none,
+                                              ),
+                                              enabledBorder: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(18),
+                                                borderSide: BorderSide(
+                                                  color: Colors.white.withOpacity(0.08),
+                                                ),
+                                              ),
+                                              focusedBorder: OutlineInputBorder(
+                                                borderRadius: BorderRadius.circular(18),
+                                                borderSide: const BorderSide(
+                                                  color: Colors.greenAccent,
+                                                  width: 1.3,
+                                                ),
+                                              ),
+                                            ),
+                                            onChanged: (value) {
                                               slot['end'] = value;
-                                            });
-                                          },
-                                        ),
+                                            },
+                                          ),
+                                        ],
                                       ),
-                                      IconButton(
-                                        onPressed: () {
-                                          setDialogState(() {
-                                            temp[day.key]!.removeAt(index);
-                                          });
-                                        },
-                                        icon: const Icon(
-                                          Icons.delete_outline,
-                                          color: Colors.redAccent,
-                                        ),
+                                    ),
+
+                                    IconButton(
+                                      onPressed: () {
+                                        setDialogState(() {
+                                          temp[day.key]!.removeAt(index);
+                                        });
+                                      },
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        color: Colors.redAccent,
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 );
                               }),
                           ],
@@ -1421,15 +1522,31 @@ Future<void> _showTransferDialog({
 
       final List<String> teacherSubjects = [];
 
-      final rawSubjects = data['subjects'];
+final rawSubjects = data['subjects'];
 
-      if (rawSubjects is List) {
-        teacherSubjects.addAll(
-          rawSubjects
-              .map((item) => item.toString().trim())
-              .where((item) => item.isNotEmpty),
-        );
-      } else if (rawSubjects is String &&
+if (rawSubjects is List) {
+  teacherSubjects.addAll(
+    rawSubjects
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty),
+  );
+} else if (rawSubjects is String &&
+    rawSubjects.trim().isNotEmpty) {
+  teacherSubjects.addAll(
+    rawSubjects
+        .split(RegExp(r'[,;/|]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty),
+  );
+} else if (rawSubjects is String &&
+    rawSubjects.trim().isNotEmpty) {
+  teacherSubjects.addAll(
+    rawSubjects
+        .split(RegExp(r'[,;/|]'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty),
+  );
+} else if (rawSubjects is String &&
           rawSubjects.trim().isNotEmpty) {
         teacherSubjects.addAll(
           rawSubjects
@@ -1748,23 +1865,6 @@ Future<bool> _confirmLogout({
       ),
     );
   }
-  Widget _teacherTimeField({
-  required String label,
-  required String initialValue,
-  required void Function(String value) onChanged,
-}) {
-  return TextFormField(
-    initialValue: initialValue,
-    keyboardType: TextInputType.number,
-    inputFormatters: [
-      FilteringTextInputFormatter.digitsOnly,
-      LengthLimitingTextInputFormatter(4),
-      _TimeTextInputFormatter(),
-    ],
-    style: const TextStyle(color: Colors.white),
-    onChanged: onChanged,
-  );
-}
 
   Widget _buildActiveQuestion() {
     final teacherId = _auth.currentUser!.uid;

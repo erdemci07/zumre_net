@@ -58,6 +58,59 @@ void initState() {
   _findAndListenActiveQueue();
   _checkZumreAvailability();
 }
+String _normalizeSubject(dynamic value) {
+  return value
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replaceAll('ı', 'i')
+      .replaceAll('ş', 's')
+      .replaceAll('ğ', 'g')
+      .replaceAll('ü', 'u')
+      .replaceAll('ö', 'o')
+      .replaceAll('ç', 'c');
+}
+
+bool _teacherHasSubject(
+  Map<String, dynamic> data,
+  String subject,
+) {
+  final targetSubject = _normalizeSubject(subject);
+  final teacherSubjects = <String>[];
+
+  final rawSubjects = data['subjects'];
+
+  if (rawSubjects is List) {
+    teacherSubjects.addAll(
+      rawSubjects
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty),
+    );
+  } else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
+    teacherSubjects.addAll(
+      rawSubjects
+          .split(RegExp(r'[,;/|]'))
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty),
+    );
+  }
+
+  final branch = data['branch']?.toString().trim() ?? '';
+  final legacySubject = data['subject']?.toString().trim() ?? '';
+
+  if (branch.isNotEmpty) {
+    teacherSubjects.add(branch);
+  }
+
+  if (legacySubject.isNotEmpty) {
+    teacherSubjects.add(legacySubject);
+  }
+
+  return teacherSubjects.any(
+    (teacherSubject) =>
+        _normalizeSubject(teacherSubject) == targetSubject,
+  );
+}
 int _timeToMinutes(String time) {
   final parts = time.split(':');
   if (parts.length != 2) return 0;
@@ -82,73 +135,107 @@ bool _isNowInSlots(DateTime now, List<Map<String, dynamic>> slots) {
 
   return false;
 }
-Future<Map<String, dynamic>?> _findBestAvailableTeacher(String subject) async {
+Future<Map<String, dynamic>?> _findBestAvailableTeacher(
+  String subject,
+) async {
   final teachersSnapshot = await _firestore
       .collection('users')
       .where('role', isEqualTo: 'teacher')
-      .where('teacherStatus', isEqualTo: 'available')
-      .where('subjects', arrayContains: subject)
       .get();
 
-  if (teachersSnapshot.docs.isEmpty) return null;
+  final availableTeachers = teachersSnapshot.docs.where((doc) {
+    final data = doc.data();
+
+    final status =
+        data['teacherStatus']?.toString().trim() ?? 'absent';
+
+    if (status != 'available') {
+      return false;
+    }
+
+    return _teacherHasSubject(data, subject);
+  }).toList();
+
+  if (availableTeachers.isEmpty) {
+    return null;
+  }
 
   final now = DateTime.now();
-  final todayStart = DateTime(now.year, now.month, now.day);
+  final todayStart = DateTime(
+    now.year,
+    now.month,
+    now.day,
+  );
 
   final queuesSnapshot = await _firestore
       .collection('queues')
-      .where('status', whereIn: ['waiting', 'in_progress'])
+      .where(
+        'status',
+        whereIn: ['waiting', 'in_progress'],
+      )
       .get();
 
   final todayCompletedSnapshot = await _firestore
       .collection('queues')
       .where('status', isEqualTo: 'completed')
-      .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
+      .where(
+        'completedAt',
+        isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart),
+      )
       .get();
 
-  final Map<String, int> teacherScore = {};
-
-  for (final teacher in teachersSnapshot.docs) {
-    teacherScore[teacher.id] = 0;
-  }
+  final Map<String, int> teacherScore = {
+    for (final teacher in availableTeachers) teacher.id: 0,
+  };
 
   for (final queue in queuesSnapshot.docs) {
     final data = queue.data();
-    final teacherId = data['teacherId'];
-    final status = data['status'];
+    final teacherId = data['teacherId']?.toString();
+    final status = data['status']?.toString();
 
-    if (teacherId == null || !teacherScore.containsKey(teacherId)) continue;
+    if (teacherId == null ||
+        !teacherScore.containsKey(teacherId)) {
+      continue;
+    }
 
     if (status == 'in_progress') {
-      teacherScore[teacherId] = teacherScore[teacherId]! + 3;
+      teacherScore[teacherId] =
+          (teacherScore[teacherId] ?? 0) + 3;
     } else if (status == 'waiting') {
-      teacherScore[teacherId] = teacherScore[teacherId]! + 1;
+      teacherScore[teacherId] =
+          (teacherScore[teacherId] ?? 0) + 1;
     }
   }
 
   final Map<String, int> todaySolved = {};
 
-  for (final doc in todayCompletedSnapshot.docs) {
-    final data = doc.data();
-    final teacherId = data['teacherId'];
+  for (final queue in todayCompletedSnapshot.docs) {
+    final teacherId =
+        queue.data()['teacherId']?.toString();
 
-    if (teacherId == null || !teacherScore.containsKey(teacherId)) continue;
+    if (teacherId == null ||
+        !teacherScore.containsKey(teacherId)) {
+      continue;
+    }
 
-    todaySolved[teacherId] = (todaySolved[teacherId] ?? 0) + 1;
+    todaySolved[teacherId] =
+        (todaySolved[teacherId] ?? 0) + 1;
   }
 
   for (final entry in todaySolved.entries) {
     teacherScore[entry.key] =
-        (teacherScore[entry.key] ?? 0) + (entry.value ~/ 10);
+        (teacherScore[entry.key] ?? 0) +
+            (entry.value ~/ 10);
   }
 
-  final teachers = teachersSnapshot.docs.toList();
+  final teachers = availableTeachers.toList();
 
   teachers.shuffle();
 
   teachers.sort((a, b) {
     final aScore = teacherScore[a.id] ?? 0;
     final bScore = teacherScore[b.id] ?? 0;
+
     return aScore.compareTo(bScore);
   });
 
@@ -157,7 +244,10 @@ Future<Map<String, dynamic>?> _findBestAvailableTeacher(String subject) async {
 
   return {
     'id': bestTeacher.id,
-    'name': data['fullName'] ?? data['name'] ?? data['email'] ?? 'Öğretmen',
+    'name': data['fullName'] ??
+        data['name'] ??
+        data['email'] ??
+        'Öğretmen',
     'score': teacherScore[bestTeacher.id] ?? 0,
   };
 }
@@ -357,7 +447,9 @@ void dispose() {
     );
   }
 
-  Future<void> _getCurrentTeacherName(String teacherId) async {
+  Future<void> _getCurrentTeacherName(String? teacherId) async {
+    if (teacherId == null || teacherId.trim().isEmpty) return;
+
     final teacherDoc =
         await _firestore.collection('users').doc(teacherId).get();
 
@@ -503,50 +595,66 @@ await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
       });
     }
   }
-
 Future<void> _loadTeachersForSubject(String subject) async {
-  if (subject.isEmpty) return;
+  if (subject.trim().isEmpty) return;
 
-  setState(() {
-    _isLoadingTeachers = true;
-    _teachersForSubject = [];
-    _selectedTeacherId = null;
-    _selectedTeacherName = null;
-    _useSmartTeacherSelection = true;
-  });
+  if (mounted) {
+    setState(() {
+      _isLoadingTeachers = true;
+      _teachersForSubject = [];
+      _selectedTeacherId = null;
+      _selectedTeacherName = null;
+      _useSmartTeacherSelection = true;
+    });
+  }
 
   try {
+    // Önce bütün öğretmenleri alıyoruz.
     final snapshot = await _firestore
         .collection('users')
         .where('role', isEqualTo: 'teacher')
-        .where('teacherStatus', isEqualTo: 'available')
-        .where('subjects', arrayContains: subject)
         .get();
 
-final teachers = snapshot.docs.where((doc) {
-  final data = doc.data();
+    final teachers = <Map<String, dynamic>>[];
 
-  if (data['activeStudyDutyId'] != null) return false;
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
 
-  return true;
-}).map((doc) {
-  final data = doc.data();
+      final status =
+          data['teacherStatus']?.toString().trim() ?? '';
 
-  return {
-    'id': doc.id,
-    'name': data['fullName'] ?? data['name'] ?? 'Öğretmen',
-  };
-}).toList();
+      // Yalnızca müsait öğretmen
+      if (status != 'available') {
+        continue;
+      }
 
-    if (mounted) {
-      setState(() {
-        _teachersForSubject = teachers;
+      if (!_teacherHasSubject(data, subject)) {
+        continue;
+      }
+
+      teachers.add({
+        'id': doc.id,
+        'name': data['fullName'] ??
+            data['name'] ??
+            data['email'] ??
+            'Öğretmen',
       });
     }
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Öğretmenler yüklenemedi: $e')),
+
+    teachers.sort(
+      (a, b) => a['name']
+          .toString()
+          .compareTo(b['name'].toString()),
     );
+
+    if (!mounted) return;
+
+    setState(() {
+      _teachersForSubject = teachers;
+    });
+
+    if (!mounted) return;
+
   } finally {
     if (mounted) {
       setState(() {
@@ -607,15 +715,37 @@ if (studentData['isInStudySession'] == true) {
   );
   return;
 }
-    if (_selectedSubject == null ||
-        _selectedSubject!.isEmpty ||
-        (_teachersForSubject.isEmpty &&
-            (_selectedTeacherId == null || _selectedTeacherId!.isEmpty))) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lütfen bir ders ve öğretmen seçin')),
-      );
-      return;
-    }
+if (_selectedSubject == null ||
+    _selectedSubject!.trim().isEmpty) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Lütfen bir ders seçin.'),
+    ),
+  );
+  return;
+}
+
+if (!_useSmartTeacherSelection &&
+    (_selectedTeacherId == null ||
+        _selectedTeacherId!.trim().isEmpty)) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Lütfen bir öğretmen seçin.'),
+    ),
+  );
+  return;
+}
+
+if (!_useSmartTeacherSelection &&
+    (_selectedTeacherId == null ||
+        _selectedTeacherId!.trim().isEmpty)) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Lütfen bir öğretmen seçin.'),
+    ),
+  );
+  return;
+}
 
     final userId = _auth.currentUser!.uid;
 
@@ -631,41 +761,28 @@ if (studentData['isInStudySession'] == true) {
       );
       return;
     }
+if (finalTeacherId == null ||
+    finalTeacherId.trim().isEmpty) {
+  final fallbackTeacher =
+      await _findBestAvailableTeacher(_selectedSubject!);
 
-    if (finalTeacherId == null || finalTeacherId.isEmpty) {
-      final teachersSnapshot = await _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'teacher')
-          .where('subjects', arrayContains: _selectedSubject)
-          .get();
+  if (fallbackTeacher == null) {
+    if (!mounted) return;
 
-      final availableTeachers = teachersSnapshot.docs.where((doc) {
-        final data = doc.data();
-        final status = data['teacherStatus'] ?? 'available';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$_selectedSubject dersi için şu an müsait öğretmen bulunamadı.',
+        ),
+      ),
+    );
+    return;
+  }
 
-        return status == 'available';
-      }).toList();
-
-      if (availableTeachers.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '$_selectedSubject dersi için uygun öğretmen bulunamadı',
-            ),
-          ),
-        );
-        return;
-      }
-
-      final randomIndex =
-          DateTime.now().millisecondsSinceEpoch % availableTeachers.length;
-      final selectedTeacherDoc = availableTeachers[randomIndex];
-      finalTeacherId = selectedTeacherDoc.id;
-      finalTeacherName = selectedTeacherDoc.data()['name'] ??
-          selectedTeacherDoc.data()['teacherName'] ??
-          selectedTeacherDoc.data()['displayName'] ??
-          finalTeacherName;
-    }
+  finalTeacherId = fallbackTeacher['id']?.toString();
+  finalTeacherName =
+      fallbackTeacher['name']?.toString() ?? 'Öğretmen';
+}
 
     try {
       final newQueue = {
@@ -708,11 +825,18 @@ if (!_isZumreOpenNow || _isLunchNow) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sıranız alındı! Lütfen bekleyin.')),
       );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sıra alınamadı: $e')),
-      );
-    }
+} catch (e) {
+  if (mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Öğretmen belirlenemedi: $e'),
+      ),
+    );
+  }
+
+  return;
+} finally {
+}
   }
 Future<bool> _confirmLogout({
   required Color color,
@@ -1143,14 +1267,14 @@ Widget _compactZumreInfoBadge() {
     mainAxisSpacing: 9,
     childAspectRatio: 1.8,
     children: [
-      _subjectCard('Matematik', Icons.calculate, const Color(0xFF6C3DFF)),
-      _subjectCard('Fizik', Icons.biotech, const Color(0xFF0099FF)),
-      _subjectCard('Kimya', Icons.science, const Color(0xFFFF8A00)),
-      _subjectCard('Biyoloji', Icons.eco, const Color(0xFF00C878)),
-      _subjectCard('Türkçe', Icons.menu_book, const Color(0xFFE91E63)),
-      _subjectCard('Tarih', Icons.history_edu, const Color(0xFFFFC107)),
-      _subjectCard('Coğrafya', Icons.public, const Color(0xFF00BCD4)),
-      _subjectCard('Geometri', Icons.square_foot, const Color(0xFF9C27B0)),
+      _subjectCard('MATEMATİK', Icons.calculate, const Color(0xFF6C3DFF)),
+      _subjectCard('FİZİK', Icons.biotech, const Color(0xFF0099FF)),
+      _subjectCard('KİMYA', Icons.science, const Color(0xFFFF8A00)),
+      _subjectCard('BİYOLOJİ', Icons.eco, const Color(0xFF00C878)),
+      _subjectCard('TÜRKÇE', Icons.menu_book, const Color(0xFFE91E63)),
+      _subjectCard('TARİH', Icons.history_edu, const Color(0xFFFFC107)),
+      _subjectCard('COĞRAFYA', Icons.public, const Color(0xFF00BCD4)),
+      _subjectCard('GEOMETRİ', Icons.square_foot, const Color(0xFF9C27B0)),
     ],
   );
 }
@@ -1242,10 +1366,13 @@ Widget _subjectCard(String title, IconData icon, Color color) {
   return InkWell(
     borderRadius: BorderRadius.circular(20),
     onTap: () {
-      setState(() {
-        _selectedSubject = title;
-        _selectedTeacherId = null;
-      });
+setState(() {
+  _selectedSubject = title;
+  _selectedTeacherId = null;
+  _selectedTeacherName = null;
+  _teachersForSubject = [];
+  _useSmartTeacherSelection = true;
+});
 
       _loadTeachersForSubject(title);
     },
