@@ -8,6 +8,17 @@ ZümreNet'in amacı, dershane içerisindeki soru çözüm ve etüt süreçlerini
 
 ## Özellikler
 
+Öğretmen Paneli
+
+* Haftalık çalışma programını ayarlayabilme
+* Bekleyen öğrencileri görüntüleme
+* Öğrencileri manuel olarak kuyruğa ekleyebilme
+* Soruları çözüldü olarak işaretleme
+* Öğrenci değerlendirmelerini görüntüleme
+* Müsait / Molada / Gelmedi durum yönetimi
+* Günlük çözülen soru istatistikleri
+* Etüt sürecindeki öğrenci ve soru takibi
+
 Öğrenci Paneli
 
 * Ders seçerek sıra alma
@@ -18,15 +29,6 @@ ZümreNet'in amacı, dershane içerisindeki soru çözüm ve etüt süreçlerini
 * Soru çözümü sonrası öğretmeni puanlama ve yorum yapma
 * Sıra iptalinde bekleme süresi (cooldown) sistemi
 
-Öğretmen Paneli
-
-* Bekleyen öğrencileri görüntüleme
-* Öğrencileri manuel olarak kuyruğa ekleyebilme
-* Soruları çözüldü olarak işaretleme
-* Öğrenci değerlendirmelerini görüntüleme
-* Müsait / Molada / Gelmedi durum yönetimi
-* Günlük çözülen soru istatistikleri
-* Etüt sürecindeki öğrenci ve soru takibi
 
 Etüt Sistemi
 
