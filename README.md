@@ -1,165 +1,135 @@
-#ZümreNet
+ZümreNet
 
-ZümreNet, dershaneler ve eğitim kurumları için geliştirilmiş gerçek zamanlı öğrenci–öğretmen soru, etüt ve zümre yönetim sistemidir.
+ZümreNet, dershaneler ve eğitim kurumları için geliştirilmiş gerçek zamanlı öğretmen–öğrenci soru, etüt ve zümre yönetim sistemidir.
 
-Sistem; öğrencilerin soru çözüm süreçlerini dijitalleştirir, öğretmenlerin iş yükünü dengeler, öğrencileri uygun öğretmenlere yönlendirir ve kurum yönetimine ölçülebilir veriler sunar.
+Sistem; öğrencilerin soru çözüm süreçlerini dijitalleştirir, öğretmenlerin iş yükünü dengeler, öğrencileri en uygun öğretmene yönlendirir ve kurum yönetimine detaylı istatistikler sunar.
 
-#Temel süreç:
+Özellikler
 
-Öğrenci Sıra Alır → Sistem Uygun Öğretmeni Belirler → Öğretmen Soruyu Çözer → Etüt/Soru Kaydı Oluşur → İstatistik ve Raporlara Yansır
+Öğrenci Paneli
 
----
+* Ders seçerek sıra alma
+* Öğretmen seçebilme veya otomatik olarak en uygun öğretmene yönlendirilme
+* Canlı sıra takibi
+* Öğretmenin soru ile ilgilenmeye başladığını anlık olarak görebilme
+* Soru çözümü sonrası öğretmeni puanlama ve yorum yapma
+* Sıra iptalinde bekleme süresi (cooldown) sistemi
+* Etüt ve soru çözüm süreçlerini sistem üzerinden takip edebilme
 
-#Özellikler
+Öğretmen Paneli
 
-👨‍🎓 Öğrenci Paneli
-
-* Ders/branş seçerek soru sırasına katılma
-* Uygun öğretmene otomatik yönlendirilme
-* Öğretmen seçerek veya sistem yönlendirmesiyle sıra alma
-* Canlı sıra ve bekleme durumu takibi
-* Öğretmenin soru ile ilgilenmeye başladığını anlık görebilme
-* Soru çözüm sürecinin gerçek zamanlı takip edilmesi
-* Soru çözümü sonrasında öğretmeni değerlendirme
-* Puan ve yorum sistemi
-* Sıra iptalinde kontrollü bekleme süresi (cooldown)
-* Etüt süreçlerinin sistem üzerinden takip edilmesi
-
----
-
-👨‍🏫 Öğretmen Paneli
-
-* Branşına ait bekleyen öğrencileri görüntüleme
-* Öğrencilerin soru çözüm süreçlerini yönetme
-* Öğrenciyi manuel olarak kuyruğa ekleme
-* Soru çözümünü başlatma ve tamamlama
+* Bekleyen öğrencileri görüntüleme
+* Branşına uygun öğrencilerin soru sıralarını yönetme
+* Öğrencileri manuel olarak kuyruğa ekleyebilme
+* Soru çözümünü başlatma ve çözüldü olarak işaretleme
 * Öğrenci değerlendirmelerini görüntüleme
-* Günlük çözülen soru sayısını takip etme
-* Etüt süreçlerini yönetme
 * Müsait / Molada / Gelmedi durum yönetimi
-* Öğretmen durumuna göre otomatik sıra yönetimi
+* Günlük çözülen soru istatistiklerini takip etme
+* Etüt süreçlerini yönetme
 
-Öğretmenin durumu değiştiğinde sistem yönlendirme mekanizması bunu dikkate alır. Böylece müsait olmayan öğretmenlere yeni öğrencilerin yönlendirilmesinin önüne geçilir.
+Öğretmenin mevcut durumu, sistemin otomatik yönlendirme mekanizması tarafından dikkate alınır. Böylece müsait olmayan öğretmenlere yeni öğrencilerin yönlendirilmesi engellenir.
 
----
+Akıllı Öğretmen Yönlendirme
 
-🎯 Akıllı Öğretmen Yönlendirme ve Kuyruk Yönetimi
-
-ZümreNet'in temel bileşenlerinden biri, öğrencilerin uygun öğretmenlere dengeli şekilde yönlendirilmesini sağlayan akıllı kuyruk yönetim sistemidir.
+ZümreNet'in temel özelliklerinden biri, öğrencileri en uygun öğretmene otomatik olarak yönlendiren kuyruk yönetim sistemidir.
 
 Sistem yönlendirme sırasında;
 
-* Öğrencinin seçtiği ders/branşı
+* Öğrencinin seçtiği ders / branşı
 * Öğretmenin branşını
 * Öğretmenin mevcut durumunu
-* Aktif soru/öğrenci yoğunluğunu
-* Mevcut kuyrukları
+* Öğretmenin mevcut öğrenci yoğunluğunu
+* Aktif ve bekleyen soru kuyruklarını
 * Öğretmenin uygunluğunu
 
-dikkate alarak öğrenciyi uygun öğretmene yönlendirebilir.
+dikkate alır.
 
-Bu yapı sayesinde öğrencilerin sürekli aynı öğretmende birikmesi azaltılır ve öğretmenler arasındaki iş yükünün daha dengeli dağıtılması amaçlanır.
+Bu yapı sayesinde öğrencilerin sürekli aynı öğretmende birikmesi önlenir ve öğretmenler arasındaki iş yükünün dengeli dağıtılması sağlanır.
 
----
+Etüt Yönetim Sistemi
 
-📚 Etüt Yönetim Sistemi
-
-ZümreNet yalnızca anlık soru sırası yönetimi değil, kurum içerisindeki etüt süreçlerinin yönetimi için de kullanılabilir.
+ZümreNet, anlık soru çözüm sisteminin yanında kurum içerisindeki etüt süreçlerinin dijital olarak yönetilmesini sağlar.
 
 Etüt sistemi ile;
 
 * Etüt başlangıç ve bitiş saatleri tanımlanabilir
-* Hafta içi ve hafta sonu farklı etüt saatleri oluşturulabilir
+* Hafta içi ve hafta sonu için farklı etüt saatleri oluşturulabilir
 * Aktif etüt süreçleri sistem tarafından takip edilebilir
 * Öğrenci ve öğretmen hareketleri kayıt altına alınabilir
-* Etüt içerisinde gerçekleşen soru çözüm süreçleri analiz edilebilir
-* Etüt sonunda oluşan veriler raporlara aktarılabilir
-* Etüt dışındaki açık süreçler kontrollü şekilde sonlandırılabilir
+* Etüt içerisinde gerçekleşen soru çözüm süreçleri takip edilebilir
+* Etüt sonunda oluşan veriler istatistiklere ve raporlara aktarılabilir
+* Açık kalan süreçler kontrollü şekilde sonlandırılabilir
 
-Böylece kurum içerisindeki etüt çalışmaları yalnızca planlanabilir değil, aynı zamanda ölçülebilir ve analiz edilebilir hale gelir.
+Böylece kurum içerisindeki etüt çalışmaları yalnızca planlanmakla kalmaz; aynı zamanda ölçülebilir, takip edilebilir ve analiz edilebilir hale gelir.
 
----
+Kullanıcı Yönetimi ve Toplu Kullanıcı Yükleme
 
-👥 Kullanıcı Yönetimi ve Toplu Kullanıcı Yükleme
-
-ZümreNet, yüksek öğrenci ve öğretmen sayısına sahip kurumların kullanıcı yönetimini kolaylaştıracak şekilde tasarlanmıştır.
+ZümreNet, yüksek öğrenci ve öğretmen sayısına sahip eğitim kurumları için kapsamlı bir kullanıcı yönetim sistemi sunar.
 
 Yönetici paneli üzerinden;
 
-* Öğrenci ekleme
-* Öğretmen ekleme
-* Kullanıcı silme ve düzenleme
+* Öğrenci ve öğretmen ekleme
+* Kullanıcı bilgilerini düzenleme
+* Kullanıcı silme
 * Kullanıcı rollerini yönetme
-* Öğrenci sınıf bilgilerini yönetme
-* Öğretmen branşlarını tanımlama
-* Çok sayıda kullanıcıyı toplu olarak sisteme aktarma
-* Excel/tablo tabanlı kurum verilerini sisteme uyarlama
+* Öğrencilerin sınıf bilgilerini yönetme
+* Öğretmenlerin branşlarını tanımlama
+* Çok sayıda kullanıcıyı toplu olarak sisteme yükleme
+* Kurumdan alınan kullanıcı verilerini ZümreNet'e aktarma
 
 işlemleri gerçekleştirilebilir.
 
-Toplu kullanıcı aktarımı sayesinde yüzlerce öğrencinin tek tek oluşturulması yerine mevcut kurum verileri sisteme hızlı şekilde aktarılabilir.
+Toplu kullanıcı yükleme sistemi sayesinde yüzlerce öğrencinin veya öğretmenin tek tek oluşturulmasına gerek kalmadan mevcut kurum verileri sisteme hızlı şekilde aktarılabilir.
 
----
+Yönetici Paneli
 
-🛠️ Yönetici Paneli
+* Öğrenci ve öğretmen yönetimi
+* Kullanıcı ekleme, düzenleme ve silme
+* Toplu kullanıcı yükleme
+* Öğretmen branşlarının yönetimi
+* Etüt saatleri ve etüt süreçlerinin yönetimi
+* Son 7 günlük soru çözüm grafikleri
+* Ders bazlı soru dağılımı
+* Öğretmen bazlı çözüm istatistikleri
+* Etüt verilerinin görüntülenmesi
+* Genel sistem kullanım istatistikleri
 
-Yönetici paneli, kurum içerisindeki ZümreNet süreçlerinin merkezi kontrol noktasıdır.
+Gerçek Zamanlı Kuyruk Yönetimi
 
-Yöneticiler;
+ZümreNet'in soru çözüm altyapısı gerçek zamanlı olarak çalışır.
 
-* Öğrenci ve öğretmenleri yönetebilir
-* Toplu kullanıcı yükleyebilir
-* Öğretmen branşlarını kontrol edebilir
-* Etüt saatlerini ve süreçlerini yönetebilir
-* Günlük soru çözüm sayılarını inceleyebilir
-* Son günlere ait soru çözüm grafiklerini görüntüleyebilir
-* Ders/branş bazlı soru dağılımlarını inceleyebilir
-* Öğretmen performanslarını takip edebilir
-* Öğrenci aktivitelerini analiz edebilir
-* Etüt verilerini inceleyebilir
-* Genel sistem kullanım istatistiklerini takip edebilir
+Bir öğrencinin sıraya katılması, öğretmenin soruyla ilgilenmeye başlaması veya soru çözümünün tamamlanması gibi işlemler ilgili kullanıcıların ekranlarına anlık olarak yansıtılır.
 
----
+Sistem;
 
-📊 İstatistik ve Raporlama
+* Yeni öğrencinin sıraya eklenmesini
+* Öğretmen durum değişikliklerini
+* Soru çözümünün başlamasını
+* Soru çözümünün tamamlanmasını
+* Öğrencinin canlı sıra pozisyonunu
+* Kuyruk değişikliklerini
 
-ZümreNet'te gerçekleşen soru çözüm işlemleri yalnızca tamamlanmaz; aynı zamanda analiz edilebilir verilere dönüştürülür.
+gerçek zamanlı olarak takip eder.
 
-Sistem üzerinden;
+İstatistik ve Raporlama
+
+ZümreNet içerisinde gerçekleşen soru çözüm ve etüt işlemleri kayıt altına alınarak analiz edilebilir verilere dönüştürülür.
+
+Yönetici panelinden;
 
 * Günlük çözülen soru sayıları
-* Ders/branş bazlı soru dağılımları
+* Ders / branş bazlı soru dağılımları
 * Öğretmen bazlı çözüm istatistikleri
 * Öğrenci aktivite verileri
-* Etüt bazlı kullanım verileri
+* Etüt kullanım verileri
 * Öğretmen değerlendirmeleri
 * Belirli zaman aralıklarındaki performans değişimleri
 
-incelenebilir.
+takip edilebilir.
 
-Bu sayede kurum yönetimi yalnızca sistemin anlık durumunu değil, zaman içerisindeki kullanım ve performans eğilimlerini de takip edebilir.
+Bu sayede kurum yönetimi yalnızca sistemin mevcut durumunu değil, zaman içerisindeki kullanım ve performans eğilimlerini de inceleyebilir.
 
----
-
-⚡ Gerçek Zamanlı Sistem
-
-ZümreNet'in öğrenci, öğretmen ve yönetici tarafları aynı veri yapısı üzerinde gerçek zamanlı olarak çalışır.
-
-Örneğin bir öğretmen öğrencinin sorusuyla ilgilenmeye başladığında öğrencinin ekranındaki durum otomatik olarak güncellenir.
-
-Benzer şekilde;
-
-* Sıraya yeni öğrenci eklenmesi
-* Öğretmenin durum değiştirmesi
-* Soru çözümünün başlaması
-* Soru çözümünün tamamlanması
-* Kuyruk pozisyonunun değişmesi
-
-gibi işlemler anlık olarak ilgili ekranlara yansıtılır.
-
----
-
-🔐 Rol Tabanlı Yetkilendirme
+Sistem Yapısı
 
 ZümreNet üç temel kullanıcı rolüne sahiptir:
 
@@ -169,49 +139,11 @@ ZümreNet üç temel kullanıcı rolüne sahiptir:
 
 Her kullanıcı yalnızca kendi rolü ve yetkileri dahilindeki ekranlara ve verilere erişebilir.
 
-Bu yapı öğrenci, öğretmen ve yönetici süreçlerinin birbirinden ayrılmasını sağlar.
+Temel soru çözüm akışı:
 
----
+Öğrenci → Ders Seçimi → Akıllı Yönlendirme → En Uygun Öğretmen → Canlı Sıra → Soru Çözümü → Değerlendirme → İstatistik
 
-🧩 Sistem Mimarisi
-
-ZümreNet'in temel yapısı gerçek zamanlı ve olay tabanlı çalışacak şekilde tasarlanmıştır.
-
-Öğrenci
-   │
-   ▼
-Ders / Branş Seçimi
-   │
-   ▼
-Akıllı Yönlendirme
-   │
-   ├── Öğretmen Branşı
-   ├── Öğretmen Durumu
-   ├── Mevcut Yoğunluk
-   └── Aktif Kuyruklar
-   │
-   ▼
-En Uygun Öğretmen
-   │
-   ▼
-Canlı Soru Kuyruğu
-   │
-   ▼
-Soru Çözüm Süreci
-   │
-   ▼
-Tamamlandı
-   │
-   ├── Değerlendirme
-   ├── İstatistik
-   ├── Etüt Verisi
-   └── Raporlama
-
----
-
-💻 Teknolojiler
-
-ZümreNet'in temel teknoloji altyapısı:
+Teknolojiler
 
 * Flutter
 * Dart
@@ -222,35 +154,28 @@ ZümreNet'in temel teknoloji altyapısı:
 * Cloud Run
 * Provider
 
-Firebase altyapısı; kimlik doğrulama, gerçek zamanlı veri senkronizasyonu, kullanıcı yönetimi ve sistem otomasyonlarının temelini oluşturur.
+Firebase altyapısı; kimlik doğrulama, gerçek zamanlı veri senkronizasyonu, kuyruk yönetimi ve sistem otomasyonlarının temelini oluşturur.
 
----
+Amaç
 
-🎯 Amaç
-
-ZümreNet'in amacı, dershane ve eğitim kurumlarında geleneksel olarak manuel yürütülen soru çözüm ve etüt süreçlerini dijitalleştirmektir.
+ZümreNet'in amacı, dershane içerisindeki soru çözüm ve etüt süreçlerini dijital ortama taşıyarak öğretmen ve öğrenciler arasındaki iletişimi hızlandırmak, bekleme sürelerini azaltmak ve kurum yönetimine detaylı istatistikler sunmaktır.
 
 Sistem özellikle;
 
-* Öğrencinin öğretmen aramasını azaltmayı
-* Koridorlarda oluşan bekleme ve yoğunluğu önlemeyi
-* Öğretmenlerin iş yükünü daha dengeli dağıtmayı
+* Öğrencilerin öğretmen aramasını azaltmayı
+* Bekleme sürelerini ve yoğunluğu azaltmayı
+* Öğretmenlerin iş yükünü dengeli dağıtmayı
 * Soru çözüm süreçlerini kayıt altına almayı
 * Etüt çalışmalarını ölçülebilir hale getirmeyi
-* Öğretmen ve öğrenci aktivitelerini analiz etmeyi
 * Kurum yönetimine gerçek veriler üzerinden karar alma imkânı sunmayı
 
 hedefler.
 
-ZümreNet böylece basit bir sıra uygulamasından ziyade, kurum içerisindeki öğrenci–öğretmen etkileşimini ve zümre süreçlerini yöneten bütünleşik bir eğitim yönetim sistemi olarak çalışır.
-
----
+ZümreNet, basit bir sıra uygulamasının ötesinde; kurum içerisindeki öğrenci–öğretmen etkileşimini, soru çözüm süreçlerini ve etüt yönetimini tek sistem altında birleştiren eğitim yönetim platformudur.
 
 Geliştirici
 
 Faruk Erdemci
-
----
 
 Lisans
 
