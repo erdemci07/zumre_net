@@ -1,0 +1,249 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================
+    // ORTAK YARDIMCI FONKSİYONLAR
+    // =========================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function currentUser() {
+      return get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      );
+    }
+
+    function hasRole(roleName) {
+      return isSignedIn()
+        && currentUser().data.role == roleName;
+    }
+
+    function isAdmin() {
+      return hasRole("admin");
+    }
+
+    function isTeacher() {
+      return hasRole("teacher");
+    }
+
+    function isStudent() {
+      return hasRole("student");
+    }
+
+    function isStudyGuard() {
+      return hasRole("studyGuard");
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // =========================================================
+    // SETTINGS — ZÜMRE / ETÜT / ÖĞLE ARASI SAATLERİ
+    // =========================================================
+
+    match /settings/{documentId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================================================
+    // USERS
+    // =========================================================
+
+    match /users/{userId} {
+
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+
+      allow update: if isTeacher()
+        && isOwner(userId)
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            "teacherStatus",
+            "weeklyAvailability",
+            "updatedAt"
+          ]);
+
+      allow update: if isStudent()
+        && isOwner(userId)
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            "cooldownUntil"
+          ]);
+
+      allow update: if isStudyGuard()
+        && resource.data.role == "student"
+        && request.resource.data.role == "student"
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            "isInStudySession",
+            "activeStudySessionId"
+          ]);
+
+      allow update: if isStudyGuard()
+        && resource.data.role == "teacher"
+        && request.resource.data.role == "teacher"
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            "teacherStatus",
+            "updatedAt"
+          ]);
+    }
+
+    // =========================================================
+    // QUEUES — ZÜMRE SIRALARI
+    // =========================================================
+
+    match /queues/{queueId} {
+
+      allow read: if isSignedIn();
+
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == "waiting";
+
+      allow create: if isTeacher()
+        && request.resource.data.teacherId == request.auth.uid
+        && (
+          request.resource.data.status == "waiting"
+          || request.resource.data.status == "in_progress"
+        );
+
+      allow create: if isAdmin();
+
+      allow update: if isStudent()
+        && resource.data.studentId == request.auth.uid
+        && resource.data.status == "waiting"
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.teacherId == resource.data.teacherId
+        && request.resource.data.subject == resource.data.subject
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            "status",
+            "cancelledAt",
+            "canceledAt",
+            "updatedAt"
+          ])
+        && (
+          request.resource.data.status == "cancelled"
+          || request.resource.data.status == "canceled"
+        );
+
+      // Yeni eklenen değerlendirme izni
+      allow update: if isStudent()
+        && resource.data.studentId == request.auth.uid
+        && resource.data.status == "completed"
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.teacherId == resource.data.teacherId
+        && request.resource.data.subject == resource.data.subject
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            "rating",
+            "comment",
+            "ratingPopupClosed",
+            "ratedAt",
+            "updatedAt"
+          ]);
+
+      allow update: if isTeacher()
+        && resource.data.teacherId == request.auth.uid
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.subject == resource.data.subject
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      allow update: if isAdmin();
+
+      allow delete: if isStudent()
+        && resource.data.studentId == request.auth.uid
+        && resource.data.status == "waiting";
+
+      allow delete: if isTeacher()
+        && resource.data.teacherId == request.auth.uid
+        && resource.data.status == "waiting";
+
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================
+    // STUDY SESSIONS — ETÜT OTURUMLARI
+    // =========================================================
+
+    match /studySessions/{sessionId} {
+
+      allow read: if isSignedIn();
+
+      allow create: if isStudyGuard()
+        && request.resource.data.staffId == request.auth.uid
+        && request.resource.data.status == "active";
+
+      allow update: if isStudyGuard()
+        && resource.data.staffId == request.auth.uid
+        && request.resource.data.staffId == resource.data.staffId;
+
+      allow create, update, delete: if isAdmin();
+
+      match /students/{studentId} {
+
+        allow read: if isSignedIn();
+
+        allow create, update, delete: if isStudyGuard()
+          && get(
+            /databases/$(database)/documents/studySessions/$(sessionId)
+          ).data.staffId == request.auth.uid;
+
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    // =========================================================
+    // RATINGS — ÖĞRETMEN DEĞERLENDİRMELERİ
+    // =========================================================
+
+    match /ratings/{ratingId} {
+
+      allow read: if isSignedIn();
+
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid;
+
+      allow update: if isStudent()
+        && resource.data.studentId == request.auth.uid
+        && request.resource.data.studentId == resource.data.studentId;
+
+      allow update, delete: if isAdmin();
+    }
+
+    // =========================================================
+    // GERİ BİLDİRİM KOLEKSİYONU
+    // =========================================================
+
+    match /feedback/{feedbackId} {
+
+      allow read: if isSignedIn();
+
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid;
+
+      allow update: if isStudent()
+        && resource.data.studentId == request.auth.uid
+        && request.resource.data.studentId == resource.data.studentId;
+
+      allow update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
