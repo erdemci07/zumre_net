@@ -370,16 +370,18 @@ Future<void> _checkScheduleAvailability() async {
   var effectiveZumreOpen = isZumreOpen;
   var effectiveLunch = isLunch;
 
-  try {
-    final runtimeDoc =
-        await _firestore.collection('settings').doc('runtimeState').get();
-    final runtimeState = _runtimeZumreState(runtimeDoc.data());
+  if (!settingsDoc.exists) {
+    try {
+      final runtimeDoc =
+          await _firestore.collection('settings').doc('runtimeState').get();
+      final runtimeState = _runtimeZumreState(runtimeDoc.data());
 
-    if (runtimeState != null) {
-      effectiveZumreOpen = runtimeState['isZumreOpen'] ?? isZumreOpen;
-      effectiveLunch = runtimeState['isLunchBreak'] ?? isLunch;
-    }
-  } catch (_) {}
+      if (runtimeState != null) {
+        effectiveZumreOpen = runtimeState['isZumreOpen'] ?? isZumreOpen;
+        effectiveLunch = runtimeState['isLunchBreak'] ?? isLunch;
+      }
+    } catch (_) {}
+  }
 
   String message;
 

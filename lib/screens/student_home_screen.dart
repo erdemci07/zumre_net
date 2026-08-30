@@ -310,6 +310,12 @@ Future<Map<String, dynamic>?> _findBestAvailableTeacher(
 
 Future<void> _checkZumreAvailability() async {
   try {
+    if (await _checkLocalZumreAvailability()) {
+      return;
+    }
+  } catch (_) {}
+
+  try {
     final runtimeDoc =
         await _firestore.collection('settings').doc('runtimeState').get();
 
@@ -321,7 +327,7 @@ Future<void> _checkZumreAvailability() async {
   await _checkLocalZumreAvailability();
 }
 
-Future<void> _checkLocalZumreAvailability() async {
+Future<bool> _checkLocalZumreAvailability() async {
   final now = DateTime.now();
   final isWeekend =
       now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
@@ -384,7 +390,7 @@ nextZumreText = '${futureSlots.first['start']}';  } else {
     message = 'Zümre saati aktif. Sıra alabilirsiniz.';
   }
 
-  if (!mounted) return;
+  if (!mounted) return false;
 
   setState(() {
     _isZumreOpenNow = isZumreOpen;
@@ -392,9 +398,10 @@ nextZumreText = '${futureSlots.first['start']}';  } else {
     _zumreMessage = message;
     _nextZumreText = nextZumreText;
   });
+
+  return true;
 }
 
-  @override
   @override
 void dispose() {
   _queueSubscription?.cancel();

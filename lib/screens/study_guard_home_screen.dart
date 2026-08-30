@@ -30,6 +30,9 @@ String _studyScheduleMessage = 'Etüt saatleri yönetici panelindeki programa g�
 final Set<String> _removingStudentIds = {};
   bool _isProcessing = false;
   StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
+  StreamSubscription<DocumentSnapshot>? _scheduleSubscription;
+  Map<String, dynamic>? _cachedScheduleData;
+  bool? _lastLocalStudyOpen;
   static const Duration _runtimeStateMaxAge = Duration(minutes: 3);
 
   @override
@@ -41,11 +44,12 @@ final Set<String> _removingStudentIds = {};
 Future<void> _initPage() async {
   await _loadStaffInfo();
   await _checkStudySchedule();
+  _listenZumreSchedule();
   _listenRuntimeScheduleState();
 
   _scheduleTimer = Timer.periodic(
-    const Duration(minutes: 1),
-    (_) => _checkStudySchedule(),
+    const Duration(seconds: 5),
+    (_) => _applyLocalStudyScheduleFromCache(runSessionSideEffects: true),
   );
 }
 
@@ -54,6 +58,7 @@ Future<void> _initPage() async {
     _elapsedTimer?.cancel();
     _scheduleTimer?.cancel();
     _runtimeStateSubscription?.cancel();
+    _scheduleSubscription?.cancel();
     super.dispose();
   }
 
@@ -146,8 +151,109 @@ bool _isFreshRuntimeState(Map<String, dynamic>? data) {
   return age >= Duration.zero && age <= _runtimeStateMaxAge;
 }
 
+Map<String, dynamic>? _localStudyScheduleState() {
+  final data = _cachedScheduleData;
+  if (data == null) return null;
+
+  final now = DateTime.now();
+  final isWeekend =
+      now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
+  final rawSlots = isWeekend
+      ? List.from(data['weekendStudySlots'] ?? [])
+      : List.from(data['weekdayStudySlots'] ?? []);
+  final slots = rawSlots.map((e) => Map<String, dynamic>.from(e)).toList();
+  final isOpen = _isNowInSlots(now, slots);
+
+  var slotText = 'Etüt saati';
+
+  for (final slot in slots) {
+    final start = '${slot['start']}';
+    final end = '${slot['end']}';
+    final startMin = _timeToMinutes(start);
+    final endMin = _timeToMinutes(end);
+    final nowMin = now.hour * 60 + now.minute;
+
+    if (endMin > startMin && nowMin >= startMin && nowMin < endMin) {
+      slotText = '$start - $end';
+      break;
+    }
+  }
+
+  final message = slots.isEmpty
+      ? isWeekend
+          ? 'Hafta sonu etüt saati tanımlı değil.'
+          : 'Hafta içi etüt saati tanımlı değil.'
+      : isOpen
+          ? 'Etüt saati aktif. Yoklama alabilirsiniz.'
+          : 'Şu an etüt saati aktif değil.';
+
+  return {
+    'isOpen': isOpen,
+    'slotText': slotText,
+    'message': message,
+  };
+}
+
+Future<bool> _applyLocalStudyScheduleFromCache({
+  required bool runSessionSideEffects,
+}) async {
+  final state = _localStudyScheduleState();
+  if (state == null) return false;
+
+  final isOpen = state['isOpen'] == true;
+  final previousOpen = _lastLocalStudyOpen;
+  _lastLocalStudyOpen = isOpen;
+
+  if (mounted) {
+    setState(() {
+      _isStudyOpenNow = isOpen;
+      _activeStudySlotText = state['slotText']?.toString() ?? 'Etüt saati';
+      _studyScheduleMessage = state['message']?.toString() ??
+          'Etüt saatleri yönetici panelindeki programa göre otomatik takip edilir.';
+    });
+  }
+
+  if (runSessionSideEffects &&
+      (previousOpen == null || previousOpen != isOpen)) {
+    if (isOpen) {
+      await _ensureActiveSession();
+    } else {
+      await _finishStudySessionSilently(autoEnded: true);
+    }
+  }
+
+  return true;
+}
+
+void _listenZumreSchedule() {
+  _scheduleSubscription?.cancel();
+  _scheduleSubscription = _firestore
+      .collection('settings')
+      .doc('zumreSchedule')
+      .snapshots()
+      .listen((snapshot) async {
+    if (!snapshot.exists) {
+      _cachedScheduleData = null;
+      if (!mounted) return;
+      setState(() {
+        _isStudyOpenNow = false;
+        _activeStudySlotText = 'Etüt saati';
+        _studyScheduleMessage =
+            'Etüt saatleri henüz yönetici tarafından ayarlanmamış.';
+      });
+      return;
+    }
+
+    _cachedScheduleData = snapshot.data() ?? {};
+    await _applyLocalStudyScheduleFromCache(runSessionSideEffects: true);
+  }, onError: (_) {});
+}
+
 Future<bool> _applyRuntimeStudyState(Map<String, dynamic>? data) async {
   if (!_isFreshRuntimeState(data)) return false;
+  if (_cachedScheduleData != null) {
+    return _applyLocalStudyScheduleFromCache(runSessionSideEffects: true);
+  }
 
   final isOpen = data!['isStudyOpen'] == true;
 
@@ -188,6 +294,10 @@ void _listenRuntimeScheduleState() {
 }
 
 Future<void> _checkStudySchedule() async {
+  if (await _applyLocalStudyScheduleFromCache(runSessionSideEffects: true)) {
+    return;
+  }
+
   try {
     final runtimeDoc =
         await _firestore.collection('settings').doc('runtimeState').get();
@@ -220,6 +330,7 @@ Future<void> _checkLocalStudySchedule() async {
     }
 
     final data = doc.data() ?? {};
+    _cachedScheduleData = data;
 
     final rawSlots = isWeekend
         ? List.from(data['weekendStudySlots'] ?? [])
@@ -265,6 +376,8 @@ for (final slot in slots) {
             : 'Şu an etüt saati aktif değil.';
       }
     });
+
+    _lastLocalStudyOpen = isOpen;
 
     if (isOpen) {
       await _ensureActiveSession();
@@ -454,18 +567,18 @@ batch.update(sessionRef, {
     }
   }
 }
-  Future<void> _addStudentToStudy(DocumentSnapshot doc) async {
-    if (_activeSessionId == null) return;
+  Future<bool> _addStudentToStudy(DocumentSnapshot doc) async {
+    if (_activeSessionId == null) return false;
     if (!_isStudyOpenNow) {
       _showSnack('Şu an etüt saati aktif değil.');
-      return;
+      return false;
     }
 
     final data = doc.data() as Map<String, dynamic>;
 
     if (data['isInStudySession'] == true) {
       _showSnack('Bu öğrenci zaten etütte görünüyor.');
-      return;
+      return false;
     }
 
     final activeQueueSnapshot = await _firestore
@@ -477,7 +590,7 @@ batch.update(sessionRef, {
 
     if (activeQueueSnapshot.docs.isNotEmpty) {
       _showSnack('Bu öğrencinin aktif zümre sırası var. Etüte alınamaz.');
-      return;
+      return false;
     }
 
     final sessionId = _activeSessionId!;
@@ -561,18 +674,21 @@ batch.update(sessionRef, {
         return false;
       });
 
-      if (!mounted) return;
+      if (!mounted) return false;
 
       _showSnack(
         wasRejoin
             ? 'Öğrenci yeniden etüte alındı.'
             : 'Öğrenci etüte alındı.',
       );
+      return true;
     } on StateError catch (e) {
       _showSnack(e.message);
     } catch (e) {
       _showSnack('Öğrenci etüte alınamadı: $e');
     }
+
+    return false;
   }
 Future<void> _removeStudentFromStudy(
   String studentId,
@@ -1614,6 +1730,7 @@ Widget _studentSearch() {
 }
 Future<void> _showStudentPickerDialog() async {
   String dialogSearch = '';
+  final optimisticallyHiddenStudentIds = <String>{};
   final activeQueuesStream = _firestore
       .collection('queues')
       .where('status', whereIn: ['waiting', 'in_progress'])
@@ -1771,6 +1888,10 @@ Future<void> _showStudentPickerDialog() async {
                             final students = snapshot.data!.docs.where((doc) {
                               final data = doc.data() as Map<String, dynamic>;
 
+                              if (optimisticallyHiddenStudentIds
+                                  .contains(doc.id)) {
+                                return false;
+                              }
                               if (data['isInStudySession'] == true) return false;
                               if (activeQueueStudentIds.contains(doc.id)) {
                                 return false;
@@ -1811,6 +1932,18 @@ Future<void> _showStudentPickerDialog() async {
                                 itemBuilder: (context, index) {
                                   return _dialogStudentTile(
                                     students[index],
+                                    onOptimisticHide: () {
+                                      setDialogState(() {
+                                        optimisticallyHiddenStudentIds
+                                            .add(students[index].id);
+                                      });
+                                    },
+                                    onRestore: () {
+                                      setDialogState(() {
+                                        optimisticallyHiddenStudentIds
+                                            .remove(students[index].id);
+                                      });
+                                    },
                                     onAdded: () {
                                       Navigator.pop(ctx);
                                     },
@@ -1834,6 +1967,8 @@ Future<void> _showStudentPickerDialog() async {
 }
 Widget _dialogStudentTile(
   DocumentSnapshot doc, {
+  required VoidCallback onOptimisticHide,
+  required VoidCallback onRestore,
   required VoidCallback onAdded,
 }) {
   final data = doc.data() as Map<String, dynamic>;
@@ -1876,7 +2011,14 @@ Widget _dialogStudentTile(
       onPressed: _isProcessing
           ? null
           : () async {
-              await _addStudentToStudy(doc);
+              onOptimisticHide();
+              final added = await _addStudentToStudy(doc);
+
+              if (added) {
+                onAdded();
+              } else {
+                onRestore();
+              }
             },
       style: ElevatedButton.styleFrom(
         backgroundColor: Colors.cyanAccent,
