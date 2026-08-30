@@ -1405,6 +1405,12 @@ else
 
     final file = result.files.single;
     final fileBase64 = base64Encode(file.bytes!);
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final idToken = await currentUser?.getIdToken();
+
+    if (idToken == null || idToken.isEmpty) {
+      throw Exception('Smart Import için geçerli admin oturumu bulunamadı.');
+    }
 
     if (!mounted) return;
     _showExcelLoadingDialog();
@@ -1413,6 +1419,7 @@ else
       Uri.parse('$smartImportBaseUrl/analyze'),
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': 'Bearer $idToken',
       },
       body: jsonEncode({
         'fileBase64': fileBase64,
@@ -1449,6 +1456,7 @@ final analyzeData = _parseUtf8JsonResponse(response);
       Uri.parse('$smartImportBaseUrl/import'),
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': 'Bearer $idToken',
       },
       body: jsonEncode({
         'type': analyzeData['type'],

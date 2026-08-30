@@ -102,6 +102,76 @@ function getStudySlots(scheduleData, weekday) {
     );
 }
 
+function getZumreSlots(scheduleData, weekday) {
+  const rawSlots = isWeekend(weekday)
+    ? scheduleData.weekendSlots
+    : scheduleData.weekdaySlots;
+
+  if (!Array.isArray(rawSlots)) {
+    return [];
+  }
+
+  return rawSlots
+    .map((slot) => ({
+      start: String(slot?.start ?? ""),
+      end: String(slot?.end ?? ""),
+      startMinutes: timeToMinutes(String(slot?.start ?? "")),
+      endMinutes: timeToMinutes(String(slot?.end ?? "")),
+    }))
+    .filter(
+      (slot) =>
+        slot.startMinutes >= 0 &&
+        slot.endMinutes >= 0 &&
+        slot.endMinutes > slot.startMinutes
+    );
+}
+
+function isNowInSlots(currentMinutes, slots) {
+  return slots.some(
+    (slot) =>
+      currentMinutes >= slot.startMinutes &&
+      currentMinutes < slot.endMinutes
+  );
+}
+
+function buildRuntimeScheduleState(scheduleData, now = new Date()) {
+  const nowParts = getIstanbulDateParts(now);
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute;
+  const zumreSlots = getZumreSlots(scheduleData, nowParts.weekday);
+  const studySlots = getStudySlots(scheduleData, nowParts.weekday);
+  const lunchBreak = scheduleData.lunchBreak || {};
+  const lunchSlots = [
+    {
+      start: String(lunchBreak.start ?? "12:20"),
+      end: String(lunchBreak.end ?? "13:00"),
+      startMinutes: timeToMinutes(String(lunchBreak.start ?? "12:20")),
+      endMinutes: timeToMinutes(String(lunchBreak.end ?? "13:00")),
+    },
+  ].filter(
+    (slot) =>
+      slot.startMinutes >= 0 &&
+      slot.endMinutes >= 0 &&
+      slot.endMinutes > slot.startMinutes
+  );
+
+  const isLunchBreak = isNowInSlots(currentMinutes, lunchSlots);
+  const isZumreOpen = isNowInSlots(currentMinutes, zumreSlots);
+  const isStudyOpen = isNowInSlots(currentMinutes, studySlots);
+
+  return {
+    isZumreOpen,
+    isLunchBreak,
+    isStudyOpen,
+    currentPeriod: isLunchBreak
+      ? "lunch"
+      : isStudyOpen
+        ? "study"
+        : isZumreOpen
+          ? "zumre"
+          : "closed",
+  };
+}
+
 /*
  * Bir etüt oturumunun hangi yönetici tanımlı saat aralığına
  * ait olduğunu başlangıç zamanından bulur.
@@ -390,6 +460,51 @@ async function closeStudySession(sessionDoc) {
     throw error;
   }
 }
+
+// ============================================================
+// SUNUCU TARAFI GENEL ZAMAN DURUMU
+// ============================================================
+
+exports.syncRuntimeSchedule = onSchedule(
+  {
+    schedule: "every 1 minutes",
+    timeZone: TIME_ZONE,
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+  },
+  async () => {
+    const scheduleDoc = await db
+      .collection("settings")
+      .doc("zumreSchedule")
+      .get();
+
+    if (!scheduleDoc.exists) {
+      console.log(
+        "settings/zumreSchedule belgesi bulunamadı; runtimeState yazılmadı."
+      );
+      return;
+    }
+
+    const runtimeState = buildRuntimeScheduleState(
+      scheduleDoc.data() || {},
+      new Date()
+    );
+
+    await db
+      .collection("settings")
+      .doc("runtimeState")
+      .set(
+        {
+          ...runtimeState,
+          updatedAt: fieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+    console.log("Runtime zaman durumu güncellendi.", runtimeState);
+  }
+);
 
 // ============================================================
 // SUNUCU TARAFI ETÜT ZAMAN SENKRONİZASYONU

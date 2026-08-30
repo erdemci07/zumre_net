@@ -62,6 +62,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   String? _warnedQueueKey;
   bool _isTimeDialogOpen = false;
   int _elapsedSeconds = 0;
+  StreamSubscription<DocumentSnapshot>? _teacherSubscription;
+  StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
+  static const Duration _runtimeStateMaxAge = Duration(minutes: 3);
 
 @override
 void initState() {
@@ -71,10 +74,10 @@ void initState() {
 }
 
 Future<void> _initTeacherPage() async {
-  await _loadTeacherInfo();
+  _listenTeacherInfo();
   await _loadTeacherAvailability();
   await _loadTodaySolvedCount();
-  await _checkScheduleAvailability();
+  _listenRuntimeScheduleState();
 }
   int _timeToMinutes(String time) {
   final parts = time.split(':');
@@ -129,10 +132,48 @@ if (nowMinutes >= start && nowMinutes < end) {
   return false;
 }
 
+bool _isFreshRuntimeState(Map<String, dynamic>? data) {
+  if (data == null ||
+      data['isZumreOpen'] is! bool ||
+      data['isLunchBreak'] is! bool ||
+      data['updatedAt'] is! Timestamp) {
+    return false;
+  }
+
+  final updatedAt = (data['updatedAt'] as Timestamp).toDate();
+  final age = DateTime.now().difference(updatedAt);
+
+  return age >= Duration.zero && age <= _runtimeStateMaxAge;
+}
+
+Map<String, bool>? _runtimeZumreState(Map<String, dynamic>? data) {
+  if (!_isFreshRuntimeState(data)) return null;
+
+  return {
+    'isZumreOpen': data!['isZumreOpen'] == true,
+    'isLunchBreak': data['isLunchBreak'] == true,
+  };
+}
+
+void _listenRuntimeScheduleState() {
+  _runtimeStateSubscription?.cancel();
+  _runtimeStateSubscription = _firestore
+      .collection('settings')
+      .doc('runtimeState')
+      .snapshots()
+      .listen((_) async {
+    await _checkScheduleAvailability();
+  }, onError: (_) async {
+    await _checkScheduleAvailability();
+  });
+}
+
   @override
   void dispose() {
     _tabController.dispose();
     _activeQuestionTimer?.cancel();
+    _teacherSubscription?.cancel();
+    _runtimeStateSubscription?.cancel();
     super.dispose();
   }
 
@@ -326,11 +367,25 @@ Future<void> _checkScheduleAvailability() async {
     ]);
   }
 
+  var effectiveZumreOpen = isZumreOpen;
+  var effectiveLunch = isLunch;
+
+  try {
+    final runtimeDoc =
+        await _firestore.collection('settings').doc('runtimeState').get();
+    final runtimeState = _runtimeZumreState(runtimeDoc.data());
+
+    if (runtimeState != null) {
+      effectiveZumreOpen = runtimeState['isZumreOpen'] ?? isZumreOpen;
+      effectiveLunch = runtimeState['isLunchBreak'] ?? isLunch;
+    }
+  } catch (_) {}
+
   String message;
 
-  if (!isZumreOpen) {
+  if (!effectiveZumreOpen) {
     message = 'Şu an zümre saati aktif değil.';
-  } else if (isLunch) {
+  } else if (effectiveLunch) {
     message = 'Şu an öğle arası.';
 } else if (!isTeacherWorking && !_availabilityOverride) {
   message = 'Bugün çalışma programınıza göre kurumda değilsiniz.';
@@ -355,9 +410,9 @@ if (!isTeacherWorking && !_availabilityOverride && _teacherStatus != 'absent') {
 if (!mounted) return;
 
 setState(() {
-  _isZumreOpenNow = isZumreOpen;
+  _isZumreOpenNow = effectiveZumreOpen;
   _isTeacherWorkingNow = isTeacherWorking;
-  _isLunchNow = isLunch;
+  _isLunchNow = effectiveLunch;
   _scheduleMessage = message;
 
   if (!isTeacherWorking && !_availabilityOverride) {
@@ -856,9 +911,11 @@ Future<void> _loadTeacherAvailability() async {
     }
   }
 
-  Future<void> _loadTeacherInfo() async {
+  void _listenTeacherInfo() {
     final uid = _auth.currentUser!.uid;
-    final doc = await _firestore.collection('users').doc(uid).get();
+    _teacherSubscription?.cancel();
+    _teacherSubscription =
+        _firestore.collection('users').doc(uid).snapshots().listen((doc) {
 
     if (!doc.exists || !mounted) return;
 
@@ -875,6 +932,9 @@ Future<void> _loadTeacherAvailability() async {
       _teacherName = data?['name'] ?? data?['email'] ?? 'Öğretmen';
       _teacherSubject = subject ?? 'Ders';
       _teacherStatus = data?['teacherStatus'] ?? 'available';
+    });
+
+    _checkScheduleAvailability();
     });
   }
 
@@ -1006,43 +1066,14 @@ if (!canAddStudent) {
     String? selectedStudentId;
     String? selectedStudentName;
     String searchText = '';
-
-    final studentsSnapshot = await _firestore
+    final studentsStream = _firestore
         .collection('users')
         .where('role', isEqualTo: 'student')
-        .get();
-
-    final activeQueuesSnapshot = await _firestore
+        .snapshots();
+    final activeQueuesStream = _firestore
         .collection('queues')
         .where('status', whereIn: ['waiting', 'in_progress'])
-        .get();
-
-    final activeStudentIds = activeQueuesSnapshot.docs
-        .map((doc) => doc.data()['studentId'])
-        .where((id) => id != null)
-        .toSet();
-
-    final now = DateTime.now();
-
-    final availableStudents = studentsSnapshot.docs.where((doc) {
-  final data = doc.data();
-
-  final cooldownUntil = data['cooldownUntil'] as Timestamp?;
-  final isInCooldown =
-      cooldownUntil != null && cooldownUntil.toDate().isAfter(now);
-
-  final isInActiveQueue = activeStudentIds.contains(doc.id);
-  final isInStudySession = data['isInStudySession'] == true;
-
-  return !isInActiveQueue && !isInCooldown && !isInStudySession;
-}).toList();
-
-    if (availableStudents.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Müsait kayıtlı öğrenci bulunamadı')),
-      );
-      return;
-    }
+        .snapshots();
 
     await showDialog(
       context: context,
@@ -1050,22 +1081,6 @@ if (!canAddStudent) {
         return StatefulBuilder(
           
           builder: (context, setDialogState) {
-            final filteredStudents = availableStudents.where((doc) {
-  final data = doc.data();
-  final name = (data['fullName'] ?? data['name'] ?? data['email'] ?? '')
-      .toString()
-      .toLowerCase();
-
-  final username = (data['username'] ?? '')
-      .toString()
-      .toLowerCase();
-
-  final query = searchText.toLowerCase().trim();
-
-  return query.isEmpty ||
-      name.contains(query) ||
-      username.contains(query);
-}).toList();
             return Dialog(
               backgroundColor: Colors.transparent,
               child: Container(
@@ -1154,18 +1169,93 @@ const SizedBox(height: 12),
     borderRadius: BorderRadius.circular(18),
     border: Border.all(color: Colors.white12),
   ),
-  child: filteredStudents.isEmpty
-      ? const Center(
-          child: Text(
-            'Öğrenci bulunamadı',
-            style: TextStyle(color: Colors.white60),
-          ),
-        )
-      : ListView.builder(
-          itemCount: filteredStudents.length,
-          itemBuilder: (context, index) {
-            final doc = filteredStudents[index];
-            final data = doc.data();
+  child: StreamBuilder<QuerySnapshot>(
+    stream: studentsStream,
+    builder: (context, studentsSnapshot) {
+      if (studentsSnapshot.hasError) {
+        return Text(
+          'Öğrenciler yüklenemedi: ${studentsSnapshot.error}',
+          style: const TextStyle(color: Colors.redAccent),
+        );
+      }
+
+      if (!studentsSnapshot.hasData) {
+        return const Center(child: CircularProgressIndicator());
+      }
+
+      return StreamBuilder<QuerySnapshot>(
+        stream: activeQueuesStream,
+        builder: (context, queuesSnapshot) {
+          if (queuesSnapshot.hasError) {
+            return Text(
+              'Sıra bilgisi yüklenemedi: ${queuesSnapshot.error}',
+              style: const TextStyle(color: Colors.redAccent),
+            );
+          }
+
+          if (!queuesSnapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final activeStudentIds = queuesSnapshot.data!.docs
+              .map((doc) =>
+                  (doc.data() as Map<String, dynamic>)['studentId'])
+              .where((id) => id != null)
+              .toSet();
+          final now = DateTime.now();
+          final filteredStudents = studentsSnapshot.data!.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+
+            final cooldownUntil = data['cooldownUntil'] as Timestamp?;
+            final isInCooldown =
+                cooldownUntil != null && cooldownUntil.toDate().isAfter(now);
+            final isInActiveQueue = activeStudentIds.contains(doc.id);
+            final isInStudySession = data['isInStudySession'] == true;
+
+            if (isInActiveQueue || isInCooldown || isInStudySession) {
+              return false;
+            }
+
+            final name =
+                (data['fullName'] ?? data['name'] ?? data['email'] ?? '')
+                    .toString()
+                    .toLowerCase();
+            final username = (data['username'] ?? '')
+                .toString()
+                .toLowerCase();
+            final query = searchText.toLowerCase().trim();
+
+            return query.isEmpty ||
+                name.contains(query) ||
+                username.contains(query);
+          }).toList();
+
+          final selectedStillVisible = selectedStudentId == null ||
+              filteredStudents.any((doc) => doc.id == selectedStudentId);
+
+          if (!selectedStillVisible) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              setDialogState(() {
+                selectedStudentId = null;
+                selectedStudentName = null;
+              });
+            });
+          }
+
+          if (filteredStudents.isEmpty) {
+            return const Center(
+              child: Text(
+                'Öğrenci bulunamadı',
+                style: TextStyle(color: Colors.white60),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            itemCount: filteredStudents.length,
+            itemBuilder: (context, index) {
+              final doc = filteredStudents[index];
+              final data = doc.data() as Map<String, dynamic>;
 
             final fullName =
                 data['fullName'] ??
@@ -1211,7 +1301,11 @@ const SizedBox(height: 12),
               },
             );
           },
-        ),
+        );
+        },
+      );
+    },
+  ),
       ),
       const SizedBox(height: 22),
       SizedBox(
@@ -1220,13 +1314,89 @@ const SizedBox(height: 12),
                       child: ElevatedButton.icon(
                         onPressed: selectedStudentId == null
                             ? null
-                            : () async {
-                                try {
-                                  final teacherId = _auth.currentUser!.uid;
+                              : () async {
+                                  try {
+                                    final teacherId = _auth.currentUser!.uid;
+                                    final selectedId = selectedStudentId;
 
-                                  final activeSnapshot = await _firestore
-                                      .collection('queues')
-                                      .where('teacherId', isEqualTo: teacherId)
+                                    if (selectedId == null) return;
+
+                                    await _checkScheduleAvailability();
+
+                                    if (_teacherStatus != 'available' ||
+                                        !_isZumreOpenNow ||
+                                        _isLunchNow) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text(_scheduleMessage)),
+                                      );
+                                      return;
+                                    }
+
+                                    final teacherDoc = await _firestore
+                                        .collection('users')
+                                        .doc(teacherId)
+                                        .get();
+                                    final teacherData =
+                                        teacherDoc.data() ?? {};
+
+                                    if (!teacherDoc.exists ||
+                                        teacherData['teacherStatus']
+                                                ?.toString()
+                                                .trim() !=
+                                            'available') {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Durumunuz müsait değil. Öğrenci sıraya eklenemedi.',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    final selectedStudentDoc = await _firestore
+                                        .collection('users')
+                                        .doc(selectedId)
+                                        .get();
+                                    final selectedStudentData =
+                                        selectedStudentDoc.data() ?? {};
+
+                                    if (selectedStudentData['isInStudySession'] ==
+                                        true) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Bu öğrenci şu anda etütte görünüyor.',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    final selectedActiveQueue = await _firestore
+                                        .collection('queues')
+                                        .where('studentId', isEqualTo: selectedId)
+                                        .where(
+                                          'status',
+                                          whereIn: ['waiting', 'in_progress'],
+                                        )
+                                        .limit(1)
+                                        .get();
+
+                                    if (selectedActiveQueue.docs.isNotEmpty) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Bu öğrencinin zaten aktif zümre sırası var.',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    final activeSnapshot = await _firestore
+                                        .collection('queues')
+                                        .where('teacherId', isEqualTo: teacherId)
                                       .where('status', isEqualTo: 'in_progress')
                                       .get();
 
@@ -1236,7 +1406,7 @@ const SizedBox(height: 12),
 await _firestore
     .collection('queues')
     .add({
-                                    'studentId': selectedStudentId,
+                                    'studentId': selectedId,
                                     'studentName': selectedStudentName,
                                     'teacherId': teacherId,
                                     'teacherName': _teacherName ?? 'Öğretmen',

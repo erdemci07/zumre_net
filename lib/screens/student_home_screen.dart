@@ -50,13 +50,17 @@ int _estimatedMinutesForQuestionCount(int count) {
 
   Timer? _cooldownTimer;
   StreamSubscription<DocumentSnapshot>? _queueSubscription;
+  StreamSubscription<DocumentSnapshot>? _studentSubscription;
+  StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
+  StreamSubscription<QuerySnapshot>? _teacherListSubscription;
+  static const Duration _runtimeStateMaxAge = Duration(minutes: 3);
 
   @override
 void initState() {
   super.initState();
-  _loadStudentInfo();
+  _listenStudentInfo();
   _findAndListenActiveQueue();
-  _checkZumreAvailability();
+  _listenRuntimeScheduleState();
 }
 String _normalizeSubject(dynamic value) {
   return value
@@ -134,6 +138,58 @@ bool _isNowInSlots(DateTime now, List<Map<String, dynamic>> slots) {
   }
 
   return false;
+}
+
+bool _isFreshRuntimeState(Map<String, dynamic>? data) {
+  if (data == null ||
+      data['isZumreOpen'] is! bool ||
+      data['isLunchBreak'] is! bool ||
+      data['updatedAt'] is! Timestamp) {
+    return false;
+  }
+
+  final updatedAt = (data['updatedAt'] as Timestamp).toDate();
+  final age = DateTime.now().difference(updatedAt);
+
+  return age >= Duration.zero && age <= _runtimeStateMaxAge;
+}
+
+bool _applyRuntimeZumreState(Map<String, dynamic>? data) {
+  if (!_isFreshRuntimeState(data)) return false;
+
+  final isZumreOpen = data!['isZumreOpen'] == true;
+  final isLunch = data['isLunchBreak'] == true;
+  final message = isLunch
+      ? 'Şu an öğle arası. Zümre sırası geçici olarak kapalı.'
+      : isZumreOpen
+          ? 'Zümre saati aktif. Sıra alabilirsiniz.'
+          : 'Şu an zümre saati aktif değil.';
+
+  if (mounted) {
+    setState(() {
+      _isZumreOpenNow = isZumreOpen;
+      _isLunchNow = isLunch;
+      _zumreMessage = message;
+      _nextZumreText = '';
+    });
+  }
+
+  return true;
+}
+
+void _listenRuntimeScheduleState() {
+  _runtimeStateSubscription?.cancel();
+  _runtimeStateSubscription = _firestore
+      .collection('settings')
+      .doc('runtimeState')
+      .snapshots()
+      .listen((snapshot) async {
+    if (!_applyRuntimeZumreState(snapshot.data())) {
+      await _checkLocalZumreAvailability();
+    }
+  }, onError: (_) async {
+    await _checkLocalZumreAvailability();
+  });
 }
 Future<Map<String, dynamic>?> _findBestAvailableTeacher(
   String subject,
@@ -253,6 +309,19 @@ Future<Map<String, dynamic>?> _findBestAvailableTeacher(
 }
 
 Future<void> _checkZumreAvailability() async {
+  try {
+    final runtimeDoc =
+        await _firestore.collection('settings').doc('runtimeState').get();
+
+    if (_applyRuntimeZumreState(runtimeDoc.data())) {
+      return;
+    }
+  } catch (_) {}
+
+  await _checkLocalZumreAvailability();
+}
+
+Future<void> _checkLocalZumreAvailability() async {
   final now = DateTime.now();
   final isWeekend =
       now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
@@ -330,6 +399,9 @@ nextZumreText = '${futureSlots.first['start']}';  } else {
 void dispose() {
   _queueSubscription?.cancel();
   _cooldownTimer?.cancel();
+  _studentSubscription?.cancel();
+  _runtimeStateSubscription?.cancel();
+  _teacherListSubscription?.cancel();
   super.dispose();
 }
 Future<void> _findAndListenActiveQueue() async {
@@ -393,13 +465,14 @@ Future<void> _findAndListenActiveQueue() async {
   }
 }
 
-  Future<void> _loadStudentInfo() async {
+  void _listenStudentInfo() {
     final user = _auth.currentUser!;
-    final doc = await _firestore.collection('users').doc(user.uid).get();
+    _studentSubscription?.cancel();
+    _studentSubscription =
+        _firestore.collection('users').doc(user.uid).snapshots().listen((doc) {
+      if (!doc.exists || !mounted) return;
 
-    if (doc.exists && mounted) {
       final data = doc.data();
-
       setState(() {
         _studentName = data?['name'] ?? data?['email'] ?? 'Öğrenci';
         _isInStudySession = data?['isInStudySession'] == true;
@@ -420,8 +493,17 @@ Future<void> _findAndListenActiveQueue() async {
 
           _startCooldownTimer();
         }
+      } else if (_cooldownUntil != 0 || _remainingCooldownSeconds != 0) {
+        _cooldownTimer?.cancel();
+
+        if (mounted) {
+          setState(() {
+            _cooldownUntil = 0;
+            _remainingCooldownSeconds = 0;
+          });
+        }
       }
-    }
+    });
   }
 
   void _startCooldownTimer() {
@@ -636,6 +718,7 @@ if (status == 'completed') {
   }
 Future<void> _loadTeachersForSubject(String subject) async {
   if (subject.trim().isEmpty) return;
+  _teacherListSubscription?.cancel();
 
   if (mounted) {
     setState(() {
@@ -648,59 +731,67 @@ Future<void> _loadTeachersForSubject(String subject) async {
   }
 
   try {
-    // Önce bütün öğretmenleri alıyoruz.
-    final snapshot = await _firestore
+    _teacherListSubscription = _firestore
         .collection('users')
         .where('role', isEqualTo: 'teacher')
-        .get();
+        .snapshots()
+        .listen((snapshot) {
+      final teachers = <Map<String, dynamic>>[];
 
-    final teachers = <Map<String, dynamic>>[];
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
 
-    for (final doc in snapshot.docs) {
-      final data = doc.data();
+        final status =
+            data['teacherStatus']?.toString().trim() ?? '';
 
-      final status =
-          data['teacherStatus']?.toString().trim() ?? '';
+        // Yalnızca müsait öğretmen
+        if (status != 'available') {
+          continue;
+        }
 
-      // Yalnızca müsait öğretmen
-      if (status != 'available') {
-        continue;
+        if (!_teacherHasSubject(data, subject)) {
+          continue;
+        }
+
+        teachers.add({
+          'id': doc.id,
+          'name': data['fullName'] ??
+              data['name'] ??
+              data['email'] ??
+              'Öğretmen',
+        });
       }
 
-      if (!_teacherHasSubject(data, subject)) {
-        continue;
-      }
+      teachers.sort(
+        (a, b) => a['name']
+            .toString()
+            .compareTo(b['name'].toString()),
+      );
 
-      teachers.add({
-        'id': doc.id,
-        'name': data['fullName'] ??
-            data['name'] ??
-            data['email'] ??
-            'Öğretmen',
+      if (!mounted) return;
+
+      final selectedStillAvailable = _selectedTeacherId == null ||
+          teachers.any((teacher) => teacher['id'] == _selectedTeacherId);
+
+      setState(() {
+        _teachersForSubject = teachers;
+        _isLoadingTeachers = false;
+
+        if (!selectedStillAvailable) {
+          _selectedTeacherId = null;
+          _selectedTeacherName = null;
+          _useSmartTeacherSelection = true;
+        }
       });
-    }
-
-    teachers.sort(
-      (a, b) => a['name']
-          .toString()
-          .compareTo(b['name'].toString()),
-    );
-
-    if (!mounted) return;
-
-    setState(() {
-      _teachersForSubject = teachers;
+    }, onError: (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingTeachers = false;
+        });
+      }
     });
 
-    if (!mounted) return;
-
-  } finally {
-    if (mounted) {
-      setState(() {
-        _isLoadingTeachers = false;
-      });
-    }
-  }
+  } catch (_) {}
 }
 
   Future<void> _joinQueue() async {
@@ -821,11 +912,49 @@ if (finalTeacherId == null ||
       fallbackTeacher['name']?.toString() ?? 'Öğretmen';
 }
 
+final String? resolvedTeacherId = finalTeacherId;
+final teacherDoc = await _firestore
+    .collection('users')
+    .doc(resolvedTeacherId)
+    .get();
+final teacherData = teacherDoc.data() ?? {};
+
+if (!teacherDoc.exists ||
+    teacherData['teacherStatus']?.toString().trim() != 'available' ||
+    !_teacherHasSubject(teacherData, _selectedSubject!)) {
+  if (!mounted) return;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text(
+        'Seçilen öğretmen şu anda müsait değil. Lütfen tekrar deneyin.',
+      ),
+    ),
+  );
+  return;
+}
+
+final latestActiveQueue = await _firestore
+    .collection('queues')
+    .where('studentId', isEqualTo: userId)
+    .where('status', whereIn: ['waiting', 'in_progress'])
+    .limit(1)
+    .get();
+
+if (latestActiveQueue.docs.isNotEmpty) {
+  if (!mounted) return;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Zaten aktif bir sıranız var')),
+  );
+  return;
+}
+
     try {
       final newQueue = {
         'teacherName': finalTeacherName,
         'studentId': userId,
-        'teacherId': finalTeacherId,
+        'teacherId': resolvedTeacherId,
         'subject': _selectedSubject,
         'status': 'waiting',
         'studentName': _studentName,

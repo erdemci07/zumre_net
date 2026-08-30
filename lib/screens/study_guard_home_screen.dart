@@ -29,6 +29,8 @@ String _studyScheduleMessage = 'Etüt saatleri yönetici panelindeki programa g�
   Timer? _scheduleTimer;
 final Set<String> _removingStudentIds = {};
   bool _isProcessing = false;
+  StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
+  static const Duration _runtimeStateMaxAge = Duration(minutes: 3);
 
   @override
   void initState() {
@@ -39,9 +41,10 @@ final Set<String> _removingStudentIds = {};
 Future<void> _initPage() async {
   await _loadStaffInfo();
   await _checkStudySchedule();
+  _listenRuntimeScheduleState();
 
   _scheduleTimer = Timer.periodic(
-    const Duration(seconds: 4),
+    const Duration(minutes: 1),
     (_) => _checkStudySchedule(),
   );
 }
@@ -50,6 +53,7 @@ Future<void> _initPage() async {
   void dispose() {
     _elapsedTimer?.cancel();
     _scheduleTimer?.cancel();
+    _runtimeStateSubscription?.cancel();
     super.dispose();
   }
 
@@ -81,6 +85,34 @@ Future<void> _initPage() async {
     return hour * 60 + minute;
   }
 
+List<String> _teacherSubjectsFromData(Map<String, dynamic> data) {
+  final subjects = <String>[];
+
+  void addSubject(dynamic value) {
+    final subject = value?.toString().trim() ?? '';
+    if (subject.isNotEmpty && !subjects.contains(subject)) {
+      subjects.add(subject);
+    }
+  }
+
+  final rawSubjects = data['subjects'];
+
+  if (rawSubjects is List) {
+    for (final item in rawSubjects) {
+      addSubject(item);
+    }
+  } else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
+    for (final item in rawSubjects.split(RegExp(r'[,;/|]'))) {
+      addSubject(item);
+    }
+  }
+
+  addSubject(data['branch']);
+  addSubject(data['subject']);
+
+  return subjects;
+}
+
 bool _isNowInSlots(
   DateTime now,
   List<Map<String, dynamic>> slots,
@@ -101,7 +133,74 @@ bool _isNowInSlots(
   return false;
 }
 
+bool _isFreshRuntimeState(Map<String, dynamic>? data) {
+  if (data == null ||
+      data['isStudyOpen'] is! bool ||
+      data['updatedAt'] is! Timestamp) {
+    return false;
+  }
+
+  final updatedAt = (data['updatedAt'] as Timestamp).toDate();
+  final age = DateTime.now().difference(updatedAt);
+
+  return age >= Duration.zero && age <= _runtimeStateMaxAge;
+}
+
+Future<bool> _applyRuntimeStudyState(Map<String, dynamic>? data) async {
+  if (!_isFreshRuntimeState(data)) return false;
+
+  final isOpen = data!['isStudyOpen'] == true;
+
+  if (!mounted) return true;
+
+  setState(() {
+    _isStudyOpenNow = isOpen;
+    _activeStudySlotText = 'Etüt saati';
+    _studyScheduleMessage = isOpen
+        ? 'Etüt saati aktif. Yoklama alabilirsiniz.'
+        : 'Şu an etüt saati aktif değil.';
+  });
+
+  if (isOpen) {
+    await _ensureActiveSession();
+  } else {
+    await _finishStudySessionSilently(autoEnded: true);
+  }
+
+  return true;
+}
+
+void _listenRuntimeScheduleState() {
+  _runtimeStateSubscription?.cancel();
+  _runtimeStateSubscription = _firestore
+      .collection('settings')
+      .doc('runtimeState')
+      .snapshots()
+      .listen((snapshot) async {
+    final applied = await _applyRuntimeStudyState(snapshot.data());
+
+    if (!applied) {
+      await _checkLocalStudySchedule();
+    }
+  }, onError: (_) async {
+    await _checkLocalStudySchedule();
+  });
+}
+
 Future<void> _checkStudySchedule() async {
+  try {
+    final runtimeDoc =
+        await _firestore.collection('settings').doc('runtimeState').get();
+
+    if (await _applyRuntimeStudyState(runtimeDoc.data())) {
+      return;
+    }
+  } catch (_) {}
+
+  await _checkLocalStudySchedule();
+}
+
+Future<void> _checkLocalStudySchedule() async {
   try {
     final now = DateTime.now();
     final isWeekend =
@@ -383,94 +482,97 @@ batch.update(sessionRef, {
 
     final sessionId = _activeSessionId!;
 
-    final sessionStudentRef = _firestore
-        .collection('studySessions')
-        .doc(sessionId)
-        .collection('students')
-        .doc(doc.id);
-final existing = await sessionStudentRef.get();
-final batch = _firestore.batch();
+    final sessionRef =
+        _firestore.collection('studySessions').doc(sessionId);
+    final sessionStudentRef =
+        sessionRef.collection('students').doc(doc.id);
+    final userRef = _firestore.collection('users').doc(doc.id);
 
-if (existing.exists) {
-  final existingData = existing.data() ?? {};
-  final existingStatus =
-      existingData['status']?.toString() ?? 'present';
+    try {
+      final wasRejoin =
+          await _firestore.runTransaction<bool>((transaction) async {
+        final userSnapshot = await transaction.get(userRef);
+        final existingSnapshot = await transaction.get(sessionStudentRef);
+        final sessionSnapshot = await transaction.get(sessionRef);
 
-  if (existingStatus == 'present') {
-    _showSnack('Bu öğrenci zaten etütte görünüyor.');
-    return;
-  }
+        final freshUserData = userSnapshot.data() ?? {};
+        final sessionData = sessionSnapshot.data() ?? {};
 
-  // Öğrenci daha önce çıkmışsa tekrar aktif etüte alınır.
-  batch.update(sessionStudentRef, {
-    'status': 'present',
-    'checkedAt': FieldValue.serverTimestamp(),
-    'checkedOutAt': null,
-    'rejoinedAt': FieldValue.serverTimestamp(),
-  });
+        if (freshUserData['isInStudySession'] == true) {
+          throw StateError('Bu öğrenci zaten etütte görünüyor.');
+        }
 
-  batch.update(
-    _firestore.collection('users').doc(doc.id),
-    {
-      'isInStudySession': true,
-      'activeStudySessionId': sessionId,
-    },
-  );
+        if (!sessionSnapshot.exists || sessionData['status'] != 'active') {
+          throw StateError('Aktif etüt oturumu bulunamadı.');
+        }
 
-  batch.update(
-    _firestore.collection('studySessions').doc(sessionId),
-    {
-      'activeStudentCount': FieldValue.increment(1),
-      'updatedAt': FieldValue.serverTimestamp(),
-    },
-  );
-} else {
-  batch.set(sessionStudentRef, {
-    'studentId': doc.id,
-    'studentName':
-        data['fullName'] ?? data['name'] ?? 'Öğrenci',
-    'className': data['className'] ?? '',
-    'branch': data['branch'] ?? '',
-    'department': data['department'] ?? '',
-    'username': data['username'] ?? '',
-    'checkedAt': FieldValue.serverTimestamp(),
-    'checkedOutAt': null,
-    'status': 'present',
-  });
+        if (existingSnapshot.exists) {
+          final existingData = existingSnapshot.data() ?? {};
+          final existingStatus =
+              existingData['status']?.toString() ?? 'present';
 
-  batch.update(
-    _firestore.collection('users').doc(doc.id),
-    {
-      'isInStudySession': true,
-      'activeStudySessionId': sessionId,
-    },
-  );
+          if (existingStatus == 'present') {
+            throw StateError('Bu öğrenci zaten etütte görünüyor.');
+          }
 
-  batch.update(
-    _firestore.collection('studySessions').doc(sessionId),
-    {
-      'studentCount': FieldValue.increment(1),
-      'activeStudentCount': FieldValue.increment(1),
-      'updatedAt': FieldValue.serverTimestamp(),
-    },
-  );
-}
+          transaction.update(sessionStudentRef, {
+            'status': 'present',
+            'checkedAt': FieldValue.serverTimestamp(),
+            'checkedOutAt': null,
+            'rejoinedAt': FieldValue.serverTimestamp(),
+          });
 
-await batch.commit();
+          transaction.update(userRef, {
+            'isInStudySession': true,
+            'activeStudySessionId': sessionId,
+          });
 
-if (!mounted) return;
+          transaction.update(sessionRef, {
+            'activeStudentCount': FieldValue.increment(1),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
 
-_showSnack(
-  existing.exists
-      ? 'Öğrenci yeniden etüte alındı.'
-      : 'Öğrenci etüte alındı.',
-);
+          return true;
+        }
 
-    await batch.commit();
+        transaction.set(sessionStudentRef, {
+          'studentId': doc.id,
+          'studentName': data['fullName'] ?? data['name'] ?? 'Öğrenci',
+          'className': data['className'] ?? '',
+          'branch': data['branch'] ?? '',
+          'department': data['department'] ?? '',
+          'username': data['username'] ?? '',
+          'checkedAt': FieldValue.serverTimestamp(),
+          'checkedOutAt': null,
+          'status': 'present',
+        });
 
-    if (!mounted) return;
+        transaction.update(userRef, {
+          'isInStudySession': true,
+          'activeStudySessionId': sessionId,
+        });
 
-    _showSnack('Öğrenci etüte alındı.');
+        transaction.update(sessionRef, {
+          'studentCount': FieldValue.increment(1),
+          'activeStudentCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        return false;
+      });
+
+      if (!mounted) return;
+
+      _showSnack(
+        wasRejoin
+            ? 'Öğrenci yeniden etüte alındı.'
+            : 'Öğrenci etüte alındı.',
+      );
+    } on StateError catch (e) {
+      _showSnack(e.message);
+    } catch (e) {
+      _showSnack('Öğrenci etüte alınamadı: $e');
+    }
   }
 Future<void> _removeStudentFromStudy(
   String studentId,
@@ -609,33 +711,40 @@ Future<void> _removeStudentFromStudy(
     final userRef = _firestore.collection('users').doc(studentId);
     final sessionRef =
         _firestore.collection('studySessions').doc(sessionId);
-        final sessionSnapshot = await sessionRef.get();
-final sessionData = sessionSnapshot.data() ?? {};
+    final didRemove = await _firestore.runTransaction<bool>((transaction) async {
+      final studentSnapshot = await transaction.get(studentRef);
+      final sessionSnapshot = await transaction.get(sessionRef);
+      final studentData = studentSnapshot.data();
 
-final currentActiveCount =
-    (sessionData['activeStudentCount'] as num?)?.toInt() ??
-    (sessionData['studentCount'] as num?)?.toInt() ??
-    0;
+      if (!studentSnapshot.exists || studentData?['status'] != 'present') {
+        return false;
+      }
 
-    final batch = _firestore.batch();
+      final sessionData = sessionSnapshot.data() ?? {};
+      final currentActiveCount =
+          (sessionData['activeStudentCount'] as num?)?.toInt() ??
+              (sessionData['studentCount'] as num?)?.toInt() ??
+              0;
+      final nextActiveCount =
+          currentActiveCount > 0 ? currentActiveCount - 1 : 0;
 
-    batch.update(studentRef, {
-      'status': 'left',
-      'checkedOutAt': FieldValue.serverTimestamp(),
+      transaction.update(studentRef, {
+        'status': 'left',
+        'checkedOutAt': FieldValue.serverTimestamp(),
+      });
+
+      transaction.update(userRef, {
+        'isInStudySession': false,
+        'activeStudySessionId': null,
+      });
+
+      transaction.update(sessionRef, {
+        'activeStudentCount': nextActiveCount,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      return true;
     });
-
-    batch.update(userRef, {
-      'isInStudySession': false,
-      'activeStudySessionId': null,
-    });
-
-batch.update(sessionRef, {
-  'activeStudentCount':
-      currentActiveCount > 0 ? currentActiveCount - 1 : 0,
-  'updatedAt': FieldValue.serverTimestamp(),
-});
-
-    await batch.commit();
 
     if (!mounted) return;
 
@@ -643,7 +752,9 @@ batch.update(sessionRef, {
       SnackBar(
         backgroundColor: const Color(0xFF008A8A),
         content: Text(
-          '$studentName etütten çıkarıldı.',
+          didRemove
+              ? '$studentName etütten çıkarıldı.'
+              : '$studentName zaten etütte görünmüyor.',
           style: const TextStyle(color: Colors.white),
         ),
       ),
@@ -1133,8 +1244,8 @@ Future<void> _showDutyTeacherDialog() async {
                         final teachers = snapshot.data!.docs.where((doc) {
                           final data = doc.data() as Map<String, dynamic>;
 
-                          final hasSubjects = data['subjects'] is List &&
-                              (data['subjects'] as List).isNotEmpty;
+                          final hasSubjects =
+                              _teacherSubjectsFromData(data).isNotEmpty;
 
                           final status = data['teacherStatus'];
 
@@ -1172,9 +1283,8 @@ Future<void> _showDutyTeacherDialog() async {
                                   data['email'] ??
                                   'Öğretmen';
 
-                              final subjects = data['subjects'] is List
-                                  ? (data['subjects'] as List).join(', ')
-                                  : '';
+                              final subjects =
+                                  _teacherSubjectsFromData(data).join(', ');
 
                               final isSelected = doc.id == tempTeacherId;
 
@@ -1504,6 +1614,10 @@ Widget _studentSearch() {
 }
 Future<void> _showStudentPickerDialog() async {
   String dialogSearch = '';
+  final activeQueuesStream = _firestore
+      .collection('queues')
+      .where('status', whereIn: ['waiting', 'in_progress'])
+      .snapshots();
 
   await showDialog(
     context: context,
@@ -1609,20 +1723,16 @@ Future<void> _showStudentPickerDialog() async {
 
                   Expanded(
                     child: StreamBuilder<QuerySnapshot>(
-                      stream: _firestore
-                          .collection('users')
-                          .where('role', isEqualTo: 'student')
-                          .limit(500)
-                          .snapshots(),
-                      builder: (context, snapshot) {
-                        if (snapshot.hasError) {
+                      stream: activeQueuesStream,
+                      builder: (context, queueSnapshot) {
+                        if (queueSnapshot.hasError) {
                           return Text(
-                            'Öğrenciler yüklenemedi: ${snapshot.error}',
+                            'Sıra bilgisi yüklenemedi: ${queueSnapshot.error}',
                             style: const TextStyle(color: Colors.redAccent),
                           );
                         }
 
-                        if (!snapshot.hasData) {
+                        if (!queueSnapshot.hasData) {
                           return const Center(
                             child: CircularProgressIndicator(
                               color: Colors.white,
@@ -1630,52 +1740,85 @@ Future<void> _showStudentPickerDialog() async {
                           );
                         }
 
-                        final students = snapshot.data!.docs.where((doc) {
-                          final data = doc.data() as Map<String, dynamic>;
+                        final activeQueueStudentIds = queueSnapshot.data!.docs
+                            .map((doc) =>
+                                (doc.data() as Map<String, dynamic>)['studentId'])
+                            .where((id) => id != null)
+                            .toSet();
 
-                          if (data['isInStudySession'] == true) return false;
-
-                          final searchable = [
-                            data['fullName'],
-                            data['name'],
-                            data['surname'],
-                            data['username'],
-                            data['className'],
-                            data['branch'],
-                            data['department'],
-                          ].where((e) => e != null).join(' ').toLowerCase();
-
-                          if (dialogSearch.isEmpty) return true;
-
-                          return searchable.contains(dialogSearch);
-                        }).toList();
-
-                        if (students.isEmpty) {
-                          return const Center(
-                            child: Text(
-                              'Uygun öğrenci bulunamadı.',
-                              style: TextStyle(color: Colors.white60),
-                            ),
-                          );
-                        }
-
-                        return Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.07),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: Colors.white12),
-                          ),
-                          child: ListView.builder(
-                            itemCount: students.length,
-                            itemBuilder: (context, index) {
-                              return _dialogStudentTile(
-                                students[index],
-                                onAdded: () {
-                                  Navigator.pop(ctx);
-                                },
+                        return StreamBuilder<QuerySnapshot>(
+                          stream: _firestore
+                              .collection('users')
+                              .where('role', isEqualTo: 'student')
+                              .limit(500)
+                              .snapshots(),
+                          builder: (context, snapshot) {
+                            if (snapshot.hasError) {
+                              return Text(
+                                'Öğrenciler yüklenemedi: ${snapshot.error}',
+                                style: const TextStyle(color: Colors.redAccent),
                               );
-                            },
-                          ),
+                            }
+
+                            if (!snapshot.hasData) {
+                              return const Center(
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                ),
+                              );
+                            }
+
+                            final students = snapshot.data!.docs.where((doc) {
+                              final data = doc.data() as Map<String, dynamic>;
+
+                              if (data['isInStudySession'] == true) return false;
+                              if (activeQueueStudentIds.contains(doc.id)) {
+                                return false;
+                              }
+
+                              final searchable = [
+                                data['fullName'],
+                                data['name'],
+                                data['surname'],
+                                data['username'],
+                                data['className'],
+                                data['branch'],
+                                data['department'],
+                              ].where((e) => e != null).join(' ').toLowerCase();
+
+                              if (dialogSearch.isEmpty) return true;
+
+                              return searchable.contains(dialogSearch);
+                            }).toList();
+
+                            if (students.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'Uygun öğrenci bulunamadı.',
+                                  style: TextStyle(color: Colors.white60),
+                                ),
+                              );
+                            }
+
+                            return Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.07),
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(color: Colors.white12),
+                              ),
+                              child: ListView.builder(
+                                itemCount: students.length,
+                                itemBuilder: (context, index) {
+                                  return _dialogStudentTile(
+                                    students[index],
+                                    onAdded: () {
+                                      Navigator.pop(ctx);
+                                    },
+                                  );
+                                },
+                              ),
+                            );
+                          },
                         );
                       },
                     ),

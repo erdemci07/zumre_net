@@ -1,6 +1,8 @@
 import base64
 import tempfile
-from fastapi import FastAPI, HTTPException
+from typing import Optional
+
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import auth, firestore
@@ -34,8 +36,34 @@ class ImportRequest(BaseModel):
     validRows: list
 
 
+def require_admin(authorization: Optional[str] = Header(default=None)) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Yetkisiz istek.")
+
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Yetkisiz istek.")
+
+    try:
+        decoded_token = auth.verify_id_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Geçersiz oturum.")
+
+    uid = decoded_token.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Geçersiz oturum.")
+
+    user_doc = db.collection("users").document(uid).get()
+    user_data = user_doc.to_dict() or {}
+
+    if not user_doc.exists or user_data.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Bu işlem için admin yetkisi gerekir.")
+
+    return uid
+
+
 @app.post("/analyze")
-def analyze_file(request: AnalyzeRequest):
+def analyze_file(request: AnalyzeRequest, _admin_uid: str = Depends(require_admin)):
     if request.type not in ["student", "teacher"]:
         raise HTTPException(status_code=400, detail="Geçersiz dosya tipi.")
 
@@ -57,7 +85,7 @@ def analyze_file(request: AnalyzeRequest):
 
 
 @app.post("/import")
-def import_users(request: ImportRequest):
+def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin)):
     if request.type not in ["student", "teacher"]:
         raise HTTPException(status_code=400, detail="Geçersiz aktarım tipi.")
 
