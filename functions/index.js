@@ -231,6 +231,99 @@ function shouldCloseSession(sessionData, scheduleData, now = new Date()) {
   return currentMinutes >= slot.endMinutes;
 }
 
+function findZumreSlot(startedAt, scheduleData) {
+  if (!startedAt || typeof startedAt.toDate !== "function") {
+    return null;
+  }
+
+  const startedDate = startedAt.toDate();
+  const startedParts = getIstanbulDateParts(startedDate);
+  const startedMinutes = startedParts.hour * 60 + startedParts.minute;
+  const slots = getZumreSlots(scheduleData, startedParts.weekday);
+
+  const matchingSlot = slots.find(
+    (slot) =>
+      startedMinutes >= slot.startMinutes &&
+      startedMinutes < slot.endMinutes
+  );
+
+  if (!matchingSlot) {
+    return null;
+  }
+
+  return {
+    ...matchingSlot,
+    dateKey: startedParts.dateKey,
+  };
+}
+
+function shouldAutoCompleteZumreQueue(queueData, scheduleData, now = new Date()) {
+  const nowParts = getIstanbulDateParts(now);
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute;
+  const currentZumreSlots = getZumreSlots(scheduleData, nowParts.weekday);
+
+  if (isNowInSlots(currentMinutes, currentZumreSlots)) {
+    return false;
+  }
+
+  const queueSlot = findZumreSlot(queueData.startedAt, scheduleData);
+
+  if (!queueSlot) {
+    return false;
+  }
+
+  if (nowParts.dateKey !== queueSlot.dateKey) {
+    return true;
+  }
+
+  return currentMinutes >= queueSlot.endMinutes + 15;
+}
+
+async function completeTimedOutZumreQueues(scheduleData, now = new Date()) {
+  const snapshot = await db
+    .collection("queues")
+    .where("status", "==", "in_progress")
+    .get();
+
+  if (snapshot.empty) {
+    return {
+      checkedCount: 0,
+      completedCount: 0,
+    };
+  }
+
+  const batch = db.batch();
+  let checkedCount = 0;
+  let completedCount = 0;
+
+  for (const queueDoc of snapshot.docs) {
+    checkedCount += 1;
+    const queueData = queueDoc.data();
+
+    if (!shouldAutoCompleteZumreQueue(queueData, scheduleData, now)) {
+      continue;
+    }
+
+    batch.update(queueDoc.ref, {
+      status: "completed",
+      completedAt: fieldValue.serverTimestamp(),
+      updatedAt: fieldValue.serverTimestamp(),
+      autoCompleted: true,
+      autoCompleteReason: "zumre_timeout",
+    });
+    completedCount += 1;
+  }
+
+  if (completedCount > 0) {
+    await batch.commit();
+  }
+
+  return {
+    checkedCount,
+    completedCount,
+  };
+}
+
 // ============================================================
 // KULLANICI ŞİFRESİ GÜNCELLEME
 // ============================================================
@@ -502,7 +595,16 @@ exports.syncRuntimeSchedule = onSchedule(
         { merge: true }
       );
 
-    console.log("Runtime zaman durumu güncellendi.", runtimeState);
+    const timeoutResult = await completeTimedOutZumreQueues(
+      scheduleDoc.data() || {},
+      new Date()
+    );
+
+    console.log("Runtime zaman durumu güncellendi.", {
+      ...runtimeState,
+      timedOutQueuesChecked: timeoutResult.checkedCount,
+      timedOutQueuesCompleted: timeoutResult.completedCount,
+    });
   }
 );
 

@@ -51,6 +51,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   bool _isZumreOpenNow = false;
   bool _isTeacherWorkingNow = false;
   bool _isLunchNow = false;
+  String _zumreSlotText = '';
+  String _nextZumreText = '';
   String _scheduleMessage = 'Kontrol ediliyor...';
   bool _availabilityOverride = false;
 
@@ -356,6 +358,42 @@ Future<void> _checkScheduleAvailability() async {
 
   final isZumreOpen = _isNowInSlots(now, zumreSlots);
   final isTeacherWorking = _isNowInSlots(now, teacherSlots);
+  var zumreSlotText = '';
+  var nextZumreText = '';
+
+  for (final slot in zumreSlots) {
+    final start = '${slot['start']}';
+    final end = '${slot['end']}';
+    final startMin = _timeToMinutes(start);
+    final endMin = _timeToMinutes(end);
+    final nowMin = now.hour * 60 + now.minute;
+
+    if (endMin > startMin && nowMin >= startMin && nowMin < endMin) {
+      zumreSlotText = '$start - $end';
+      break;
+    }
+  }
+
+  if (!isZumreOpen && zumreSlots.isNotEmpty) {
+    final nowMinutes = now.hour * 60 + now.minute;
+    final futureSlots = zumreSlots.where((slot) {
+      final start = _timeToMinutes('${slot['start']}');
+      return start > nowMinutes;
+    }).toList();
+
+    if (futureSlots.isNotEmpty) {
+      futureSlots.sort((a, b) {
+        final aStart = _timeToMinutes('${a['start']}');
+        final bStart = _timeToMinutes('${b['start']}');
+        return aStart.compareTo(bStart);
+      });
+      nextZumreText = 'Sonraki: ${futureSlots.first['start']}';
+    } else {
+      nextZumreText = isWeekend
+          ? 'Bugünkü zümre tamamlandı'
+          : 'Yarın zümre ${zumreSlots.first['start']}';
+    }
+  }
 
   bool isLunch = false;
   if (lunch.isNotEmpty) {
@@ -415,6 +453,8 @@ setState(() {
   _isZumreOpenNow = effectiveZumreOpen;
   _isTeacherWorkingNow = isTeacherWorking;
   _isLunchNow = effectiveLunch;
+  _zumreSlotText = effectiveZumreOpen ? zumreSlotText : '';
+  _nextZumreText = effectiveZumreOpen ? '' : nextZumreText;
   _scheduleMessage = message;
 
   if (!isTeacherWorking && !_availabilityOverride) {
@@ -2841,6 +2881,53 @@ _headerActionButton(
     );
   }
 
+  Widget _zumreStatusChip() {
+    final active = _isZumreOpenNow && !_isLunchNow;
+    final text = active
+        ? _zumreSlotText.isEmpty
+            ? 'Zümre Aktif'
+            : 'Zümre Aktif • $_zumreSlotText'
+        : _nextZumreText.isEmpty
+            ? 'Zümre Kapalı'
+            : _nextZumreText;
+    final color = active ? Colors.greenAccent : Colors.orangeAccent;
+
+    return Container(
+      constraints: const BoxConstraints(
+        maxWidth: 190,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            active ? Icons.circle : Icons.schedule_rounded,
+            color: color,
+            size: active ? 8 : 14,
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTeacherHeader() {
   return Padding(
     padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
@@ -2910,26 +2997,33 @@ _headerActionButton(
   ),
 ),
                         const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: Colors.white12),
-                          ),
-                          child: Text(
-                            'Branş: ${_teacherSubject ?? "Ders"}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: Colors.white12),
+                              ),
+                              child: Text(
+                                'Branş: ${_teacherSubject ?? "Ders"}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
-                          ),
+                            _zumreStatusChip(),
+                          ],
                         ),
                       ],
                     ),

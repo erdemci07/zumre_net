@@ -28,6 +28,7 @@ String _studyScheduleMessage = 'Etüt saatleri yönetici panelindeki programa g�
   Timer? _elapsedTimer;
   Timer? _scheduleTimer;
 final Set<String> _removingStudentIds = {};
+final Map<String, Map<String, dynamic>> _optimisticStudyStudents = {};
   bool _isProcessing = false;
   StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
   StreamSubscription<DocumentSnapshot>? _scheduleSubscription;
@@ -1933,19 +1934,39 @@ Future<void> _showStudentPickerDialog() async {
                                   return _dialogStudentTile(
                                     students[index],
                                     onOptimisticHide: () {
-                                      setDialogState(() {
-                                        optimisticallyHiddenStudentIds
-                                            .add(students[index].id);
+                                      final data = students[index].data()
+                                          as Map<String, dynamic>;
+                                      if (ctx.mounted) {
+                                        setDialogState(() {
+                                          optimisticallyHiddenStudentIds
+                                              .add(students[index].id);
+                                        });
+                                      }
+                                      setState(() {
+                                        _optimisticStudyStudents[
+                                            students[index].id] = {
+                                          'studentName': data['fullName'] ??
+                                              data['name'] ??
+                                              'Öğrenci',
+                                          'className': data['className'] ?? '',
+                                          'branch': data['branch'] ?? '',
+                                          'department': data['department'] ?? '',
+                                        };
                                       });
                                     },
                                     onRestore: () {
-                                      setDialogState(() {
-                                        optimisticallyHiddenStudentIds
-                                            .remove(students[index].id);
-                                      });
-                                    },
-                                    onAdded: () {
-                                      Navigator.pop(ctx);
+                                      if (ctx.mounted) {
+                                        setDialogState(() {
+                                          optimisticallyHiddenStudentIds
+                                              .remove(students[index].id);
+                                        });
+                                      }
+                                      if (mounted) {
+                                        setState(() {
+                                          _optimisticStudyStudents
+                                              .remove(students[index].id);
+                                        });
+                                      }
                                     },
                                   );
                                 },
@@ -1969,7 +1990,6 @@ Widget _dialogStudentTile(
   DocumentSnapshot doc, {
   required VoidCallback onOptimisticHide,
   required VoidCallback onRestore,
-  required VoidCallback onAdded,
 }) {
   final data = doc.data() as Map<String, dynamic>;
 
@@ -2014,9 +2034,7 @@ Widget _dialogStudentTile(
               onOptimisticHide();
               final added = await _addStudentToStudy(doc);
 
-              if (added) {
-                onAdded();
-              } else {
+              if (!added) {
                 onRestore();
               }
             },
@@ -2060,12 +2078,28 @@ Widget _dialogStudentTile(
 
         if (!snapshot.hasData) return const SizedBox.shrink();
 
-final students = snapshot.data!.docs.where((doc) {
+final snapshotStudents = snapshot.data!.docs.where((doc) {
   final data = doc.data() as Map<String, dynamic>;
   return (data['status']?.toString() ?? 'present') == 'present';
-}).toList();        
+}).toList();
+final snapshotStudentIds = snapshotStudents.map((doc) => doc.id).toSet();
+final optimisticStudents = _optimisticStudyStudents.entries
+    .where((entry) => !snapshotStudentIds.contains(entry.key))
+    .toList();
 
-        if (students.isEmpty) {
+if (snapshotStudentIds
+    .any((id) => _optimisticStudyStudents.containsKey(id))) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!mounted) return;
+    setState(() {
+      _optimisticStudyStudents
+          .removeWhere((id, _) => snapshotStudentIds.contains(id));
+    });
+  });
+}
+final totalStudentCount = optimisticStudents.length + snapshotStudents.length;
+
+        if (totalStudentCount == 0) {
           return Container(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             padding: const EdgeInsets.all(18),
@@ -2096,10 +2130,16 @@ final students = snapshot.data!.docs.where((doc) {
 SizedBox(
   height: 260,
   child: ListView.builder(
-    itemCount: students.length,
+    itemCount: totalStudentCount,
     itemBuilder: (context, index) {
-      final doc = students[index];
-      final data = doc.data() as Map<String, dynamic>;
+      final isOptimistic = index < optimisticStudents.length;
+      final id = isOptimistic
+          ? optimisticStudents[index].key
+          : snapshotStudents[index - optimisticStudents.length].id;
+      final data = isOptimistic
+          ? optimisticStudents[index].value
+          : snapshotStudents[index - optimisticStudents.length].data()
+              as Map<String, dynamic>;
 
       return Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -2130,12 +2170,12 @@ SizedBox(
               Icons.close_rounded,
               color: Colors.redAccent,
             ),
-onPressed: _removingStudentIds.contains(doc.id)
-    ? null
-    : () => _removeStudentFromStudy(
-          doc.id,
-          data['studentName']?.toString() ?? 'Öğrenci',
-        ),
+            onPressed: isOptimistic || _removingStudentIds.contains(id)
+                ? null
+                : () => _removeStudentFromStudy(
+                      id,
+                      data['studentName']?.toString() ?? 'Öğrenci',
+                    ),
           ),
         ),
       );
