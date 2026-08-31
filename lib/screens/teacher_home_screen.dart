@@ -37,12 +37,9 @@ class _TimeTextInputFormatter extends TextInputFormatter {
     );
   }
 }
-class _TeacherHomeScreenState extends State<TeacherHomeScreen>
-    with SingleTickerProviderStateMixin {
+class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  late TabController _tabController;
 
   String _teacherStatus = 'available';
   String? _teacherName;
@@ -53,12 +50,17 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   bool _isLunchNow = false;
   String _zumreSlotText = '';
   String _nextZumreText = '';
+  int? _zumreRemainingMinutes;
   String _scheduleMessage = 'Kontrol ediliyor...';
-  bool _availabilityOverride = false;
+  String? _manualAbsentDate;
+  Timestamp? _breakUntil;
+  int _remainingBreakMinutes = 0;
 
   int _todaySolved = 0;
 
   Timer? _activeQuestionTimer;
+  Timer? _zumrePillTimer;
+  Timer? _breakCountdownTimer;
   String? _activeTimerQueueId;
   int? _activeTimerLimitMinutes;
   String? _warnedQueueKey;
@@ -66,12 +68,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen>
   int _elapsedSeconds = 0;
   StreamSubscription<DocumentSnapshot>? _teacherSubscription;
   StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
+  List<Map<String, dynamic>> _cachedZumreSlots = [];
+  bool _cachedZumreIsWeekend = false;
   static const Duration _runtimeStateMaxAge = Duration(minutes: 3);
 
 @override
 void initState() {
   super.initState();
-  _tabController = TabController(length: 2, vsync: this);
   _initTeacherPage();
 }
 
@@ -80,6 +83,10 @@ Future<void> _initTeacherPage() async {
   await _loadTeacherAvailability();
   await _loadTodaySolvedCount();
   _listenRuntimeScheduleState();
+  _zumrePillTimer = Timer.periodic(
+    const Duration(seconds: 30),
+    (_) => _refreshZumrePillFromCache(),
+  );
 }
   int _timeToMinutes(String time) {
   final parts = time.split(':');
@@ -112,6 +119,17 @@ String _dayKey(DateTime date) {
   }
 }
 
+String _todayDateKey() {
+  final now = DateTime.now();
+  return '${now.year.toString().padLeft(4, '0')}-'
+      '${now.month.toString().padLeft(2, '0')}-'
+      '${now.day.toString().padLeft(2, '0')}';
+}
+
+bool _hasManualAbsentOverrideToday([String? dateKey]) {
+  return (dateKey ?? _manualAbsentDate) == _todayDateKey();
+}
+
 bool _isNowInSlots(
   DateTime now,
   List<Map<String, dynamic>> slots,
@@ -132,6 +150,52 @@ if (nowMinutes >= start && nowMinutes < end) {
   }
 
   return false;
+}
+
+List<Map<String, dynamic>> _availabilitySlotsFromData(
+  Map<String, dynamic> data,
+  DateTime now,
+) {
+  final rawAvailability = data['weeklyAvailability'];
+  if (rawAvailability is! Map) return [];
+
+  final rawSlots = rawAvailability[_dayKey(now)];
+  if (rawSlots is! List) return [];
+
+  return rawSlots
+      .whereType<Map>()
+      .map((slot) => Map<String, dynamic>.from(slot))
+      .toList();
+}
+
+bool _isTeacherScheduledFromData(Map<String, dynamic> data, DateTime now) {
+  return _isNowInSlots(now, _availabilitySlotsFromData(data, now));
+}
+
+String _resolveBaseTeacherStatus(Map<String, dynamic> data) {
+  if (_hasManualAbsentOverrideToday(data['manualAbsentDate']?.toString())) {
+    return 'absent';
+  }
+
+  return _isTeacherScheduledFromData(data, DateTime.now())
+      ? 'available'
+      : 'absent';
+}
+
+int _breakRemainingMinutes(Timestamp? breakUntil) {
+  if (breakUntil == null) return 0;
+
+  final seconds = breakUntil.toDate().difference(DateTime.now()).inSeconds;
+  if (seconds <= 0) return 0;
+
+  return (seconds / 60).ceil();
+}
+
+bool _sameTimestamp(Timestamp? first, Timestamp? second) {
+  if (first == null || second == null) return false;
+
+  return first.toDate().millisecondsSinceEpoch ==
+      second.toDate().millisecondsSinceEpoch;
 }
 
 bool _isFreshRuntimeState(Map<String, dynamic>? data) {
@@ -172,8 +236,9 @@ void _listenRuntimeScheduleState() {
 
   @override
   void dispose() {
-    _tabController.dispose();
     _activeQuestionTimer?.cancel();
+    _zumrePillTimer?.cancel();
+    _breakCountdownTimer?.cancel();
     _teacherSubscription?.cancel();
     _runtimeStateSubscription?.cancel();
     super.dispose();
@@ -189,6 +254,82 @@ void _listenRuntimeScheduleState() {
     if (value is int) return value;
     if (value is double) return value.toInt();
     return int.tryParse('$value') ?? fallback;
+  }
+
+  Map<String, dynamic> _zumreUiStateFromSlots(
+    DateTime now,
+    List<Map<String, dynamic>> slots,
+    bool isWeekend,
+  ) {
+    final nowMinutes = now.hour * 60 + now.minute;
+    var slotText = '';
+    var nextZumreText = '';
+    int? remainingMinutes;
+    var isZumreOpen = false;
+
+    for (final slot in slots) {
+      final start = '${slot['start']}';
+      final end = '${slot['end']}';
+      final startMin = _timeToMinutes(start);
+      final endMin = _timeToMinutes(end);
+
+      if (endMin <= startMin) continue;
+
+      if (nowMinutes >= startMin && nowMinutes < endMin) {
+        isZumreOpen = true;
+        slotText = '$start - $end';
+        remainingMinutes = endMin - nowMinutes;
+        break;
+      }
+    }
+
+    if (!isZumreOpen && slots.isNotEmpty) {
+      final futureSlots = slots.where((slot) {
+        final start = _timeToMinutes('${slot['start']}');
+        return start > nowMinutes;
+      }).toList();
+
+      if (futureSlots.isNotEmpty) {
+        futureSlots.sort((a, b) {
+          final aStart = _timeToMinutes('${a['start']}');
+          final bStart = _timeToMinutes('${b['start']}');
+          return aStart.compareTo(bStart);
+        });
+        nextZumreText = 'Sonraki: ${futureSlots.first['start']}';
+      } else {
+        nextZumreText = isWeekend
+            ? 'Bugünkü zümre tamamlandı'
+            : 'Yarın zümre ${slots.first['start']}';
+      }
+    }
+
+    return {
+      'isZumreOpen': isZumreOpen,
+      'slotText': slotText,
+      'nextZumreText': nextZumreText,
+      'remainingMinutes': remainingMinutes,
+    };
+  }
+
+  void _refreshZumrePillFromCache() {
+    if (_cachedZumreSlots.isEmpty || !mounted) return;
+
+    final uiState = _zumreUiStateFromSlots(
+      DateTime.now(),
+      _cachedZumreSlots,
+      _cachedZumreIsWeekend,
+    );
+    final isOpen = uiState['isZumreOpen'] == true;
+    final remainingMinutes = uiState['remainingMinutes'];
+
+    setState(() {
+      _isZumreOpenNow = isOpen;
+      _zumreSlotText = isOpen ? uiState['slotText']?.toString() ?? '' : '';
+      _nextZumreText =
+          isOpen ? '' : uiState['nextZumreText']?.toString() ?? '';
+      _zumreRemainingMinutes =
+          isOpen && remainingMinutes is int ? remainingMinutes : null;
+    });
   }
 
  void _resetActiveQuestionTimer() {
@@ -349,6 +490,8 @@ Future<void> _checkScheduleAvailability() async {
   final zumreSlots = rawZumreSlots
       .map((e) => Map<String, dynamic>.from(e))
       .toList();
+  _cachedZumreSlots = zumreSlots;
+  _cachedZumreIsWeekend = isWeekend;
 
   final lunch = Map<String, dynamic>.from(settings['lunchBreak'] ?? {});
 
@@ -356,44 +499,9 @@ Future<void> _checkScheduleAvailability() async {
       .map((e) => Map<String, dynamic>.from(e))
       .toList();
 
-  final isZumreOpen = _isNowInSlots(now, zumreSlots);
+  final zumreUiState = _zumreUiStateFromSlots(now, zumreSlots, isWeekend);
+  final isZumreOpen = zumreUiState['isZumreOpen'] == true;
   final isTeacherWorking = _isNowInSlots(now, teacherSlots);
-  var zumreSlotText = '';
-  var nextZumreText = '';
-
-  for (final slot in zumreSlots) {
-    final start = '${slot['start']}';
-    final end = '${slot['end']}';
-    final startMin = _timeToMinutes(start);
-    final endMin = _timeToMinutes(end);
-    final nowMin = now.hour * 60 + now.minute;
-
-    if (endMin > startMin && nowMin >= startMin && nowMin < endMin) {
-      zumreSlotText = '$start - $end';
-      break;
-    }
-  }
-
-  if (!isZumreOpen && zumreSlots.isNotEmpty) {
-    final nowMinutes = now.hour * 60 + now.minute;
-    final futureSlots = zumreSlots.where((slot) {
-      final start = _timeToMinutes('${slot['start']}');
-      return start > nowMinutes;
-    }).toList();
-
-    if (futureSlots.isNotEmpty) {
-      futureSlots.sort((a, b) {
-        final aStart = _timeToMinutes('${a['start']}');
-        final bStart = _timeToMinutes('${b['start']}');
-        return aStart.compareTo(bStart);
-      });
-      nextZumreText = 'Sonraki: ${futureSlots.first['start']}';
-    } else {
-      nextZumreText = isWeekend
-          ? 'Bugünkü zümre tamamlandı'
-          : 'Yarın zümre ${zumreSlots.first['start']}';
-    }
-  }
 
   bool isLunch = false;
   if (lunch.isNotEmpty) {
@@ -427,7 +535,7 @@ Future<void> _checkScheduleAvailability() async {
     message = 'Şu an zümre saati aktif değil.';
   } else if (effectiveLunch) {
     message = 'Şu an öğle arası.';
-} else if (!isTeacherWorking && !_availabilityOverride) {
+} else if (!isTeacherWorking) {
   message = 'Bugün çalışma programınıza göre kurumda değilsiniz.';
 } else if (_teacherStatus == 'absent') {
     message = 'Kurumda değil olarak görünüyorsunuz.';
@@ -439,27 +547,19 @@ Future<void> _checkScheduleAvailability() async {
 
   if (!mounted) return;
 
-if (!isTeacherWorking && !_availabilityOverride && _teacherStatus != 'absent') {
-  final uid = _auth.currentUser!.uid;
-
-  await _firestore.collection('users').doc(uid).update({
-    'teacherStatus': 'absent',
-  });
-}
-
-if (!mounted) return;
+final remainingMinutes = zumreUiState['remainingMinutes'];
 
 setState(() {
   _isZumreOpenNow = effectiveZumreOpen;
   _isTeacherWorkingNow = isTeacherWorking;
   _isLunchNow = effectiveLunch;
-  _zumreSlotText = effectiveZumreOpen ? zumreSlotText : '';
-  _nextZumreText = effectiveZumreOpen ? '' : nextZumreText;
+  _zumreSlotText =
+      effectiveZumreOpen ? zumreUiState['slotText']?.toString() ?? '' : '';
+  _nextZumreText =
+      effectiveZumreOpen ? '' : zumreUiState['nextZumreText']?.toString() ?? '';
+  _zumreRemainingMinutes =
+      effectiveZumreOpen && remainingMinutes is int ? remainingMinutes : null;
   _scheduleMessage = message;
-
-  if (!isTeacherWorking && !_availabilityOverride) {
-    _teacherStatus = 'absent';
-  }
 });
 }
 
@@ -945,12 +1045,89 @@ Future<void> _loadTeacherAvailability() async {
       case 'available':
         return 'Müsait';
       case 'break':
-        return 'Molada';
+        return _remainingBreakMinutes > 0
+            ? 'Molada · $_remainingBreakMinutes dk'
+            : 'Molada';
       case 'absent':
         return 'Kurumda Değil';
+      case 'studyGuard':
+        return 'Etüt Nöbetçisi';
       default:
         return 'Etütte';
     }
+  }
+
+  void _configureBreakCountdown() {
+    _breakCountdownTimer?.cancel();
+    _breakCountdownTimer = null;
+
+    final currentBreakUntil = _breakUntil;
+    if (_teacherStatus != 'break' || currentBreakUntil == null) {
+      if (_remainingBreakMinutes != 0 && mounted) {
+        setState(() {
+          _remainingBreakMinutes = 0;
+        });
+      } else {
+        _remainingBreakMinutes = 0;
+      }
+      return;
+    }
+
+    void tick() {
+      final remaining = _breakRemainingMinutes(currentBreakUntil);
+
+      if (mounted) {
+        setState(() {
+          _remainingBreakMinutes = remaining;
+        });
+      } else {
+        _remainingBreakMinutes = remaining;
+      }
+
+      if (remaining <= 0) {
+        _breakCountdownTimer?.cancel();
+        _breakCountdownTimer = null;
+        _finishBreakIfStillCurrent(currentBreakUntil);
+      }
+    }
+
+    tick();
+    _breakCountdownTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) {
+        if (_teacherStatus != 'break' ||
+            !_sameTimestamp(_breakUntil, currentBreakUntil)) {
+          _breakCountdownTimer?.cancel();
+          _breakCountdownTimer = null;
+          return;
+        }
+
+        tick();
+      },
+    );
+  }
+
+  Future<void> _finishBreakIfStillCurrent(Timestamp expectedBreakUntil) async {
+    try {
+      final uid = _auth.currentUser!.uid;
+      final teacherRef = _firestore.collection('users').doc(uid);
+      final doc = await teacherRef.get();
+      final data = doc.data();
+
+      if (data == null || data['teacherStatus'] != 'break') return;
+
+      final currentBreakUntil = data['breakUntil'];
+      if (currentBreakUntil is! Timestamp ||
+          !_sameTimestamp(currentBreakUntil, expectedBreakUntil)) {
+        return;
+      }
+
+      await teacherRef.update({
+        'teacherStatus': _resolveBaseTeacherStatus(data),
+        'breakUntil': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
   }
 
   void _listenTeacherInfo() {
@@ -974,33 +1151,69 @@ Future<void> _loadTeacherAvailability() async {
       _teacherName = data?['name'] ?? data?['email'] ?? 'Öğretmen';
       _teacherSubject = subject ?? 'Ders';
       _teacherStatus = data?['teacherStatus'] ?? 'available';
+      _manualAbsentDate = data?['manualAbsentDate']?.toString();
+      _breakUntil = data?['breakUntil'] is Timestamp
+          ? data!['breakUntil'] as Timestamp
+          : null;
     });
 
+    _configureBreakCountdown();
     _checkScheduleAvailability();
     });
   }
 
-  Future<void> _updateTeacherStatus(String status) async {
+  Future<void> _updateTeacherStatus(
+    String status, {
+    int? breakMinutes,
+  }) async {
     final uid = _auth.currentUser!.uid;
+    final targetStatus =
+        status == 'available' && !_isTeacherWorkingNow ? 'absent' : status;
+    final updateData = <String, dynamic>{
+      'teacherStatus': targetStatus,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
 
-    await _firestore.collection('users').doc(uid).update({
-      'teacherStatus': status,
-    });
+    if (status == 'available') {
+      updateData['manualAbsentDate'] = FieldValue.delete();
+      updateData['breakUntil'] = FieldValue.delete();
+    } else if (status == 'absent') {
+      updateData['manualAbsentDate'] = _todayDateKey();
+      updateData['breakUntil'] = FieldValue.delete();
+    } else if (status == 'break') {
+      final minutes = breakMinutes ?? 5;
+      updateData['manualAbsentDate'] = FieldValue.delete();
+      updateData['breakUntil'] = Timestamp.fromDate(
+        DateTime.now().add(Duration(minutes: minutes)),
+      );
+    }
+
+    await _firestore.collection('users').doc(uid).update(updateData);
 
     if (!mounted) return;
 
     setState(() {
-      _teacherStatus = status;
+      _teacherStatus = targetStatus;
+      if (status == 'absent') {
+        _manualAbsentDate = _todayDateKey();
+        _breakUntil = null;
+      } else if (status == 'available') {
+        _manualAbsentDate = null;
+        _breakUntil = null;
+      } else if (status == 'break') {
+        _manualAbsentDate = null;
+        _breakUntil = updateData['breakUntil'] as Timestamp?;
+      }
     });
-    if (status != 'available') {
-  _availabilityOverride = false;
-}
+    _configureBreakCountdown();
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           status == 'available'
-              ? 'Durumunuz müsait olarak güncellendi'
+              ? targetStatus == 'available'
+                  ? 'Durumunuz müsait olarak güncellendi'
+                  : 'Manuel durum temizlendi. Programınıza göre kurumda değilsiniz.'
               : status == 'break'
                   ? 'Durumunuz molada olarak güncellendi'
                   : 'Durumunuz kurumda değil olarak güncellendi',
@@ -1009,26 +1222,125 @@ Future<void> _loadTeacherAvailability() async {
     );
   }
 
+  Future<int?> _showBreakDurationDialog() {
+    return showDialog<int>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF06312E),
+                  Color(0xFF008A5C),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: Colors.white24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.22),
+                  blurRadius: 24,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 58,
+                  height: 58,
+                  decoration: BoxDecoration(
+                    color: Colors.orangeAccent.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.free_breakfast_rounded,
+                    color: Colors.orangeAccent,
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Mola süresi',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Ne kadar süre molada görüneceksiniz?',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white70,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                Row(
+                  children: [
+                    for (final minutes in const [5, 10, 15]) ...[
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx, minutes),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white38),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                          ),
+                          child: Text('$minutes dk'),
+                        ),
+                      ),
+                      if (minutes != 15) const SizedBox(width: 8),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                    child: const Text('İptal'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _showStatusChangeDialog(String value) async {
-    if (_teacherStatus == value) return;
+    if (_teacherStatus == value && value != 'break') return;
     await _checkScheduleAvailability();
 
-if (value == 'available' && !_isTeacherWorkingNow) {
-  final override = await _confirmAction(
-    title: 'Program dışında görünüyorsunuz',
-    message:
-        'Bugünkü çalışma programınıza göre kurumda değilsiniz. Buna rağmen durumunuzu müsait olarak değiştirmek istiyor musunuz?',
-    confirmText: 'Müsait Yap',
-    icon: Icons.warning_amber_rounded,
-    color: Colors.orangeAccent,
-  );
+    if (value == 'break') {
+      final minutes = await _showBreakDurationDialog();
+      if (minutes == null) return;
 
-  if (!override) return;
-
-  setState(() {
-    _availabilityOverride = true;
-  });
-}
+      await _updateTeacherStatus(value, breakMinutes: minutes);
+      return;
+    }
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -2563,190 +2875,6 @@ Widget _compactQueueAction({
     ],
   );
 }
-Widget _buildRatingsPage() {
-  return ListView(
-    physics: const AlwaysScrollableScrollPhysics(),
-    padding: const EdgeInsets.only(bottom: 32),
-    children: [
-      _buildTeacherHeader(),
-      _buildStatusCard(),
-      SizedBox(
-        height: MediaQuery.of(context).size.height * 0.75,
-        child: _buildMyRatings(),
-      ),
-    ],
-  );
-}
-
-  Widget _buildMyRatings() {
-    final teacherId = _auth.currentUser!.uid;
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('queues')
-          .where('teacherId', isEqualTo: teacherId)
-          .where('status', isEqualTo: 'completed')
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return _glassInfoCard(
-            icon: Icons.error_outline,
-            title: 'Değerlendirmeler yüklenemedi',
-            subtitle: '${snapshot.error}',
-            iconColor: Colors.redAccent,
-          );
-        }
-
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final queues = snapshot.data!.docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          return data['rating'] != null;
-        }).toList();
-
-        queues.sort((a, b) {
-          final aTime =
-              (a.data() as Map<String, dynamic>)['completedAt'] as Timestamp?;
-          final bTime =
-              (b.data() as Map<String, dynamic>)['completedAt'] as Timestamp?;
-
-          if (aTime == null && bTime == null) return 0;
-          if (aTime == null) return 1;
-          if (bTime == null) return -1;
-
-          return bTime.compareTo(aTime);
-        });
-
-        if (queues.isEmpty) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: 28),
-            child: _glassInfoCard(
-              icon: Icons.star_border,
-              title: 'Henüz değerlendirme yok',
-              subtitle:
-                  'Öğrenciler soru çözüldükten sonra puan verince burada görünecek.',
-              iconColor: Colors.amber,
-            ),
-          );
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-          itemCount: queues.length,
-          itemBuilder: (context, index) {
-            final doc = queues[index];
-            final data = doc.data() as Map<String, dynamic>;
-
-            final rating = _toInt(data['rating']);
-            final comment = data['comment'] ?? '';
-            final studentName = data['studentName'] ?? 'Öğrenci';
-            final subject = data['subject'] ?? 'Ders';
-
-            final completedAt = data['completedAt'] as Timestamp?;
-            final dateText = completedAt == null
-                ? ''
-                : '${completedAt.toDate().day}.${completedAt.toDate().month}.${completedAt.toDate().year}';
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white.withOpacity(0.15)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: Colors.amber.withOpacity(0.18),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.star,
-                          color: Colors.amber,
-                          size: 28,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              studentName,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 17,
-                              ),
-                            ),
-                            Text(
-                              subject,
-                              style: const TextStyle(
-                                color: Colors.white60,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (dateText.isNotEmpty)
-                        Text(
-                          dateText,
-                          style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 12,
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: List.generate(
-                      5,
-                      (i) => Icon(
-                        i < rating ? Icons.star : Icons.star_border,
-                        color: Colors.amber,
-                        size: 24,
-                      ),
-                    ),
-                  ),
-                  if (comment.toString().trim().isNotEmpty) ...[
-                    const SizedBox(height: 14),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: Text(
-                        '"$comment"',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontStyle: FontStyle.italic,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   Widget _statusButton(
     String text,
     IconData icon,
@@ -2754,12 +2882,15 @@ Widget _buildRatingsPage() {
     String value,
   ) {
     final selected = _teacherStatus == value;
+    final tapEnabled = !(selected && value == 'break');
 
     return InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: () {
-        _showStatusChangeDialog(value);
-      },
+      onTap: tapEnabled
+          ? () {
+              _showStatusChangeDialog(value);
+            }
+          : null,
       child: Container(
         padding: const EdgeInsets.symmetric(
           horizontal: 14,
@@ -2883,10 +3014,13 @@ _headerActionButton(
 
   Widget _zumreStatusChip() {
     final active = _isZumreOpenNow && !_isLunchNow;
+    final remaining = _zumreRemainingMinutes;
     final text = active
-        ? _zumreSlotText.isEmpty
-            ? 'Zümre Aktif'
-            : 'Zümre Aktif • $_zumreSlotText'
+        ? remaining != null && remaining <= 5 && remaining > 0
+            ? 'Bitime $remaining dk'
+            : _zumreSlotText.isEmpty
+                ? 'Zümre Aktif'
+                : 'Zümre Aktif • $_zumreSlotText'
         : _nextZumreText.isEmpty
             ? 'Zümre Kapalı'
             : _nextZumreText;
@@ -3227,25 +3361,6 @@ Widget _headerActionButton({
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-  toolbarHeight: 0,
-  bottom: TabBar(
-    controller: _tabController,
-    indicatorColor: Colors.greenAccent,
-    labelColor: Colors.greenAccent,
-    unselectedLabelColor: Colors.white60,
-    tabs: const [
-      Tab(
-        icon: Icon(Icons.list_alt),
-        text: 'Bekleyen Sorular',
-      ),
-      Tab(
-        icon: Icon(Icons.star),
-        text: 'Değerlendirmeler',
-      ),
-    ],
-  ),
-),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -3259,13 +3374,7 @@ Widget _headerActionButton({
           ),
         ),
         child: SafeArea(
-  child: TabBarView(
-    controller: _tabController,
-    children: [
-      _buildWaitingQueues(),
-      _buildRatingsPage(),
-    ],
-  ),
+  child: _buildWaitingQueues(),
 ),
       ),
     );

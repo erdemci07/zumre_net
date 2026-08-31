@@ -572,7 +572,20 @@ void _listenToQueue(String queueId) {
   _queueSubscription =
       _firestore.collection('queues').doc(queueId).snapshots().listen(
     (snapshot) async {
-      if (!snapshot.exists) return;
+      if (!snapshot.exists) {
+        await _queueSubscription?.cancel();
+        _queueSubscription = null;
+
+        if (!mounted) return;
+
+        setState(() {
+          _isInQueue = false;
+          _currentQueueId = null;
+          _currentTeacherName = null;
+          _queuePosition = 0;
+        });
+        return;
+      }
 
       final data = snapshot.data()!;
       final status = data['status'];
@@ -648,17 +661,6 @@ if (status == 'completed') {
     _currentQueueId = null;
     _currentTeacherName = null;
     _queuePosition = 0;
-  });
-
-  Future.delayed(const Duration(milliseconds: 400), () {
-    if (!mounted) return;
-
-    final ratingPopupClosed =
-        data['ratingPopupClosed'] == true;
-
-    if (!ratingPopupClosed) {
-      _showRatingDialog(queueId);
-    }
   });
 
   return;
@@ -1151,208 +1153,6 @@ void _hideSmartTeacherLoadingDialog() {
   if (mounted && Navigator.canPop(context)) {
     Navigator.pop(context);
   }
-}
-  void _showRatingDialog(String queueId) {
-  int rating = 5;
-  String comment = '';
-
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (ctx) {
-      bool showCloseButton = false;
-
-      return StatefulBuilder(
-        builder: (context, setStateDialog) {
-          if (!showCloseButton) {
-            Future.delayed(const Duration(seconds: 2), () {
-              if (ctx.mounted) {
-                setStateDialog(() {
-                  showCloseButton = true;
-                });
-              }
-            });
-          }
-
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            child: Container(
-              padding: const EdgeInsets.all(22),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFF071A3A),
-                    Color(0xFF30106B),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(26),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Sorunuz çözüldü!',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      if (showCloseButton)
-                        IconButton(
-                          icon: const Icon(
-                            Icons.close,
-                            color: Colors.white70,
-                          ),
-                     onPressed: () async {
-  Navigator.pop(ctx);
-
-  try {
-    await _firestore
-        .collection('queues')
-        .doc(queueId)
-        .update({
-      'ratingPopupClosed': true,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-  } catch (e) {
-    debugPrint('Rating penceresi kapatma kaydı yazılamadı: $e');
-  }
-},
-                        )
-                    ],
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.18),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.check_circle,
-                      color: Colors.greenAccent,
-                      size: 42,
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  const Text(
-                    'Öğretmeni puanlayın',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(
-                      5,
-                      (i) => IconButton(
-                        icon: Icon(
-                          i < rating ? Icons.star : Icons.star_border,
-                          color: Colors.amber,
-                          size: 30,
-                        ),
-                        onPressed: () {
-                          setStateDialog(() {
-                            rating = i + 1;
-                          });
-                        },
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  TextField(
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Yorum (isteğe bağlı)',
-                      labelStyle: const TextStyle(color: Colors.white60),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.08),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                    onChanged: (val) {
-                      comment = val;
-                    },
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        try {
-                   await _firestore
-    .collection('queues')
-    .doc(queueId)
-    .update({
-  'rating': rating,
-  'comment': comment.trim(),
-  'ratingPopupClosed': true,
-  'ratedAt': FieldValue.serverTimestamp(),
-  'updatedAt': FieldValue.serverTimestamp(),
-});
-
-if (ctx.mounted) {
-  Navigator.pop(ctx);
-}
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Teşekkürler! Değerlendirmeniz kaydedildi.',
-                              ),
-                            ),
-                          );
-                        } catch (e) {
-                          if (!ctx.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Değerlendirme kaydedilemedi: $e',
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                      icon: const Icon(Icons.send),
-                      label: const Text('Değerlendirmeyi Gönder'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF6C3DFF),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    },
-  );
 }
 
   String _formatCooldown(int seconds) {

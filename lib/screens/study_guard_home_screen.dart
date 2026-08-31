@@ -119,6 +119,61 @@ List<String> _teacherSubjectsFromData(Map<String, dynamic> data) {
   return subjects;
 }
 
+String _dayKey(DateTime date) {
+  switch (date.weekday) {
+    case DateTime.monday:
+      return 'monday';
+    case DateTime.tuesday:
+      return 'tuesday';
+    case DateTime.wednesday:
+      return 'wednesday';
+    case DateTime.thursday:
+      return 'thursday';
+    case DateTime.friday:
+      return 'friday';
+    case DateTime.saturday:
+      return 'saturday';
+    case DateTime.sunday:
+      return 'sunday';
+    default:
+      return 'monday';
+  }
+}
+
+String _todayDateKey() {
+  final now = DateTime.now();
+  return '${now.year.toString().padLeft(4, '0')}-'
+      '${now.month.toString().padLeft(2, '0')}-'
+      '${now.day.toString().padLeft(2, '0')}';
+}
+
+List<Map<String, dynamic>> _teacherAvailabilitySlots(
+  Map<String, dynamic> data,
+  DateTime now,
+) {
+  final rawAvailability = data['weeklyAvailability'];
+  if (rawAvailability is! Map) return [];
+
+  final rawSlots = rawAvailability[_dayKey(now)];
+  if (rawSlots is! List) return [];
+
+  return rawSlots
+      .whereType<Map>()
+      .map((slot) => Map<String, dynamic>.from(slot))
+      .toList();
+}
+
+String _resolveDutyTeacherStatus(Map<String, dynamic> data) {
+  if (data['manualAbsentDate']?.toString() == _todayDateKey()) {
+    return 'absent';
+  }
+
+  final now = DateTime.now();
+  return _isNowInSlots(now, _teacherAvailabilitySlots(data, now))
+      ? 'available'
+      : 'absent';
+}
+
 bool _isNowInSlots(
   DateTime now,
   List<Map<String, dynamic>> slots,
@@ -505,6 +560,13 @@ Future<void> _finishStudySessionSilently({
     final dutyTeacherId = sessionData['dutyTeacherId'];
     final previousStatus =
         sessionData['dutyTeacherPreviousStatus'] ?? 'available';
+    Map<String, dynamic>? dutyTeacherData;
+
+    if (dutyTeacherId != null) {
+      final dutyTeacherDoc =
+          await _firestore.collection('users').doc(dutyTeacherId).get();
+      dutyTeacherData = dutyTeacherDoc.data();
+    }
 
     final studentsSnapshot =
         await sessionRef.collection('students').get();
@@ -532,7 +594,10 @@ for (final doc in studentsSnapshot.docs) {
       batch.update(
         _firestore.collection('users').doc(dutyTeacherId),
         {
-          'teacherStatus': previousStatus,
+          'teacherStatus': dutyTeacherData == null
+              ? previousStatus
+              : _resolveDutyTeacherStatus(dutyTeacherData),
+          'breakUntil': FieldValue.delete(),
           'updatedAt': FieldValue.serverTimestamp(),
         },
       );
@@ -1518,11 +1583,19 @@ Future<void> _saveDutyTeacher({
       final sessionData = sessionDoc.data() ?? {};
       final previousStatus =
           sessionData['dutyTeacherPreviousStatus'] ?? 'available';
+      final previousTeacherDoc = await _firestore
+          .collection('users')
+          .doc(_selectedDutyTeacherId)
+          .get();
+      final previousTeacherData = previousTeacherDoc.data();
 
       batch.update(
         _firestore.collection('users').doc(_selectedDutyTeacherId),
         {
-          'teacherStatus': previousStatus,
+          'teacherStatus': previousTeacherData == null
+              ? previousStatus
+              : _resolveDutyTeacherStatus(previousTeacherData),
+          'breakUntil': FieldValue.delete(),
           'updatedAt': FieldValue.serverTimestamp(),
         },
       );

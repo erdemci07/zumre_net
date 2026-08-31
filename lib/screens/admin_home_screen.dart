@@ -2602,6 +2602,8 @@ class _TimeTextInputFormatter extends TextInputFormatter {
 
 class _UserManagementPageState extends State<UserManagementPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
   final List<String> _roles = ['admin', 'teacher', 'student', 'studyGuard'];
   String _roleLabel(String role) {
@@ -3180,7 +3182,11 @@ try {
                     );
                   } catch (e) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Hata: $e')),
+                      SnackBar(
+                        content: Text(
+                          'Hata: ${_adminFunctionErrorMessage(e)}',
+                        ),
+                      ),
                     );
                   } finally {
                     if (mounted) setState(() => _isLoading = false);
@@ -3198,13 +3204,39 @@ try {
   required String uid,
   required String password,
 }) async {
-  final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
-  final callable = functions.httpsCallable('updateUserPassword');
+  final callable = _functions.httpsCallable('updateUserPassword');
 
   await callable.call({
     'uid': uid,
     'password': password,
   });
+}
+
+String _adminFunctionErrorMessage(Object error) {
+  if (error is FirebaseFunctionsException) {
+    final message = error.message?.trim();
+
+    if (message != null && message.isNotEmpty) {
+      return message;
+    }
+
+    switch (error.code) {
+      case 'permission-denied':
+        return 'Bu işlem için yetkiniz bulunmuyor.';
+      case 'already-exists':
+        return 'Bu kullanıcı adı zaten kullanılıyor.';
+      case 'failed-precondition':
+        return 'Bu kullanıcının aktif bir işlemi bulunuyor.';
+      case 'not-found':
+        return 'Kullanıcı kaydı bulunamadı.';
+      case 'invalid-argument':
+        return 'Girilen bilgileri kontrol edin.';
+      default:
+        return 'İşlem tamamlanamadı.';
+    }
+  }
+
+  return error.toString();
 }
 
   Future<void> _createUser(
@@ -3221,73 +3253,22 @@ try {
   String department,
   String studentNo,
 ) async {
-  const apiKey = 'AIzaSyBznoF8WcalY8k-tUexUTrooeDJdZHsM5w';
+  final callable = _functions.httpsCallable('adminCreateUser');
 
-  final url = Uri.parse(
-    'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey',
-  );
-
-  final response = await http.post(
-    url,
-    body: jsonEncode({
-      'email': email,
-      'password': password,
-      'returnSecureToken': true,
-    }),
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  );
-
-  if (response.statusCode != 200) {
-    final responseData = jsonDecode(response.body);
-    final error =
-        responseData['error']?['message'] ?? 'Bilinmeyen Authentication hatası';
-
-    throw Exception('Auth oluşturulamadı: $error');
-  }
-
-  final responseData = jsonDecode(response.body);
-  final uid = responseData['localId'];
-
-  if (uid == null) {
-    throw Exception('Firebase kullanıcı kimliği oluşturulamadı.');
-  }
-
-  final Map<String, dynamic> userData = {
-    'uid': uid,
+  await callable.call({
     'email': email,
     'username': username,
-    'identityKey': username,
     'name': firstName,
     'surname': surname,
     'fullName': fullName,
     'role': role,
-    'updatedAt': FieldValue.serverTimestamp(),
-    'createdAt': FieldValue.serverTimestamp(),
-  };
-
-  if (role == 'student') {
-    userData.addAll({
-      'className': className,
-      'branch': branch,
-      'department': department,
-      'studentNo': studentNo,
-      'isInStudySession': false,
-      'activeStudySessionId': null,
-    });
-  }
-
-  if (role == 'teacher') {
-    userData.addAll({
-      'subjects': subjects,
-      'branch': subjects.isNotEmpty ? subjects.first : '',
-      'teacherStatus': 'absent',
-      'weeklyAvailability': {},
-    });
-  }
-
-  await _firestore.collection('users').doc(uid).set(userData);
+    'subjects': subjects,
+    'className': className,
+    'branch': branch,
+    'department': department,
+    'studentNo': studentNo,
+    'password': password,
+  });
 }
 Future<void> _updateUser(
   String uid,
@@ -3303,50 +3284,22 @@ Future<void> _updateUser(
   String department,
   String studentNo,
 ) async {
-  final Map<String, dynamic> updates = {
+  final callable = _functions.httpsCallable('adminUpdateUser');
+
+  await callable.call({
+    'uid': uid,
     'email': newEmail,
     'username': username,
-    'identityKey': username,
     'name': firstName,
     'surname': surname,
     'fullName': fullName,
     'role': newRole,
-    'updatedAt': FieldValue.serverTimestamp(),
-  };
-
-  if (newRole == 'teacher') {
-    updates.addAll({
-      'subjects': subjects,
-      'branch': subjects.isNotEmpty ? subjects.first : '',
-    });
-
-    updates['className'] = FieldValue.delete();
-    updates['department'] = FieldValue.delete();
-    updates['studentNo'] = FieldValue.delete();
-    updates['isInStudySession'] = FieldValue.delete();
-    updates['activeStudySessionId'] = FieldValue.delete();
-  } else if (newRole == 'student') {
-    updates.addAll({
-      'className': className,
-      'branch': branch,
-      'department': department,
-      'studentNo': studentNo,
-    });
-
-    updates['subjects'] = FieldValue.delete();
-    updates['teacherStatus'] = FieldValue.delete();
-    updates['weeklyAvailability'] = FieldValue.delete();
-  } else {
-    updates['subjects'] = FieldValue.delete();
-    updates['teacherStatus'] = FieldValue.delete();
-    updates['weeklyAvailability'] = FieldValue.delete();
-    updates['className'] = FieldValue.delete();
-    updates['branch'] = FieldValue.delete();
-    updates['department'] = FieldValue.delete();
-    updates['studentNo'] = FieldValue.delete();
-  }
-
-  await _firestore.collection('users').doc(uid).update(updates);
+    'subjects': subjects,
+    'className': className,
+    'branch': branch,
+    'department': department,
+    'studentNo': studentNo,
+  });
 }
   
 
@@ -3355,7 +3308,7 @@ Future<void> _updateUser(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Kullanıcıyı Sil'),
-        content: Text('$email adlı kullanıcıyı silmek istediğinize emin misiniz?'),
+        content: Text('$email kullanıcısının hesabı silinecek. Emin misiniz?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -3374,14 +3327,17 @@ Future<void> _updateUser(
     setState(() => _isLoading = true);
 
     try {
-      await _firestore.collection('users').doc(uid).delete();
+      final callable = _functions.httpsCallable('adminDeleteUser');
+      await callable.call({
+        'uid': uid,
+      });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Kullanıcı Firestore’dan silindi.')),
+        const SnackBar(content: Text('Kullanıcı hesabı silindi.')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Silme hatası: $e')),
+        SnackBar(content: Text('Silme hatası: ${_adminFunctionErrorMessage(e)}')),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);

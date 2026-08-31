@@ -67,6 +67,8 @@ service cloud.firestore {
           .hasOnly([
             "teacherStatus",
             "weeklyAvailability",
+            "manualAbsentDate",
+            "breakUntil",
             "updatedAt"
           ]);
 
@@ -95,6 +97,7 @@ service cloud.firestore {
           .affectedKeys()
           .hasOnly([
             "teacherStatus",
+            "breakUntil",
             "updatedAt"
           ]);
     }
@@ -138,23 +141,6 @@ service cloud.firestore {
           request.resource.data.status == "cancelled"
           || request.resource.data.status == "canceled"
         );
-
-      // Yeni eklenen değerlendirme izni
-      allow update: if isStudent()
-        && resource.data.studentId == request.auth.uid
-        && resource.data.status == "completed"
-        && request.resource.data.studentId == resource.data.studentId
-        && request.resource.data.teacherId == resource.data.teacherId
-        && request.resource.data.subject == resource.data.subject
-        && request.resource.data.diff(resource.data)
-          .affectedKeys()
-          .hasOnly([
-            "rating",
-            "comment",
-            "ratingPopupClosed",
-            "ratedAt",
-            "updatedAt"
-          ]);
 
       allow update: if isTeacher()
         && resource.data.teacherId == request.auth.uid
@@ -204,42 +190,6 @@ service cloud.firestore {
 
         allow create, update, delete: if isAdmin();
       }
-    }
-
-    // =========================================================
-    // RATINGS — ÖĞRETMEN DEĞERLENDİRMELERİ
-    // =========================================================
-
-    match /ratings/{ratingId} {
-
-      allow read: if isSignedIn();
-
-      allow create: if isStudent()
-        && request.resource.data.studentId == request.auth.uid;
-
-      allow update: if isStudent()
-        && resource.data.studentId == request.auth.uid
-        && request.resource.data.studentId == resource.data.studentId;
-
-      allow update, delete: if isAdmin();
-    }
-
-    // =========================================================
-    // GERİ BİLDİRİM KOLEKSİYONU
-    // =========================================================
-
-    match /feedback/{feedbackId} {
-
-      allow read: if isSignedIn();
-
-      allow create: if isStudent()
-        && request.resource.data.studentId == request.auth.uid;
-
-      allow update: if isStudent()
-        && resource.data.studentId == request.auth.uid
-        && request.resource.data.studentId == resource.data.studentId;
-
-      allow update, delete: if isAdmin();
     }
 
     match /{document=**} {

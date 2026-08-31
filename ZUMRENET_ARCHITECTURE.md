@@ -44,7 +44,7 @@ Rol yönlendirme `lib/main.dart` içinde yapılır:
 
 ### Student
 
-Öğrenci ekranı `users`, `queues` ve `settings/zumreSchedule` okur. Öğrenci sıra almak için `queues` koleksiyonuna belge ekler. Sıra iptalinde kendi queue belgesini `cancelled` yapar ve kendi `users/{uid}.cooldownUntil` alanını yazar. Soru tamamlanınca aynı queue belgesine `rating`, `comment`, `ratingPopupClosed` ve `ratedAt` alanlarını yazar.
+Öğrenci ekranı `users`, `queues` ve `settings/zumreSchedule` okur. Öğrenci sıra almak için `queues` koleksiyonuna belge ekler. Sıra iptalinde kendi queue belgesini `cancelled` yapar ve kendi `users/{uid}.cooldownUntil` alanını yazar. Soru tamamlanınca aktif queue state'i kapanır; güncel kodda öğrenci değerlendirme/rating yazımı yoktur.
 
 Öğrenci ekranı aktif queue belgesini stream ile dinler. `waiting`, `in_progress`, `completed`, `cancelled` durumlarına göre arayüz değişir.
 
@@ -62,7 +62,7 @@ Görevli branş öğretmeni seçilirse seçilen öğretmenin mevcut `teacherStat
 
 ### Admin
 
-Admin ekranı istatistik, PDF rapor, zaman yönetimi, Smart Import ve kullanıcı yönetimini içerir. `users`, `queues`, `studySessions` ve `settings/zumreSchedule` okur/yazar. Şifre güncelleme için Cloud Function `updateUserPassword` çağrılır.
+Admin ekranı istatistik, PDF rapor, zaman yönetimi, Smart Import ve kullanıcı yönetimini içerir. Kullanıcı yönetiminde create/update/delete/password işlemleri server callable Cloud Functions üzerinden yürütülür; Firebase Authentication ve `users/{uid}` tek kullanıcı lifecycle olarak ele alınır.
 
 ## Firestore Veri Modeli
 
@@ -101,6 +101,8 @@ Ortak alanlar:
 - `subject`: string, legacy okuma desteği var
 - `teacherStatus`: string
 - `weeklyAvailability`: map; gün anahtarları altında `start`/`end` slot listeleri
+- `manualAbsentDate`: string veya yok; Europe/Istanbul takvim günü için `YYYY-MM-DD` günlük "Kurumda Değilim" override değeri
+- `breakUntil`: timestamp veya yok; süreli "Molada" durumunun bitiş zamanı
 
 StudyGuard için kodda `role == studyGuard` temel alınır. `dutyTeacherId` ve `dutyTeacherName` alanları StudyGuard kullanıcısından okunuyor gibi görünür, ancak aktif akışta görevli öğretmen bilgisi `studySessions` üzerinde tutulur.
 
@@ -123,10 +125,8 @@ Kodda kullanılan alanlar:
 - `cancelledAt`: timestamp
 - `updatedAt`: timestamp
 - `isManual`: bool
-- `rating`: number
-- `comment`: string
-- `ratingPopupClosed`: bool
-- `ratedAt`: timestamp
+- `autoCompleted`: bool, server timeout ile tamamlanan queue'larda yazılabilir
+- `autoCompleteReason`: string, server timeout nedeni için yazılabilir
 - `transferredAt`: timestamp
 - `transferredFromTeacherId`: string
 - `transferredFromTeacherName`: string
@@ -179,7 +179,7 @@ Kodda kullanılan alanlar:
 - `lunchBreak`: map, `start` ve `end`
 - `updatedAt`: timestamp
 
-Ayrı `ratings` veya `feedback` koleksiyonu kodda görülmedi. Değerlendirme verisi `queues` belgesi üzerinde tutuluyor.
+Güncel kodda aktif rating/değerlendirme akışı yoktur. Eski queue belgelerinde `rating`, `comment`, `ratingPopupClosed` ve `ratedAt` alanları kalmış olabilir; bunlar geçmiş queue belgesini silmeden one-time cleanup ile temizlenebilir.
 
 ## Queue Durum Geçişleri
 
@@ -196,6 +196,8 @@ Kodda görülen queue status değerleri:
 
 Transfer akışında queue başka öğretmene atanır ve `status` tekrar `waiting` yapılır. Transfer alanları aynı belgeye yazılır.
 
+Server zaman senkronizasyonunda zümre gerçekten kapalıysa `waiting` queue belgeleri silinir. `completed` queue geçmişi korunur. `in_progress` queue belgeleri zümre bitişinde silinmez veya hemen completed yapılmaz; zümre slot bitişinden 15 dakika sonra hâlâ `in_progress` ise server tarafından `completed` yapılabilir.
+
 ## TeacherStatus Değerleri
 
 Güncel kodda kullanılan öğretmen durumları:
@@ -207,9 +209,18 @@ Güncel kodda kullanılan öğretmen durumları:
 
 Öğrenci ve transfer akışları yalnızca `teacherStatus == available` olan öğretmenleri uygun kabul eder. `break`, `absent` ve `studyGuard` yeni sıra için uygun değildir.
 
-Teacher ekranında çalışma programı dışına çıkan öğretmenin durumu otomatik `absent` yapılabilir. StudyGuard ekranında seçilen görevli branş öğretmeni geçici olarak `studyGuard` yapılır ve etüt bitiminde önceki duruma döndürülmesi hedeflenir.
+Öğretmen durum lifecycle hedefi:
 
-Kod davranışı notu: `subjects` alanı Student ve Teacher transfer akışlarında hem `List` hem `String` olarak ele alınır. StudyGuard öğretmen seçimi tarafında ise öğretmenin `subjects` alanı `List` ve dolu değilse öğretmen filtre dışında kalabilir.
+- `weeklyAvailability` varsayılan çalışma durumudur.
+- `manualAbsentDate` bugünün Europe/Istanbul tarihi ise öğretmen o gün manuel olarak `absent` kalır.
+- `breakUntil` gelecekteyse öğretmen süreli olarak `break` kalır.
+- `studyGuard` etüt görevinde geçici durumdur ve sunucu zaman otomasyonu tarafından override edilmez.
+
+Teacher ekranında "Kurumda Değilim" bugüne ait `manualAbsentDate` yazar. "Müsait" `manualAbsentDate` ve `breakUntil` alanlarını temizler. "Molada" 5/10/15 dakikalık `breakUntil` yazar ve ekrandaki sayaç local timer ile gösterilir. Server scheduler öğretmen cihazı kapalı olsa bile süresi dolan molaları ve program başlangıç/bitiş durumlarını `weeklyAvailability` üzerinden senkronize eder.
+
+StudyGuard ekranında seçilen görevli branş öğretmeni geçici olarak `studyGuard` yapılır. Etüt bittiğinde veya görevli değiştiğinde öğretmen artık doğrudan eski `dutyTeacherPreviousStatus` değerine dönmez; bugünkü manuel yokluk ve o anki `weeklyAvailability` durumuna göre `available` veya `absent` olarak çözülür. `dutyTeacherPreviousStatus` geçmiş/fallback amaçlı tutulur.
+
+Kod davranışı notu: `subjects` alanı Student, Teacher transfer ve StudyGuard öğretmen seçimi akışlarında hem `List` hem `String` olarak ele alınır. StudyGuard tarafında `branch` ve `subject` legacy alanları da hesaba katılır.
 
 ## Etüt Yaşam Döngüsü
 
@@ -233,7 +244,7 @@ Etüt kapatma:
 
 - `present` öğrenciler `completed` yapılır.
 - Öğrencilerin aktif etüt alanları temizlenir.
-- Görevli öğretmen varsa önceki `teacherStatus` değerine döndürülür.
+- Görevli öğretmen varsa güncel manuel yokluk ve çalışma programına göre `available` veya `absent` yapılır.
 - Session `completed` yapılır.
 
 ## `studentCount` / `activeStudentCount` Farkı
@@ -250,7 +261,7 @@ Tekrar alma davranışı:
 - `activeStudentCount` artar.
 - `studentCount` tekrar artmaz.
 
-Kod davranışı notu: Çıkarma akışında `activeStudentCount` önce okunup sonra sabit değer olarak yazılıyor. Eşzamanlı çıkarma işlemlerinde sayı sapması riski vardır.
+Kod davranışı notu: Çıkarma akışı transaction içinde güncel session/student belgesini okuyarak `activeStudentCount` değerini negatif olmayacak şekilde günceller.
 
 ## Zaman Yönetimi
 
@@ -275,12 +286,14 @@ Student, Teacher ve StudyGuard tarafında saat kontrolü genel olarak `start <= 
 
 Kod davranışı notu:
 
-- StudyGuard ekranında `Timer.periodic` 4 saniyede bir etüt saatini kontrol eder.
-- Teacher ekranında aktif soru süresi için 1 saniyelik timer vardır.
+- StudyGuard ekranında `settings/zumreSchedule` stream ile belleğe alınır; local timer Firestore okumadan etüt saatini yeniden değerlendirir.
+- Teacher ekranında aktif soru süresi için 1 saniyelik timer vardır. Zümre pill'i son 5 dakika metnini bellekteki slot bitişinden local timer ile günceller.
 - Student ekranında cooldown için 1 saniyelik timer vardır.
-- Student ve Teacher zümre saatini sürekli periyodik olarak değil, açılışta ve ilgili işlem öncesinde kontrol eder.
+- Student zümre saatini açılışta ve ilgili işlem öncesinde kontrol eder. Teacher ekranı zümre durumunu işlem öncesinde Firestore'dan doğrular; kompakt pill metni ise ek Firestore okuması yapmadan local timer ile güncellenir.
 
 Cloud Function `syncStudySessions` her dakika çalışarak aktif etüt oturumlarını sunucu tarafında kapatır. Flutter timer arayüz ve istemci davranışı için, Cloud Function ise arka plan güvenlik ağı olarak konumlanmıştır.
+
+Cloud Function `syncRuntimeSchedule` her dakika genel zümre/etüt runtime durumunu yazar. Aynı scheduler içinde zümre kapalıyken `waiting` queue belgeleri temizlenir ve zümre bitişinden 15 dakika sonra hâlâ `in_progress` kalan queue belgeleri `autoCompleted: true`, `autoCompleteReason: zumre_timeout` alanlarıyla completed yapılır.
 
 ## Smart Import Mimarisi
 
@@ -311,7 +324,11 @@ Eski Node import kodları `functions/services/*` altında durur. `functions/inde
 
 Cloud Functions:
 
+- `adminCreateUser`: callable function. Admin doğrular, Firebase Auth kullanıcısı oluşturur, aynı uid ile `users/{uid}` belgesi oluşturur. Firestore create başarısız olursa Auth kullanıcısını silerek rollback dener.
+- `adminUpdateUser`: callable function. Admin doğrular, profil alanlarını Firestore'da günceller, username/email değişmişse Firebase Auth email bilgisini de günceller.
+- `adminDeleteUser`: callable function. Admin doğrular, self-delete ve aktif operasyon guard kontrollerinden sonra Firebase Auth hesabını ve `users/{uid}` belgesini siler. Auth `user-not-found` durumunda Firestore kaydını silerek legacy uyumsuzluğu reconcile edebilir.
 - `updateUserPassword`: callable function. Çağıran kullanıcının `users/{uid}.role == admin` olmasını kontrol eder ve Firebase Auth şifresini günceller.
+- `syncRuntimeSchedule`: scheduled function. Her dakika `settings/runtimeState` yazar, zümre kapalıyken stale `waiting` queue belgelerini siler ve 15 dakika timeout'a düşen `in_progress` queue belgelerini tamamlar.
 - `syncStudySessions`: scheduled function. Her dakika `settings/zumreSchedule` okur, aktif `studySessions` belgelerini inceler, süresi biten etütleri kapatır.
 
 Cloud Run:
@@ -323,6 +340,7 @@ Cloud Run:
 Uygulama tarafı:
 
 - Student/Teacher/StudyGuard ekranları canlı UI ve kullanıcı işlemlerinden sorumludur.
+- Admin kullanıcı yönetimi Firebase Auth üzerinde doğrudan client işlemi yapmaz; callable function sonucu başarılı olmadan kullanıcı eklendi/güncellendi/silindi kabul edilmez.
 - Sunucu scheduler etüt kapanışında güvenlik ağıdır.
 
 ## PDF Raporlama
@@ -353,7 +371,6 @@ Bu nedenle mevcut kaynak repo üzerinden şu write işlemlerinin rules tarafınd
 - Öğrenci queue oluşturma
 - Öğrenci queue iptali
 - `cooldownUntil` yazma/silme
-- Rating ve `ratingPopupClosed` yazma
 - Öğretmen queue update, başlatma, tamamlama, iptal, transfer
 - StudyGuard öğrenci etüt güncelleme
 - StudyGuard görevli öğretmen `teacherStatus` güncelleme

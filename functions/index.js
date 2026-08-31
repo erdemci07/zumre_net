@@ -78,6 +78,20 @@ function isWeekend(weekday) {
   return weekday === "Sat" || weekday === "Sun";
 }
 
+function weekdayAvailabilityKey(weekday) {
+  const keys = {
+    Mon: "monday",
+    Tue: "tuesday",
+    Wed: "wednesday",
+    Thu: "thursday",
+    Fri: "friday",
+    Sat: "saturday",
+    Sun: "sunday",
+  };
+
+  return keys[weekday] || "monday";
+}
+
 function getStudySlots(scheduleData, weekday) {
   const rawSlots = isWeekend(weekday)
     ? scheduleData.weekendStudySlots
@@ -132,6 +146,153 @@ function isNowInSlots(currentMinutes, slots) {
       currentMinutes >= slot.startMinutes &&
       currentMinutes < slot.endMinutes
   );
+}
+
+function getTeacherAvailabilitySlots(teacherData, weekday) {
+  const weeklyAvailability = teacherData.weeklyAvailability || {};
+  const rawSlots = weeklyAvailability[weekdayAvailabilityKey(weekday)];
+
+  if (!Array.isArray(rawSlots)) {
+    return [];
+  }
+
+  return rawSlots
+    .map((slot) => ({
+      start: String(slot?.start ?? ""),
+      end: String(slot?.end ?? ""),
+      startMinutes: timeToMinutes(String(slot?.start ?? "")),
+      endMinutes: timeToMinutes(String(slot?.end ?? "")),
+    }))
+    .filter(
+      (slot) =>
+        slot.startMinutes >= 0 &&
+        slot.endMinutes >= 0 &&
+        slot.endMinutes > slot.startMinutes
+    );
+}
+
+function isTeacherScheduledNow(teacherData, now = new Date()) {
+  const nowParts = getIstanbulDateParts(now);
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute;
+  const slots = getTeacherAvailabilitySlots(
+    teacherData,
+    nowParts.weekday
+  );
+
+  return isNowInSlots(currentMinutes, slots);
+}
+
+function isManualAbsentToday(teacherData, now = new Date()) {
+  return teacherData.manualAbsentDate === getIstanbulDateParts(now).dateKey;
+}
+
+function timestampToDate(value) {
+  if (value && typeof value.toDate === "function") {
+    return value.toDate();
+  }
+
+  return null;
+}
+
+function resolveTeacherLifecycleStatus(
+  teacherData,
+  now = new Date(),
+  options = {}
+) {
+  if (isManualAbsentToday(teacherData, now)) {
+    return {
+      status: "absent",
+      clearBreakUntil: true,
+    };
+  }
+
+  const breakUntilDate = timestampToDate(teacherData.breakUntil);
+  if (!options.ignoreBreak && breakUntilDate && breakUntilDate > now) {
+    return {
+      status: "break",
+      clearBreakUntil: false,
+    };
+  }
+
+  return {
+    status: isTeacherScheduledNow(teacherData, now)
+      ? "available"
+      : "absent",
+    clearBreakUntil: Boolean(breakUntilDate),
+  };
+}
+
+async function syncTeacherStatuses(now = new Date()) {
+  const snapshot = await db
+    .collection("users")
+    .where("role", "==", "teacher")
+    .get();
+
+  if (snapshot.empty) {
+    return {
+      checkedCount: 0,
+      updatedCount: 0,
+    };
+  }
+
+  let batch = db.batch();
+  let batchSize = 0;
+  let updatedCount = 0;
+  const todayKey = getIstanbulDateParts(now).dateKey;
+
+  for (const teacherDoc of snapshot.docs) {
+    const teacherData = teacherDoc.data();
+    const currentStatus = teacherData.teacherStatus || "absent";
+
+    if (currentStatus === "studyGuard") {
+      continue;
+    }
+
+    const resolved = resolveTeacherLifecycleStatus(teacherData, now);
+    const updateData = {};
+
+    if (currentStatus !== resolved.status) {
+      updateData.teacherStatus = resolved.status;
+    }
+
+    if (resolved.clearBreakUntil && teacherData.breakUntil) {
+      updateData.breakUntil = fieldValue.delete();
+    }
+
+    if (
+      resolved.status === "available" &&
+      teacherData.manualAbsentDate &&
+      teacherData.manualAbsentDate !== todayKey
+    ) {
+      updateData.manualAbsentDate = fieldValue.delete();
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      continue;
+    }
+
+    batch.update(teacherDoc.ref, {
+      ...updateData,
+      updatedAt: fieldValue.serverTimestamp(),
+    });
+    batchSize += 1;
+    updatedCount += 1;
+
+    if (batchSize >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      batchSize = 0;
+    }
+  }
+
+  if (batchSize > 0) {
+    await batch.commit();
+  }
+
+  return {
+    checkedCount: snapshot.size,
+    updatedCount,
+  };
 }
 
 function buildRuntimeScheduleState(scheduleData, now = new Date()) {
@@ -324,9 +485,576 @@ async function completeTimedOutZumreQueues(scheduleData, now = new Date()) {
   };
 }
 
+async function deleteWaitingZumreQueuesWhenClosed(scheduleData, now = new Date()) {
+  const nowParts = getIstanbulDateParts(now);
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute;
+  const currentZumreSlots = getZumreSlots(scheduleData, nowParts.weekday);
+
+  if (isNowInSlots(currentMinutes, currentZumreSlots)) {
+    return {
+      checkedCount: 0,
+      deletedCount: 0,
+      skippedBecauseOpen: true,
+    };
+  }
+
+  const snapshot = await db
+    .collection("queues")
+    .where("status", "==", "waiting")
+    .get();
+
+  if (snapshot.empty) {
+    return {
+      checkedCount: 0,
+      deletedCount: 0,
+      skippedBecauseOpen: false,
+    };
+  }
+
+  let batch = db.batch();
+  let batchSize = 0;
+  let deletedCount = 0;
+
+  for (const queueDoc of snapshot.docs) {
+    batch.delete(queueDoc.ref);
+    batchSize += 1;
+    deletedCount += 1;
+
+    if (batchSize >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      batchSize = 0;
+    }
+  }
+
+  if (batchSize > 0) {
+    await batch.commit();
+  }
+
+  return {
+    checkedCount: snapshot.size,
+    deletedCount,
+    skippedBecauseOpen: false,
+  };
+}
+
 // ============================================================
 // KULLANICI ŞİFRESİ GÜNCELLEME
 // ============================================================
+
+const USER_ROLES = ["admin", "teacher", "student", "studyGuard"];
+const USER_EMAIL_DOMAIN = "@bilimkalesi.com";
+
+async function assertAdminCaller(request) {
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Giriş yapılmamış."
+    );
+  }
+
+  const adminDoc = await db
+    .collection("users")
+    .doc(request.auth.uid)
+    .get();
+
+  if (!adminDoc.exists || adminDoc.data()?.role !== "admin") {
+    throw new HttpsError(
+      "permission-denied",
+      "Bu işlem için yetkiniz yok."
+    );
+  }
+
+  return request.auth.uid;
+}
+
+function normalizeUsername(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function emailFromUsername(username) {
+  return `${normalizeUsername(username)}${USER_EMAIL_DOMAIN}`;
+}
+
+function cleanText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function cleanSubjects(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => cleanText(item))
+    .filter((item, index, list) => item && list.indexOf(item) === index);
+}
+
+function validateUserPayload(data, options = {}) {
+  const username = normalizeUsername(data?.username);
+  const email = emailFromUsername(username);
+  const role = cleanText(data?.role);
+  const password = String(data?.password || "");
+  const firstName = cleanText(data?.name);
+  const surname = cleanText(data?.surname);
+  const fullName = cleanText(data?.fullName || `${firstName} ${surname}`);
+
+  if (!username) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Kullanıcı adı zorunludur."
+    );
+  }
+
+  if (!USER_ROLES.includes(role)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Geçersiz kullanıcı rolü."
+    );
+  }
+
+  if (!firstName || !surname) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Ad ve soyad zorunludur."
+    );
+  }
+
+  if (options.requirePassword && password.length < 6) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Şifre en az 6 karakter olmalıdır."
+    );
+  }
+
+  return {
+    email,
+    username,
+    identityKey: username,
+    password,
+    name: firstName,
+    surname,
+    fullName,
+    role,
+    subjects: cleanSubjects(data?.subjects),
+    className: cleanText(data?.className),
+    branch: cleanText(data?.branch),
+    department: cleanText(data?.department),
+    studentNo: cleanText(data?.studentNo),
+  };
+}
+
+function buildUserDocument(payload, options = {}) {
+  const userData = {
+    uid: options.uid,
+    email: payload.email,
+    username: payload.username,
+    identityKey: payload.identityKey,
+    name: payload.name,
+    surname: payload.surname,
+    fullName: payload.fullName,
+    role: payload.role,
+    updatedAt: fieldValue.serverTimestamp(),
+  };
+
+  if (options.includeCreatedAt) {
+    userData.createdAt = fieldValue.serverTimestamp();
+  }
+
+  if (payload.role === "student") {
+    Object.assign(userData, {
+      className: payload.className,
+      branch: payload.branch,
+      department: payload.department,
+      studentNo: payload.studentNo,
+      isInStudySession: false,
+      activeStudySessionId: null,
+    });
+  }
+
+  if (payload.role === "teacher") {
+    Object.assign(userData, {
+      subjects: payload.subjects,
+      branch: payload.subjects[0] || "",
+      teacherStatus: options.existingTeacherStatus || "absent",
+      weeklyAvailability: options.existingWeeklyAvailability || {},
+    });
+  }
+
+  return userData;
+}
+
+function applyRoleCleanup(updateData, newRole) {
+  if (newRole === "teacher") {
+    updateData.className = fieldValue.delete();
+    updateData.department = fieldValue.delete();
+    updateData.studentNo = fieldValue.delete();
+    updateData.isInStudySession = fieldValue.delete();
+    updateData.activeStudySessionId = fieldValue.delete();
+    updateData.manualAbsentDate = fieldValue.delete();
+    updateData.breakUntil = fieldValue.delete();
+  } else if (newRole === "student") {
+    updateData.subjects = fieldValue.delete();
+    updateData.teacherStatus = fieldValue.delete();
+    updateData.weeklyAvailability = fieldValue.delete();
+    updateData.manualAbsentDate = fieldValue.delete();
+    updateData.breakUntil = fieldValue.delete();
+  } else {
+    updateData.subjects = fieldValue.delete();
+    updateData.teacherStatus = fieldValue.delete();
+    updateData.weeklyAvailability = fieldValue.delete();
+    updateData.manualAbsentDate = fieldValue.delete();
+    updateData.breakUntil = fieldValue.delete();
+    updateData.className = fieldValue.delete();
+    updateData.branch = fieldValue.delete();
+    updateData.department = fieldValue.delete();
+    updateData.studentNo = fieldValue.delete();
+    updateData.isInStudySession = fieldValue.delete();
+    updateData.activeStudySessionId = fieldValue.delete();
+  }
+}
+
+function mapAuthError(error, fallbackMessage) {
+  const code = error?.code || "";
+
+  if (code === "auth/email-already-exists") {
+    return "Bu kullanıcı adı zaten kullanılıyor.";
+  }
+
+  if (code === "auth/user-not-found") {
+    return "Kullanıcı hesabı bulunamadı.";
+  }
+
+  if (code === "auth/invalid-password" || code === "auth/weak-password") {
+    return "Şifre en az 6 karakter olmalıdır.";
+  }
+
+  if (code === "auth/invalid-email") {
+    return "Kullanıcı adı geçerli bir e-posta oluşturamıyor.";
+  }
+
+  return fallbackMessage || "Kullanıcı işlemi tamamlanamadı.";
+}
+
+async function hasActiveQueueFor(uid, fieldName) {
+  const snapshot = await db
+    .collection("queues")
+    .where("status", "in", ["waiting", "in_progress"])
+    .get();
+
+  return snapshot.docs.some(
+    (doc) => doc.data()?.[fieldName] === uid
+  );
+}
+
+async function hasActiveStudySessionFor(uid, fieldName) {
+  const snapshot = await db
+    .collection("studySessions")
+    .where("status", "==", "active")
+    .get();
+
+  return snapshot.docs.some(
+    (doc) => doc.data()?.[fieldName] === uid
+  );
+}
+
+async function assertNoActiveUserOperation(uid, userData) {
+  const role = userData?.role;
+
+  if (role === "student") {
+    if (
+      userData.isInStudySession === true ||
+      userData.activeStudySessionId ||
+      await hasActiveQueueFor(uid, "studentId")
+    ) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Bu öğrencinin aktif bir işlemi bulunuyor. Önce işlemi sonlandırın."
+      );
+    }
+  }
+
+  if (role === "teacher") {
+    if (
+      userData.teacherStatus === "studyGuard" ||
+      await hasActiveQueueFor(uid, "teacherId") ||
+      await hasActiveStudySessionFor(uid, "dutyTeacherId")
+    ) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Bu öğretmenin aktif bir işlemi bulunuyor. Önce işlemi sonlandırın."
+      );
+    }
+  }
+
+  if (role === "studyGuard") {
+    if (await hasActiveStudySessionFor(uid, "staffId")) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Bu kullanıcının aktif bir etüt oturumu bulunuyor. Önce işlemi sonlandırın."
+      );
+    }
+  }
+}
+
+exports.adminCreateUser = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const adminUid = await assertAdminCaller(request);
+    const payload = validateUserPayload(request.data, {
+      requirePassword: true,
+    });
+
+    let authUser;
+
+    try {
+      authUser = await admin.auth().createUser({
+        email: payload.email,
+        password: payload.password,
+        displayName: payload.fullName,
+        disabled: false,
+      });
+
+      const userData = buildUserDocument(payload, {
+        uid: authUser.uid,
+        includeCreatedAt: true,
+      });
+
+      await db.collection("users").doc(authUser.uid).create(userData);
+
+      console.log("admin user lifecycle", {
+        operation: "create",
+        adminUid,
+        targetUid: authUser.uid,
+      });
+
+      return {
+        ok: true,
+        uid: authUser.uid,
+      };
+    } catch (error) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      if (authUser?.uid) {
+        try {
+          await admin.auth().deleteUser(authUser.uid);
+        } catch (rollbackError) {
+          console.error("adminCreateUser rollback failed", {
+            adminUid,
+            targetUid: authUser.uid,
+            error: rollbackError?.message || rollbackError,
+          });
+        }
+      }
+
+      console.error("adminCreateUser error", {
+        adminUid,
+        error: error?.message || error,
+      });
+
+      throw new HttpsError(
+        "internal",
+        mapAuthError(error, "Kullanıcı oluşturulamadı.")
+      );
+    }
+  }
+);
+
+exports.adminUpdateUser = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const adminUid = await assertAdminCaller(request);
+    const uid = cleanText(request.data?.uid);
+
+    if (!uid) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Kullanıcı kimliği eksik."
+      );
+    }
+
+    const userRef = db.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+      throw new HttpsError(
+        "not-found",
+        "Kullanıcı kaydı bulunamadı."
+      );
+    }
+
+    const existingData = userDoc.data() || {};
+    const payload = validateUserPayload(request.data);
+    const roleChanged = payload.role !== existingData.role;
+    const emailChanged = payload.email !== existingData.email;
+    const oldEmail = existingData.email;
+
+    if (roleChanged) {
+      await assertNoActiveUserOperation(uid, existingData);
+    }
+
+    try {
+      if (emailChanged) {
+        await admin.auth().updateUser(uid, {
+          email: payload.email,
+        });
+      }
+
+      const updateData = buildUserDocument(payload, {
+        uid,
+        existingTeacherStatus: existingData.teacherStatus || "absent",
+        existingWeeklyAvailability: existingData.weeklyAvailability || {},
+      });
+
+      applyRoleCleanup(updateData, payload.role);
+
+      await userRef.update(updateData);
+
+      console.log("admin user lifecycle", {
+        operation: "update",
+        adminUid,
+        targetUid: uid,
+      });
+
+      return {
+        ok: true,
+      };
+    } catch (error) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      if (emailChanged && oldEmail) {
+        try {
+          await admin.auth().updateUser(uid, {
+            email: oldEmail,
+          });
+        } catch (rollbackError) {
+          console.error("adminUpdateUser auth rollback failed", {
+            adminUid,
+            targetUid: uid,
+            error: rollbackError?.message || rollbackError,
+          });
+        }
+      }
+
+      console.error("adminUpdateUser error", {
+        adminUid,
+        targetUid: uid,
+        error: error?.message || error,
+      });
+
+      throw new HttpsError(
+        "internal",
+        mapAuthError(error, "Kullanıcı güncellenemedi.")
+      );
+    }
+  }
+);
+
+exports.adminDeleteUser = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const adminUid = await assertAdminCaller(request);
+    const uid = cleanText(request.data?.uid);
+
+    if (!uid) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Kullanıcı kimliği eksik."
+      );
+    }
+
+    if (uid === adminUid) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Kendi yönetici hesabınızı buradan silemezsiniz."
+      );
+    }
+
+    const userRef = db.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+      throw new HttpsError(
+        "not-found",
+        "Kullanıcı kaydı bulunamadı."
+      );
+    }
+
+    const userData = userDoc.data() || {};
+
+    if (userData.role === "admin") {
+      const adminsSnapshot = await db
+        .collection("users")
+        .where("role", "==", "admin")
+        .limit(2)
+        .get();
+
+      if (adminsSnapshot.size <= 1) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Sistemdeki son yönetici hesabı silinemez."
+        );
+      }
+    }
+
+    await assertNoActiveUserOperation(uid, userData);
+
+    try {
+      try {
+        await admin.auth().deleteUser(uid);
+      } catch (authError) {
+        if (authError?.code !== "auth/user-not-found") {
+          throw authError;
+        }
+
+        console.warn("adminDeleteUser auth user not found", {
+          adminUid,
+          targetUid: uid,
+        });
+      }
+
+      await userRef.delete();
+
+      console.log("admin user lifecycle", {
+        operation: "delete",
+        adminUid,
+        targetUid: uid,
+      });
+
+      return {
+        ok: true,
+      };
+    } catch (error) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      console.error("adminDeleteUser error", {
+        adminUid,
+        targetUid: uid,
+        error: error?.message || error,
+      });
+
+      throw new HttpsError(
+        "internal",
+        mapAuthError(error, "Kullanıcı silinemedi.")
+      );
+    }
+  }
+);
 
 exports.updateUserPassword = onCall(
   {
@@ -334,24 +1062,7 @@ exports.updateUserPassword = onCall(
   },
   async (request) => {
     try {
-      if (!request.auth) {
-        throw new HttpsError(
-          "unauthenticated",
-          "Giriş yapılmamış."
-        );
-      }
-
-      const adminDoc = await db
-        .collection("users")
-        .doc(request.auth.uid)
-        .get();
-
-      if (!adminDoc.exists || adminDoc.data()?.role !== "admin") {
-        throw new HttpsError(
-          "permission-denied",
-          "Bu işlem için yetkiniz yok."
-        );
-      }
+      const adminUid = await assertAdminCaller(request);
 
       const uid = request.data?.uid;
       const password = request.data?.password;
@@ -372,6 +1083,17 @@ exports.updateUserPassword = onCall(
         password,
       });
 
+      if (uid.trim() !== adminUid) {
+        await admin.auth().revokeRefreshTokens(uid.trim());
+      }
+
+      console.log("admin user lifecycle", {
+        operation: "password-reset",
+        adminUid,
+        targetUid: uid.trim(),
+        revokedRefreshTokens: uid.trim() !== adminUid,
+      });
+
       return {
         success: true,
         message: "Şifre güncellendi.",
@@ -385,7 +1107,7 @@ exports.updateUserPassword = onCall(
 
       throw new HttpsError(
         "internal",
-        error?.message || "Şifre güncellenemedi."
+        mapAuthError(error, "Şifre güncellenemedi.")
       );
     }
   }
@@ -502,7 +1224,7 @@ async function closeStudySession(sessionDoc) {
     }
 
     /*
-     * Seçilmiş branş öğretmenini etüt öncesindeki durumuna döndür.
+     * Seçilmiş branş öğretmenini güncel günlük lifecycle'a göre döndür.
      */
     const dutyTeacherId = claimedSessionData.dutyTeacherId;
 
@@ -510,13 +1232,23 @@ async function closeStudySession(sessionDoc) {
       const teacherRef = db
         .collection("users")
         .doc(dutyTeacherId);
+      const teacherSnapshot = await teacherRef.get();
+      const teacherData = teacherSnapshot.data() || {};
 
       const previousStatus =
         claimedSessionData.dutyTeacherPreviousStatus ||
         "available";
+      const resolvedStatus = teacherSnapshot.exists
+        ? resolveTeacherLifecycleStatus(
+          teacherData,
+          new Date(),
+          { ignoreBreak: true }
+        ).status
+        : previousStatus;
 
       batch.update(teacherRef, {
-        teacherStatus: previousStatus,
+        teacherStatus: resolvedStatus,
+        breakUntil: fieldValue.delete(),
         updatedAt: fieldValue.serverTimestamp(),
       });
     }
@@ -599,11 +1331,22 @@ exports.syncRuntimeSchedule = onSchedule(
       scheduleDoc.data() || {},
       new Date()
     );
+    const waitingCleanupResult = await deleteWaitingZumreQueuesWhenClosed(
+      scheduleDoc.data() || {},
+      new Date()
+    );
+    const teacherStatusResult = await syncTeacherStatuses(new Date());
 
     console.log("Runtime zaman durumu güncellendi.", {
       ...runtimeState,
       timedOutQueuesChecked: timeoutResult.checkedCount,
       timedOutQueuesCompleted: timeoutResult.completedCount,
+      waitingQueuesChecked: waitingCleanupResult.checkedCount,
+      waitingQueuesDeleted: waitingCleanupResult.deletedCount,
+      waitingCleanupSkippedBecauseOpen:
+        waitingCleanupResult.skippedBecauseOpen,
+      teacherStatusesChecked: teacherStatusResult.checkedCount,
+      teacherStatusesUpdated: teacherStatusResult.updatedCount,
     });
   }
 );

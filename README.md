@@ -14,7 +14,6 @@ ZümreNet'in amacı, dershane içerisindeki soru çözüm ve etüt süreçlerini
 * Bekleyen öğrencileri görüntüleme
 * Öğrencileri manuel olarak kuyruğa ekleyebilme
 * Soruları çözüldü olarak işaretleme
-* Öğrenci değerlendirmelerini görüntüleme
 * Müsait / Molada / Gelmedi durum yönetimi
 * Günlük çözülen soru istatistikleri
 * Etüt sürecindeki öğrenci ve soru takibi
