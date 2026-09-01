@@ -182,6 +182,32 @@ String _resolveBaseTeacherStatus(Map<String, dynamic> data) {
       : 'absent';
 }
 
+String _resolveEffectiveTeacherStatus({
+  required Map<String, List<Map<String, String>>> weeklyAvailability,
+  required String currentStatus,
+  required String? manualAbsentDate,
+  required Timestamp? breakUntil,
+}) {
+  if (currentStatus == 'studyGuard') {
+    return 'studyGuard';
+  }
+
+  if (_hasManualAbsentOverrideToday(manualAbsentDate)) {
+    return 'absent';
+  }
+
+  if (breakUntil != null && breakUntil.toDate().isAfter(DateTime.now())) {
+    return 'break';
+  }
+
+  final now = DateTime.now();
+  final slots = (weeklyAvailability[_dayKey(now)] ?? [])
+      .map((slot) => Map<String, dynamic>.from(slot))
+      .toList();
+
+  return _isNowInSlots(now, slots) ? 'available' : 'absent';
+}
+
 int _breakRemainingMinutes(Timestamp? breakUntil) {
   if (breakUntil == null) return 0;
 
@@ -844,16 +870,38 @@ Future<void> _showAvailabilityDialog() async {
                           child: ElevatedButton(
                             onPressed: () async {
                               final uid = _auth.currentUser!.uid;
-
-                              await _firestore.collection('users').doc(uid).update({
+                              final nextStatus = _resolveEffectiveTeacherStatus(
+                                weeklyAvailability: temp,
+                                currentStatus: _teacherStatus,
+                                manualAbsentDate: _manualAbsentDate,
+                                breakUntil: _breakUntil,
+                              );
+                              final updateData = <String, dynamic>{
                                 'weeklyAvailability': temp,
                                 'updatedAt': FieldValue.serverTimestamp(),
-                              });
+                              };
+
+                              if (nextStatus != 'studyGuard') {
+                                updateData['teacherStatus'] = nextStatus;
+                              }
+
+                              if (_breakUntil != null &&
+                                  !_breakUntil!.toDate().isAfter(DateTime.now())) {
+                                updateData['breakUntil'] = FieldValue.delete();
+                              }
+
+                              await _firestore
+                                  .collection('users')
+                                  .doc(uid)
+                                  .update(updateData);
 
                               if (!mounted) return;
 
                               setState(() {
                                 _weeklyAvailability = temp;
+                                if (nextStatus != 'studyGuard') {
+                                  _teacherStatus = nextStatus;
+                                }
                               });
                               await _checkScheduleAvailability();
 
@@ -1213,7 +1261,7 @@ Future<void> _loadTeacherAvailability() async {
           status == 'available'
               ? targetStatus == 'available'
                   ? 'Durumunuz müsait olarak güncellendi'
-                  : 'Manuel durum temizlendi. Programınıza göre kurumda değilsiniz.'
+                  : 'Çalışma programınıza göre kurumda değilsiniz.'
               : status == 'break'
                   ? 'Durumunuz molada olarak güncellendi'
                   : 'Durumunuz kurumda değil olarak güncellendi',
@@ -1342,25 +1390,17 @@ Future<void> _loadTeacherAvailability() async {
       return;
     }
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Durum değiştirilsin mi?'),
-        content: Text(
-          '${_statusText(_teacherStatus)} durumundan '
+    final confirm = await _confirmAction(
+      title: 'Durum değiştirilsin mi?',
+      message: '${_statusText(_teacherStatus)} durumundan '
           '${_statusText(value)} durumuna geçmek istiyor musunuz?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('İptal'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Onayla'),
-          ),
-        ],
-      ),
+      confirmText: 'Onayla',
+      icon: Icons.swap_horiz_rounded,
+      color: value == 'available'
+          ? const Color.fromARGB(255, 84, 189, 138)
+          : value == 'absent'
+              ? Colors.redAccent
+              : Colors.orangeAccent,
     );
 
     if (confirm == true) {
@@ -2311,49 +2351,13 @@ if (rawSubjects is List) {
 Future<bool> _confirmLogout({
   required Color color,
 }) async {
-  return await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            title: Row(
-              children: [
-                Icon(
-                  Icons.logout_rounded,
-                  color: color,
-                ),
-                const SizedBox(width: 10),
-                const Text("Çıkış Yap"),
-              ],
-            ),
-            content: const Text(
-              "Oturumu kapatmak istediğinize emin misiniz?",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text("Vazgeç"),
-              ),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: color,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                onPressed: () => Navigator.pop(context, true),
-                icon: const Icon(Icons.logout),
-                label: const Text("Çıkış Yap"),
-              ),
-            ],
-          );
-        },
-      ) ??
-      false;
+  return _confirmAction(
+    title: 'Çıkış Yap',
+    message: 'Oturumu kapatmak istediğinize emin misiniz?',
+    confirmText: 'Çıkış Yap',
+    icon: Icons.logout_rounded,
+    color: color,
+  );
 }
   Widget _miniTimeBox({
     required String title,

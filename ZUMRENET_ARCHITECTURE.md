@@ -211,12 +211,13 @@ Güncel kodda kullanılan öğretmen durumları:
 
 Öğretmen durum lifecycle hedefi:
 
+- `teacherStatus == absent` tek başına manuel yokluk anlamına gelmez.
 - `weeklyAvailability` varsayılan çalışma durumudur.
 - `manualAbsentDate` bugünün Europe/Istanbul tarihi ise öğretmen o gün manuel olarak `absent` kalır.
 - `breakUntil` gelecekteyse öğretmen süreli olarak `break` kalır.
 - `studyGuard` etüt görevinde geçici durumdur ve sunucu zaman otomasyonu tarafından override edilmez.
 
-Teacher ekranında "Kurumda Değilim" bugüne ait `manualAbsentDate` yazar. "Müsait" `manualAbsentDate` ve `breakUntil` alanlarını temizler. "Molada" 5/10/15 dakikalık `breakUntil` yazar ve ekrandaki sayaç local timer ile gösterilir. Server scheduler öğretmen cihazı kapalı olsa bile süresi dolan molaları ve program başlangıç/bitiş durumlarını `weeklyAvailability` üzerinden senkronize eder.
+Teacher ekranında "Kurumda Değilim" bugüne ait `manualAbsentDate` yazar. "Müsait" `manualAbsentDate` ve `breakUntil` alanlarını temizler, ardından durum mevcut `weeklyAvailability` ve saate göre yeniden hesaplanır. "Molada" 5/10/15 dakikalık `breakUntil` yazar ve ekrandaki sayaç local timer ile gösterilir. Çalışma programı kaydedildiğinde `studyGuard`, bugünkü manuel absent ve aktif break öncelikleri korunarak effective status anında yeniden hesaplanır. Server scheduler öğretmen cihazı kapalı olsa bile süresi dolan molaları ve program başlangıç/bitiş durumlarını `weeklyAvailability` üzerinden senkronize eder.
 
 StudyGuard ekranında seçilen görevli branş öğretmeni geçici olarak `studyGuard` yapılır. Etüt bittiğinde veya görevli değiştiğinde öğretmen artık doğrudan eski `dutyTeacherPreviousStatus` değerine dönmez; bugünkü manuel yokluk ve o anki `weeklyAvailability` durumuna göre `available` veya `absent` olarak çözülür. `dutyTeacherPreviousStatus` geçmiş/fallback amaçlı tutulur.
 

@@ -1003,74 +1003,140 @@ if (latestActiveQueue.docs.isNotEmpty) {
 } finally {
 }
   }
-Future<bool> _confirmLogout({
+Future<bool> _studentConfirmDialog({
+  required String title,
+  required String message,
+  required String confirmText,
+  required IconData icon,
   required Color color,
 }) async {
   return await showDialog<bool>(
         context: context,
         barrierDismissible: false,
-        builder: (context) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            title: Row(
-              children: [
-                Icon(
-                  Icons.logout_rounded,
-                  color: color,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Container(
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF12103F),
+                    Color(0xFF261369),
+                    Color(0xFF071A3A),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                const Text("Çıkış Yap"),
-              ],
-            ),
-            content: const Text(
-              "Oturumu kapatmak istediğinize emin misiniz?",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text("Vazgeç"),
-              ),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: color,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: Colors.white24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.28),
+                    blurRadius: 24,
+                    offset: const Offset(0, 12),
                   ),
-                ),
-                onPressed: () => Navigator.pop(context, true),
-                icon: const Icon(Icons.logout),
-                label: const Text("Çıkış Yap"),
+                ],
               ),
-            ],
-          );
-        },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 58,
+                    height: 58,
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.16),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: color.withOpacity(0.35)),
+                    ),
+                    child: Icon(icon, color: color, size: 30),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white38),
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                          ),
+                          child: const Text('Vazgeç'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          icon: Icon(icon, size: 18),
+                          label: Text(confirmText),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: color,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ) ??
       false;
+}
+
+Future<bool> _confirmLogout({
+  required Color color,
+}) async {
+  return _studentConfirmDialog(
+    title: 'Çıkış Yap',
+    message: 'Oturumu kapatmak istediğinize emin misiniz?',
+    confirmText: 'Çıkış Yap',
+    icon: Icons.logout_rounded,
+    color: color,
+  );
 }
   Future<void> _cancelQueue() async {
     if (_currentQueueId == null) return;
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sıranızı iptal ediyorsunuz'),
-        content: const Text(
+    final confirm = await _studentConfirmDialog(
+      title: 'Sıranızı iptal ediyorsunuz',
+      message:
           'İptal ederseniz 2 dakika yeni sıra alamazsınız. Devam etmek istiyor musunuz?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Hayır'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Evet'),
-          ),
-        ],
-      ),
+      confirmText: 'Evet',
+      icon: Icons.timer_off_rounded,
+      color: Colors.orangeAccent,
     );
 
     if (confirm == true) {

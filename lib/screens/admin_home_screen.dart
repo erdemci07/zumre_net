@@ -260,22 +260,34 @@ String _lunchEnd = '13:00';
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        content: Row(
-          children: const [
-            SizedBox(
-              width: 26,
-              height: 26,
-              child: CircularProgressIndicator(),
-            ),
-            SizedBox(width: 18),
-            Expanded(
-              child: Text(
-                'Excel dosyası okunuyor...\n'
-                'Veri yoğunluğuna bağlı olarak bu işlem biraz sürebilir.',
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 380),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF071A3A),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: const Row(
+            children: [
+              SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(color: Colors.lightBlueAccent),
               ),
-            ),
-          ],
+              SizedBox(width: 18),
+              Expanded(
+                child: Text(
+                  'Excel dosyası okunuyor...\n'
+                  'Veri yoğunluğuna bağlı olarak bu işlem biraz sürebilir.',
+                  style: TextStyle(color: Colors.white70, height: 1.35),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -289,22 +301,34 @@ String _lunchEnd = '13:00';
   showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (_) => AlertDialog(
-      content: Row(
-        children: const [
-          SizedBox(
-            width: 26,
-            height: 26,
-            child: CircularProgressIndicator(),
-          ),
-          SizedBox(width: 18),
-          Expanded(
-            child: Text(
-              'PDF raporu hazırlanıyor...\n'
-              'Veri yoğunluğuna bağlı olarak bu işlem biraz sürebilir.',
+    builder: (_) => Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 380),
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          color: const Color(0xFF071A3A),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(color: Colors.lightBlueAccent),
             ),
-          ),
-        ],
+            SizedBox(width: 18),
+            Expanded(
+              child: Text(
+                'PDF raporu hazırlanıyor...\n'
+                'Veri yoğunluğuna bağlı olarak bu işlem biraz sürebilir.',
+                style: TextStyle(color: Colors.white70, height: 1.35),
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );
@@ -1697,21 +1721,78 @@ type == 'student'
   }) {
     return showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Aktarım Tamamlandı'),
-        content: Text(
-          'Toplam geçerli: ${summary['totalValid'] ?? 0}\n'
-          'Yeni oluşturulan: ${summary['created'] ?? 0}\n'
-          'Güncellenen: ${summary['updated'] ?? 0}\n'
-          'Başarısız: ${summary['failed'] ?? 0}\n'
-          'Hatalı satır: ${importData['invalidCount'] ?? 0}',
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Tamam'),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 380),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF071A3A),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.28),
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+            ],
           ),
-        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: Colors.greenAccent.withOpacity(0.16),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check_circle_outline_rounded,
+                  color: Colors.greenAccent,
+                  size: 32,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Aktarım Tamamlandı',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Toplam geçerli: ${summary['totalValid'] ?? 0}\n'
+                'Yeni oluşturulan: ${summary['created'] ?? 0}\n'
+                'Güncellenen: ${summary['updated'] ?? 0}\n'
+                'Başarısız: ${summary['failed'] ?? 0}\n'
+                'Hatalı satır: ${importData['invalidCount'] ?? 0}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, height: 1.45),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                  child: const Text('Tamam'),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2923,9 +3004,63 @@ if (role == 'teacher' &&
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setStateDialog) {
-          return AlertDialog(
-            title: Text(isEditing ? 'Kullanıcı Düzenle' : 'Yeni Kullanıcı Ekle'),
-            content: SingleChildScrollView(
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 560, maxHeight: 720),
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: const Color(0xFF071A3A),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.30),
+                    blurRadius: 24,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: Theme(
+                data: Theme.of(context).copyWith(
+                  colorScheme: const ColorScheme.dark(
+                    primary: Colors.lightBlueAccent,
+                    secondary: Colors.greenAccent,
+                    surface: Color(0xFF071A3A),
+                  ),
+                  inputDecorationTheme: InputDecorationTheme(
+                    labelStyle: const TextStyle(color: Colors.white70),
+                    helperStyle: const TextStyle(color: Colors.white54),
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    suffixStyle: const TextStyle(color: Colors.white54),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.08),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  textTheme: Theme.of(context).textTheme.apply(
+                        bodyColor: Colors.white,
+                        displayColor: Colors.white,
+                      ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isEditing ? 'Kullanıcı Düzenle' : 'Yeni Kullanıcı Ekle',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Flexible(
+                      child: SingleChildScrollView(
               child: Form(
                 key: formKey,
                 child: Column(
@@ -3109,17 +3244,40 @@ if (role == 'teacher') ...[
                       ),
            
                 ),
+                    ),
           
-            actions: [
-              TextButton(
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('İptal'),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  if (!formKey.currentState!.validate()) return;
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white38),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                            ),
+                            child: const Text('İptal'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                            ),
+                            onPressed: () async {
+                              if (!formKey.currentState!.validate()) return;
 
-                  setState(() => _isLoading = true);
+                              setState(() => _isLoading = true);
 try {
   final cleanFirstName =
       firstName.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -3169,32 +3327,38 @@ try {
       studentNo,
     );
   }
-                    if (ctx.mounted) Navigator.pop(ctx);
+                              if (ctx.mounted) Navigator.pop(ctx);
 
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          isEditing
-                              ? 'Kullanıcı güncellendi'
-                              : 'Kullanıcı oluşturuldu',
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    isEditing
+                                        ? 'Kullanıcı güncellendi'
+                                        : 'Kullanıcı oluşturuldu',
+                                  ),
+                                ),
+                              );
+                            } catch (e) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Hata: ${_adminFunctionErrorMessage(e)}',
+                                  ),
+                                ),
+                              );
+                            } finally {
+                              if (mounted) setState(() => _isLoading = false);
+                            }
+                          },
+                            child: Text(isEditing ? 'Güncelle' : 'Oluştur'),
+                          ),
                         ),
-                      ),
-                    );
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Hata: ${_adminFunctionErrorMessage(e)}',
-                        ),
-                      ),
-                    );
-                  } finally {
-                    if (mounted) setState(() => _isLoading = false);
-                  }
-                },
-                child: Text(isEditing ? 'Güncelle' : 'Oluştur'),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ],
+            ),
           );
         },
       ),
@@ -3306,19 +3470,94 @@ Future<void> _updateUser(
   Future<void> _deleteUser(String uid, String email) async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Kullanıcıyı Sil'),
-        content: Text('$email kullanıcısının hesabı silinecek. Emin misiniz?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Hayır'),
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 380),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF071A3A),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.28),
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Evet'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withOpacity(0.16),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.redAccent.withOpacity(0.35)),
+                ),
+                child: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Colors.redAccent,
+                  size: 32,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Kullanıcıyı Sil',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '$email kullanıcısının hesabı silinecek. Emin misiniz?',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, height: 1.35),
+              ),
+              const SizedBox(height: 22),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Colors.white38),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      child: const Text('Hayır'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      child: const Text('Evet'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
 
