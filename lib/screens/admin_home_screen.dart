@@ -1,6 +1,4 @@
 import 'dart:convert';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -9,7 +7,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -222,13 +219,15 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
 class StatisticsPage extends StatefulWidget {
   const StatisticsPage({super.key});
-  
 
   @override
   State<StatisticsPage> createState() => _StatisticsPageState();
 }
 
 class _StatisticsPageState extends State<StatisticsPage> {
+  static const String _reportsBaseUrl =
+      'https://zumrenet-reports-542741706921.europe-west1.run.app';
+
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   Map<String, int> _subjectStats = {};
@@ -240,12 +239,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
   bool _isLoading = true;
   bool _isImporting = false;
   final List<Map<String, String>> _weekdaySlots = [];
-final List<Map<String, String>> _weekendSlots = [];
-final List<Map<String, String>> _weekdayStudySlots = [];
-final List<Map<String, String>> _weekendStudySlots = [];
+  final List<Map<String, String>> _weekendSlots = [];
+  final List<Map<String, String>> _weekdayStudySlots = [];
+  final List<Map<String, String>> _weekendStudySlots = [];
 
-String _lunchStart = '12:20';
-String _lunchEnd = '13:00';
+  String _lunchStart = '12:20';
+  String _lunchEnd = '13:00';
 
   @override
   void initState() {
@@ -256,6 +255,7 @@ String _lunchEnd = '13:00';
   String _dateKey(DateTime date) {
     return '${date.day}/${date.month}';
   }
+
   void _showExcelLoadingDialog() {
     showDialog(
       context: context,
@@ -292,1045 +292,782 @@ String _lunchEnd = '13:00';
       ),
     );
   }
+
   void _hideExcelLoadingDialog() {
     if (Navigator.canPop(context)) {
       Navigator.pop(context);
     }
   }
+
   void _showPdfLoadingDialog() {
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 26),
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 380),
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          color: const Color(0xFF071A3A),
-          borderRadius: BorderRadius.circular(26),
-          border: Border.all(color: Colors.white24),
-        ),
-        child: const Row(
-          children: [
-            SizedBox(
-              width: 26,
-              height: 26,
-              child: CircularProgressIndicator(color: Colors.lightBlueAccent),
-            ),
-            SizedBox(width: 18),
-            Expanded(
-              child: Text(
-                'PDF raporu hazırlanıyor...\n'
-                'Veri yoğunluğuna bağlı olarak bu işlem biraz sürebilir.',
-                style: TextStyle(color: Colors.white70, height: 1.35),
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 380),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF071A3A),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: const Row(
+            children: [
+              SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(color: Colors.lightBlueAccent),
               ),
-            ),
-          ],
+              SizedBox(width: 18),
+              Expanded(
+                child: Text(
+                  'PDF raporu hazırlanıyor...\n'
+                  'Rapor motoru seçilen aralıktaki verileri işliyor.',
+                  style: TextStyle(color: Colors.white70, height: 1.35),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
-}
-void _hidePdfLoadingDialog() {
-  if (Navigator.canPop(context)) {
-    Navigator.pop(context);
+    );
   }
-}
 
-Future<void> _showPdfReportDialog() async {
-  DateTime? startDate;
-  DateTime? endDate;
+  void _hidePdfLoadingDialog() {
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+  }
 
-  String dateText(DateTime? date) {
-    if (date == null) return 'Tarih seçilmedi';
+  String _formatIsoDate(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String _formatDisplayDate(DateTime date) {
     return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
   }
 
-  await showDialog(
-    context: context,
-    builder: (ctx) {
-      return StatefulBuilder(
-        builder: (context, setDialogState) {
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(horizontal: 22),
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 540),
-              padding: const EdgeInsets.all(22),
-              decoration: BoxDecoration(
-                color: const Color(0xFF071A3A),
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: Colors.white24),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.30),
-                    blurRadius: 24,
-                    offset: const Offset(0, 12),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: Colors.redAccent.withOpacity(0.16),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.redAccent.withOpacity(0.35),
+  DateTimeRange _reportRangeForPreset(String preset) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    if (preset == 'week') {
+      final start = today.subtract(Duration(days: today.weekday - 1));
+      return DateTimeRange(start: start, end: today);
+    }
+
+    if (preset == 'month') {
+      return DateTimeRange(
+          start: DateTime(today.year, today.month), end: today);
+    }
+
+    return DateTimeRange(start: today, end: today);
+  }
+
+  Future<List<String>> _loadReportClassOptions() async {
+    final snapshot = await _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'student')
+        .get();
+
+    final classes = snapshot.docs
+        .map((doc) => '${doc.data()['className'] ?? ''}'.trim())
+        .where((className) => className.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort((a, b) => a.compareTo(b));
+
+    return classes;
+  }
+
+  Future<String?> _showReportClassPicker() async {
+    final classes = await _loadReportClassOptions();
+    if (!mounted) return null;
+
+    if (classes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sınıf raporu için öğrenci sınıf bilgisi bulunamadı.'),
+        ),
+      );
+      return null;
+    }
+
+    var selectedClass = classes.first;
+
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 420),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF071A3A),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.30),
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: Colors.greenAccent.withOpacity(0.14),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.greenAccent.withOpacity(0.28),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.groups_rounded,
+                            color: Colors.greenAccent,
                           ),
                         ),
-                        child: const Icon(
-                          Icons.picture_as_pdf_rounded,
-                          color: Colors.redAccent,
-                          size: 31,
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Sınıf Seç',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedClass,
+                      dropdownColor: const Color(0xFF071A3A),
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Rapor sınıfı',
+                        labelStyle: const TextStyle(color: Colors.white60),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.08),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: const BorderSide(color: Colors.white12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide:
+                              const BorderSide(color: Colors.lightBlueAccent),
                         ),
                       ),
-                      const SizedBox(width: 14),
-                      const Expanded(
+                      style: const TextStyle(color: Colors.white),
+                      items: classes
+                          .map(
+                            (className) => DropdownMenuItem(
+                              value: className,
+                              child: Text(className),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setDialogState(() => selectedClass = value);
+                      },
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.pop(ctx, selectedClass),
+                        icon: const Icon(Icons.picture_as_pdf_rounded),
+                        label: const Text('Raporu Oluştur'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.lightBlueAccent,
+                          foregroundColor: const Color(0xFF071A3A),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _requestClassReportPdf({
+    required String endpoint,
+    required String fallbackFileName,
+    required DateTime startDate,
+    required DateTime endDate,
+  }) async {
+    final className = await _showReportClassPicker();
+    if (className == null || className.isEmpty) return;
+
+    await _requestReportPdf(
+      endpoint: endpoint,
+      fallbackFileName: fallbackFileName,
+      startDate: startDate,
+      endDate: endDate,
+      className: className,
+    );
+  }
+
+  String? _filenameFromContentDisposition(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final match = RegExp(r'filename="?([^";]+)"?').firstMatch(value);
+    return match?.group(1);
+  }
+
+  Future<void> _requestReportPdf({
+    required String endpoint,
+    required String fallbackFileName,
+    required DateTime startDate,
+    required DateTime endDate,
+    String? className,
+  }) async {
+    var loadingShown = false;
+
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final idToken = await currentUser?.getIdToken();
+
+      if (idToken == null || idToken.isEmpty) {
+        throw Exception(
+            'Rapor oluşturmak için geçerli admin oturumu bulunamadı.');
+      }
+
+      if (!mounted) return;
+      _showPdfLoadingDialog();
+      loadingShown = true;
+
+      final response = await http.post(
+        Uri.parse('$_reportsBaseUrl$endpoint'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'startDate': _formatIsoDate(startDate),
+          'endDate': _formatIsoDate(endDate),
+          if (className != null) 'className': className,
+        }),
+      );
+
+      if (!mounted) return;
+      _hidePdfLoadingDialog();
+      loadingShown = false;
+
+      if (response.statusCode != 200) {
+        if (response.statusCode == 401) {
+          throw Exception('Admin oturumu doğrulanamadı.');
+        }
+        if (response.statusCode == 403) {
+          throw Exception('Bu rapor için admin yetkisi gerekiyor.');
+        }
+        throw Exception('Rapor oluşturulamadı.');
+      }
+
+      final filename = _filenameFromContentDisposition(
+            response.headers['content-disposition'],
+          ) ??
+          fallbackFileName;
+
+      await Printing.sharePdf(bytes: response.bodyBytes, filename: filename);
+    } catch (e) {
+      if (!mounted) return;
+      if (loadingShown) {
+        _hidePdfLoadingDialog();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Rapor hatası: $e')),
+      );
+    }
+  }
+
+  Future<void> _showPdfReportDialog() async {
+    var preset = 'today';
+    var selectedRange = _reportRangeForPreset(preset);
+
+    Future<void> pickDate({
+      required bool isStart,
+      required StateSetter setDialogState,
+    }) async {
+      final picked = await showDatePicker(
+        context: context,
+        locale: const Locale('tr', 'TR'),
+        firstDate: DateTime(2024),
+        lastDate: DateTime.now(),
+        initialDate: isStart ? selectedRange.start : selectedRange.end,
+      );
+
+      if (picked == null) return;
+      setDialogState(() {
+        preset = 'custom';
+        if (isStart) {
+          selectedRange = DateTimeRange(
+            start: picked,
+            end: picked.isAfter(selectedRange.end) ? picked : selectedRange.end,
+          );
+        } else {
+          selectedRange = DateTimeRange(
+            start: picked.isBefore(selectedRange.start)
+                ? picked
+                : selectedRange.start,
+            end: picked,
+          );
+        }
+      });
+    }
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final screenSize = MediaQuery.of(context).size;
+            final isMobile = screenSize.width < 600;
+            final rangeLabel =
+                '${_formatDisplayDate(selectedRange.start)} - ${_formatDisplayDate(selectedRange.end)}';
+
+            void selectPreset(String value) {
+              setDialogState(() {
+                preset = value;
+                selectedRange = _reportRangeForPreset(value);
+              });
+            }
+
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: EdgeInsets.symmetric(
+                horizontal: isMobile ? 10 : 24,
+                vertical: isMobile ? 12 : 24,
+              ),
+              child: Container(
+                width: double.infinity,
+                constraints: BoxConstraints(
+                  maxWidth: 680,
+                  maxHeight: screenSize.height * 0.90,
+                ),
+                padding: EdgeInsets.all(isMobile ? 16 : 20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF071A3A),
+                  borderRadius: BorderRadius.circular(isMobile ? 24 : 28),
+                  border: Border.all(color: Colors.white24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.30),
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: isMobile ? 44 : 52,
+                            height: isMobile ? 44 : 52,
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent.withOpacity(0.16),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.redAccent.withOpacity(0.35),
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.analytics_rounded,
+                              color: Colors.redAccent,
+                              size: isMobile ? 25 : 29,
+                            ),
+                          ),
+                          SizedBox(width: isMobile ? 10 : 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Rapor Merkezi',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: isMobile ? 19 : 22,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  isMobile
+                                      ? 'PDF raporları hazırlayın.'
+                                      : 'Kurum ve sınıf raporlarını PDF olarak hazırlayın.',
+                                  style: TextStyle(
+                                    color: Colors.white60,
+                                    fontSize: isMobile ? 12 : 13,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: isMobile ? 14 : 18),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          _reportPresetChip(
+                            'Bugün',
+                            'today',
+                            preset,
+                            selectPreset,
+                          ),
+                          _reportPresetChip(
+                            'Bu Hafta',
+                            'week',
+                            preset,
+                            selectPreset,
+                          ),
+                          _reportPresetChip(
+                            'Bu Ay',
+                            'month',
+                            preset,
+                            selectPreset,
+                          ),
+                          _reportPresetChip('Özel', 'custom', preset, (value) {
+                            setDialogState(() => preset = value);
+                          }),
+                        ],
+                      ),
+                      SizedBox(height: isMobile ? 10 : 12),
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.all(isMobile ? 12 : 14),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white12),
+                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'PDF Rapor Oluştur',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                              ),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.date_range_rounded,
+                                  color: Colors.lightBlueAccent,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    rangeLabel,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Günlük veya tarih aralıklı rapor hazırlayın.',
-                              style: TextStyle(
-                                color: Colors.white60,
-                                fontSize: 13,
+                            if (preset == 'custom') ...[
+                              const SizedBox(height: 10),
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final stackDates = constraints.maxWidth < 340;
+                                  final buttons = [
+                                    OutlinedButton.icon(
+                                      onPressed: () => pickDate(
+                                        isStart: true,
+                                        setDialogState: setDialogState,
+                                      ),
+                                      icon:
+                                          const Icon(Icons.first_page_rounded),
+                                      label: const Text('Başlangıç'),
+                                    ),
+                                    OutlinedButton.icon(
+                                      onPressed: () => pickDate(
+                                        isStart: false,
+                                        setDialogState: setDialogState,
+                                      ),
+                                      icon: const Icon(Icons.last_page_rounded),
+                                      label: const Text('Bitiş'),
+                                    ),
+                                  ];
+
+                                  if (stackDates) {
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        buttons[0],
+                                        const SizedBox(height: 8),
+                                        buttons[1],
+                                      ],
+                                    );
+                                  }
+
+                                  return Row(
+                                    children: [
+                                      Expanded(child: buttons[0]),
+                                      const SizedBox(width: 10),
+                                      Expanded(child: buttons[1]),
+                                    ],
+                                  );
+                                },
                               ),
-                            ),
+                            ],
                           ],
                         ),
                       ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 22),
-
-                  SizedBox(
-                    width: double.infinity,
-                    height: 54,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.today_rounded),
-                      label: const Text(
-                        'Bugünün Raporunu Oluştur',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        await _generateDailyPdfReport();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Tarih Aralığı Raporu',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        _pdfDateButton(
-                          icon: Icons.date_range_rounded,
-                          title: 'Başlangıç Tarihi',
-                          value: dateText(startDate),
-                          onTap: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              locale: const Locale('tr', 'TR'),
-                              firstDate: DateTime(2024),
-                              lastDate: DateTime.now(),
-                              initialDate: startDate ?? DateTime.now(),
-                            );
-
-                            if (picked != null) {
-                              setDialogState(() => startDate = picked);
-                            }
-                          },
-                        ),
-
-                        const SizedBox(height: 10),
-
-                        _pdfDateButton(
-                          icon: Icons.event_rounded,
-                          title: 'Bitiş Tarihi',
-                          value: dateText(endDate),
-                          onTap: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              locale: const Locale('tr', 'TR'),
-                              firstDate: DateTime(2024),
-                              lastDate: DateTime.now(),
-                              initialDate: endDate ?? startDate ?? DateTime.now(),
-                            );
-
-                            if (picked != null) {
-                              setDialogState(() => endDate = picked);
-                            }
-                          },
-                        ),
-
-                        const SizedBox(height: 16),
-
-                        SizedBox(
-                          width: double.infinity,
-                          height: 50,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.download_rounded),
-                            label: const Text(
-                              'Tarih Aralığı Raporu Oluştur',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            onPressed: startDate == null || endDate == null
-                                ? null
-                                : () async {
-                                    Navigator.pop(ctx);
-                                    await _generatePdfReportForRange(
-                                      startDate: startDate!,
-                                      endDate: endDate!,
-                                    );
-                                  },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.lightBlueAccent,
-                              foregroundColor: const Color(0xFF071A3A),
-                              disabledBackgroundColor:
-                                  Colors.white.withOpacity(0.12),
-                              disabledForegroundColor: Colors.white38,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(18),
+                      SizedBox(height: isMobile ? 12 : 16),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final compact = constraints.maxWidth < 560;
+                          final cards = [
+                            _reportCard(
+                              icon: Icons.apartment_rounded,
+                              title: 'Kurum Faaliyet Özeti',
+                              subtitle:
+                                  'Tamamlanan zümre soruları ve etüt oturumları',
+                              color: Colors.lightBlueAccent,
+                              compact: compact,
+                              onTap: () => _requestReportPdf(
+                                endpoint: '/reports/institution-summary',
+                                fallbackFileName: 'Kurum_Faaliyet_Ozeti.pdf',
+                                startDate: selectedRange.start,
+                                endDate: selectedRange.end,
                               ),
                             ),
+                            _reportCard(
+                              icon: Icons.groups_rounded,
+                              title: 'Sınıf Takip Raporu',
+                              subtitle: 'Öğrenci bazlı zümre ve etüt özeti',
+                              color: Colors.greenAccent,
+                              compact: compact,
+                              onTap: () => _requestClassReportPdf(
+                                endpoint: '/reports/class-tracking',
+                                fallbackFileName: 'Sinif_Takip_Raporu.pdf',
+                                startDate: selectedRange.start,
+                                endDate: selectedRange.end,
+                              ),
+                            ),
+                            _reportCard(
+                              icon: Icons.timeline_rounded,
+                              title: 'Sınıf Faaliyet Takip',
+                              subtitle:
+                                  'Öğrenci faaliyetlerini tarih sırasıyla listeler',
+                              color: Colors.orangeAccent,
+                              compact: compact,
+                              onTap: () => _requestClassReportPdf(
+                                endpoint: '/reports/class-activity',
+                                fallbackFileName:
+                                    'Sinif_Faaliyet_Takip_Raporu.pdf',
+                                startDate: selectedRange.start,
+                                endDate: selectedRange.end,
+                              ),
+                            ),
+                          ];
+
+                          if (compact) {
+                            return Column(
+                              children: cards
+                                  .map(
+                                    (card) => Padding(
+                                      padding:
+                                          const EdgeInsets.only(bottom: 10),
+                                      child: card,
+                                    ),
+                                  )
+                                  .toList(),
+                            );
+                          }
+
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: cards
+                                .map(
+                                  (card) => Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 5,
+                                      ),
+                                      child: card,
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _reportPresetChip(
+    String label,
+    String value,
+    String selectedValue,
+    ValueChanged<String> onSelected,
+  ) {
+    final selected = value == selectedValue;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onSelected(value),
+      backgroundColor: Colors.white.withOpacity(0.08),
+      selectedColor: Colors.lightBlueAccent,
+      labelStyle: TextStyle(
+        color: selected ? const Color(0xFF071A3A) : Colors.white70,
+        fontWeight: FontWeight.bold,
+      ),
+      side: BorderSide(
+        color: selected ? Colors.lightBlueAccent : Colors.white12,
+      ),
+    );
+  }
+
+  Widget _reportCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+    bool enabled = true,
+    bool compact = false,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: double.infinity,
+        constraints: BoxConstraints(minHeight: compact ? 82 : 132),
+        padding: EdgeInsets.all(compact ? 13 : 15),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(enabled ? 0.08 : 0.04),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: enabled ? Colors.white12 : Colors.white10),
+        ),
+        child: compact
+            ? Row(
+                children: [
+                  Icon(icon, color: enabled ? color : Colors.white30, size: 27),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: enabled ? Colors.white : Colors.white38,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: enabled ? Colors.white60 : Colors.white30,
+                            fontSize: 11.5,
+                            height: 1.20,
                           ),
                         ),
                       ],
                     ),
                   ),
-
-                  const SizedBox(height: 16),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white70,
-                        side: const BorderSide(color: Colors.white24),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      child: const Text('Vazgeç'),
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: enabled ? Colors.white38 : Colors.white24,
+                  ),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, color: enabled ? color : Colors.white30, size: 28),
+                  const SizedBox(height: 12),
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: enabled ? Colors.white : Colors.white38,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: enabled ? Colors.white60 : Colors.white30,
+                      fontSize: 11.5,
+                      height: 1.25,
                     ),
                   ),
                 ],
               ),
-            ),
-          );
-        },
-      );
-    },
-  );
-}
-Widget _pdfDateButton({
-  required IconData icon,
-  required String title,
-  required String value,
-  required VoidCallback onTap,
-}) {
-  final selected = value != 'Tarih seçilmedi';
-
-  return InkWell(
-    borderRadius: BorderRadius.circular(18),
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: selected
-              ? Colors.lightBlueAccent.withOpacity(0.40)
-              : Colors.white12,
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            color: selected ? Colors.lightBlueAccent : Colors.white54,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white60,
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  value,
-                  style: TextStyle(
-                    color: selected ? Colors.white : Colors.white54,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Icon(Icons.chevron_right, color: Colors.white38),
-        ],
-      ),
-    ),
-  );
-}
-
-Future<void> _generateDailyPdfReport() async {
-  final now = DateTime.now();
-  final todayStart = DateTime(now.year, now.month, now.day);
-  final todayEnd = todayStart.add(const Duration(days: 1));
-
-  await _generatePdfReport(
-    startDate: todayStart,
-    endDateExclusive: todayEnd,
-    fileNamePrefix: 'ZumreNet_Gunluk_Rapor',
-  );
-}
-
-Future<void> _generatePdfReportForRange({
-  required DateTime startDate,
-  required DateTime endDate,
-}) async {
-  final start = DateTime(startDate.year, startDate.month, startDate.day);
-  final endExclusive = DateTime(endDate.year, endDate.month, endDate.day)
-      .add(const Duration(days: 1));
-
-  await _generatePdfReport(
-    startDate: start,
-    endDateExclusive: endExclusive,
-    fileNamePrefix: 'ZumreNet_Tarih_Araligi_Raporu',
-  );
-}
-
-Future<void> _generatePdfReport({
-  required DateTime startDate,
-  required DateTime endDateExclusive,
-  required String fileNamePrefix,
-}) async {
-  _showPdfLoadingDialog();
-  final regularFont = await PdfGoogleFonts.notoSansRegular();
-  final boldFont = await PdfGoogleFonts.notoSansBold();
-
-  final snapshot = await _firestore
-      .collection('queues')
-      .where('status', isEqualTo: 'completed')
-      .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
-      .where('completedAt', isLessThan: Timestamp.fromDate(endDateExclusive))
-      .get();
-      final studySnapshot = await _firestore
-    .collection('studySessions')
-    .where(
-      'startedAt',
-      isGreaterThanOrEqualTo: Timestamp.fromDate(startDate),
-    )
-    .where(
-      'startedAt',
-      isLessThan: Timestamp.fromDate(endDateExclusive),
-    )
-    .get();
-
-  final Map<String, Map<String, dynamic>> studentMap = {};
-  final Map<String, int> subjectTotals = {};
-  final Set<String> teacherIds = {};
-  final List<Map<String, dynamic>> historyRows = [];
-  final Map<String, Set<String>> subjectStudentIds = {};
-  final Map<String, Set<String>> subjectTeacherIds = {};  
-  final Set<String> uniqueStudyStudentIds = {};
-  final Map<String, int> studyAttendanceByStudent = {};
-  final Map<String, Map<String, dynamic>> studyStudentInfo = {};
-  final Map<String, int> studyHourlyDensity = {};
-  final List<Map<String, dynamic>> studySessionRows = [];
-
-int totalStudyAttendances = 0;
-
-  String formatDate(DateTime date) {
-    const months = [
-      'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
-      'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
-    ];
-    return '${date.day} ${months[date.month - 1]} ${date.year}';
-  }
-
-  String shortDateTime(dynamic timestamp) {
-    if (timestamp is! Timestamp) return '-';
-    final d = timestamp.toDate();
-    return '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-  }
-
-  for (final doc in snapshot.docs) {
-    final data = doc.data();
-
-    final studentName = data['studentName'] ?? 'Öğrenci';
-    final studentId = '${data['studentId'] ?? studentName}';
-    final teacherName = data['teacherName'] ?? '-';
-    final teacherId = data['teacherId'];
-    final subject = data['subject'] ?? 'Bilinmeyen';
-    final completedAt = data['completedAt'];
-
-    final questionCount =
-        data['questionCount'] is num ? (data['questionCount'] as num).toInt() : 1;
-
-    if (teacherId != null) teacherIds.add('$teacherId');
-
-    final studentDoc = await _firestore.collection('users').doc(studentId).get();
-    final studentData = studentDoc.data() ?? {};
-
-    studentMap.putIfAbsent(studentId, () {
-      return {
-        'studentName': studentName,
-        'className': studentData['className'] ?? data['className'] ?? '',
-        'branch': studentData['branch'] ?? data['branch'] ?? '',
-        'department': studentData['department'] ?? data['department'] ?? '',
-        'subjects': <String, int>{},
-        'total': 0,
-        'lastTeacher': '',
-        'lastCompleted': null,
-      };
-    });
-
-    final subjects = studentMap[studentId]!['subjects'] as Map<String, int>;
-    subjects[subject] = (subjects[subject] ?? 0) + questionCount;
-
-    studentMap[studentId]!['total'] =
-        (studentMap[studentId]!['total'] ?? 0) + questionCount;
-    studentMap[studentId]!['lastTeacher'] = teacherName;
-    studentMap[studentId]!['lastCompleted'] = completedAt;
-
-    subjectTotals[subject] = (subjectTotals[subject] ?? 0) + questionCount;
-    subjectStudentIds.putIfAbsent(subject, () => <String>{});
-subjectStudentIds[subject]!.add(studentId);
-
-if (teacherId != null) {
-  subjectTeacherIds.putIfAbsent(subject, () => <String>{});
-  subjectTeacherIds[subject]!.add('$teacherId');
-}
-
-    historyRows.add({
-      'completedAt': completedAt,
-      'studentName': studentName,
-      'teacherName': teacherName,
-      'subject': subject,
-      'questionCount': questionCount,
-    });
-  }
-
-  historyRows.sort((a, b) {
-    final at = a['completedAt'];
-    final bt = b['completedAt'];
-    if (at is! Timestamp && bt is! Timestamp) return 0;
-    if (at is! Timestamp) return 1;
-    if (bt is! Timestamp) return -1;
-    return at.toDate().compareTo(bt.toDate());
-  });
-  for (final sessionDoc in studySnapshot.docs) {
-  final sessionData = sessionDoc.data();
-
-  final startedAt = sessionData['startedAt'];
-  final endedAt = sessionData['endedAt'];
-  final dutyTeacherName =
-      sessionData['dutyTeacherName']?.toString() ?? '-';
-
-  final studentsSnapshot = await _firestore
-      .collection('studySessions')
-      .doc(sessionDoc.id)
-      .collection('students')
-      .get();
-
-  final sessionStudentCount = studentsSnapshot.docs.length;
-  totalStudyAttendances += sessionStudentCount;
-
-  if (startedAt is Timestamp) {
-    final startDateTime = startedAt.toDate();
-    final startHour = startDateTime.hour;
-    final endHour = (startHour + 1) % 24;
-
-    final hourLabel =
-        '${startHour.toString().padLeft(2, '0')}:00 - '
-        '${endHour.toString().padLeft(2, '0')}:00';
-
-    studyHourlyDensity[hourLabel] =
-        (studyHourlyDensity[hourLabel] ?? 0) + sessionStudentCount;
-  }
-
-  studySessionRows.add({
-    'startedAt': startedAt,
-    'endedAt': endedAt,
-    'studentCount': sessionStudentCount,
-    'dutyTeacherName': dutyTeacherName,
-  });
-
-  for (final studentDoc in studentsSnapshot.docs) {
-    final studentData = studentDoc.data();
-
-    final studentId =
-        studentData['studentId']?.toString() ?? studentDoc.id;
-
-    final studentName =
-        studentData['studentName']?.toString() ?? 'Öğrenci';
-
-    uniqueStudyStudentIds.add(studentId);
-
-    studyAttendanceByStudent[studentId] =
-        (studyAttendanceByStudent[studentId] ?? 0) + 1;
-
-    studyStudentInfo[studentId] = {
-      'studentName': studentName,
-      'className': studentData['className'] ?? '',
-      'branch': studentData['branch'] ?? '',
-      'department': studentData['department'] ?? '',
-    };
-  }
-}
-
-  final totalQuestions = subjectTotals.values.fold<int>(0, (a, b) => a + b);
-  final average = studentMap.isEmpty ? 0 : totalQuestions / studentMap.length;
-  final totalStudySessions = studySessionRows.length;
-
-final averageStudentsPerStudy = totalStudySessions == 0
-    ? 0.0
-    : totalStudyAttendances / totalStudySessions;
-
-String busiestStudyHour = '-';
-
-if (studyHourlyDensity.isNotEmpty) {
-  final busiestEntry = studyHourlyDensity.entries.reduce(
-    (a, b) => a.value >= b.value ? a : b,
-  );
-
-  busiestStudyHour = busiestEntry.key;
-}
-
-// Zümre + etüt birleşik öğrenci aktivitesi
-final Set<String> allActiveStudentIds = {
-  ...studentMap.keys,
-  ...studyAttendanceByStudent.keys,
-};
-
-final List<Map<String, dynamic>> activeStudentRows =
-    allActiveStudentIds.map((studentId) {
-  final queueStudent = studentMap[studentId];
-  final studyStudent = studyStudentInfo[studentId];
-
-  final solvedQuestions =
-      (queueStudent?['total'] as num?)?.toInt() ?? 0;
-
-  final studyCount = studyAttendanceByStudent[studentId] ?? 0;
-
-  return {
-    'studentId': studentId,
-    'studentName':
-        queueStudent?['studentName'] ??
-        studyStudent?['studentName'] ??
-        'Öğrenci',
-    'className':
-        queueStudent?['className'] ??
-        studyStudent?['className'] ??
-        '',
-    'branch':
-        queueStudent?['branch'] ??
-        studyStudent?['branch'] ??
-        '',
-    'department':
-        queueStudent?['department'] ??
-        studyStudent?['department'] ??
-        '',
-    'solvedQuestions': solvedQuestions,
-    'studyCount': studyCount,
-    'activityScore': solvedQuestions + studyCount,
-  };
-}).toList();
-
-activeStudentRows.sort(
-  (a, b) => (b['activityScore'] as int)
-      .compareTo(a['activityScore'] as int),
-);
-final sortedStudyHourlyEntries =
-    studyHourlyDensity.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-
-  final pdf = pw.Document(
-    theme: pw.ThemeData.withFont(base: regularFont, bold: boldFont),
-  );
-
-  final endVisible = endDateExclusive.subtract(const Duration(days: 1));
-  final dateTitle = startDate.year == endVisible.year &&
-          startDate.month == endVisible.month &&
-          startDate.day == endVisible.day
-      ? formatDate(startDate)
-      : '${formatDate(startDate)} - ${formatDate(endVisible)}';
-
-  pw.Widget statBox(String title, String value) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(10),
-      decoration: pw.BoxDecoration(
-        color: PdfColors.blueGrey50,
-        borderRadius: pw.BorderRadius.circular(8),
-        border: pw.Border.all(color: PdfColors.blueGrey200),
-      ),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text(
-            value,
-            style: pw.TextStyle(
-              fontSize: 18,
-              fontWeight: pw.FontWeight.bold,
-              color: PdfColors.blue900,
-            ),
-          ),
-          pw.SizedBox(height: 3),
-          pw.Text(title, style: const pw.TextStyle(fontSize: 8)),
-        ],
       ),
     );
   }
-
-  pw.Widget subjectBar(String subject, int value) {
-    final max = subjectTotals.values.isEmpty
-        ? 1
-        : subjectTotals.values.reduce((a, b) => a > b ? a : b);
-    final percent = max == 0 ? 0.0 : value / max;
-
-    return pw.Padding(
-      padding: const pw.EdgeInsets.only(bottom: 7),
-      child: pw.Row(
-        children: [
-          pw.SizedBox(width: 85, child: pw.Text(subject, style: const pw.TextStyle(fontSize: 9))),
-          pw.Expanded(
-  child: pw.LayoutBuilder(
-    builder: (context, constraints) {
-      return pw.Container(
-        height: 9,
-        color: PdfColors.blueGrey100,
-        child: pw.Align(
-          alignment: pw.Alignment.centerLeft,
-          child: pw.Container(
-            width: constraints!.maxWidth * percent,
-            height: 9,
-            color: PdfColors.blue700,
-          ),
-        ),
-      );
-    },
-  ),
-),
-          pw.SizedBox(width: 8),
-          pw.Text('$value', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-  pw.Widget studyDensityBar(String hour, int value) {
-  final maxValue = studyHourlyDensity.values.isEmpty
-      ? 1
-      : studyHourlyDensity.values.reduce(
-          (a, b) => a > b ? a : b,
-        );
-
-  final percent = maxValue == 0 ? 0.0 : value / maxValue;
-
-  return pw.Padding(
-    padding: const pw.EdgeInsets.only(bottom: 8),
-    child: pw.Row(
-      children: [
-        pw.SizedBox(
-          width: 90,
-          child: pw.Text(
-            hour,
-            style: const pw.TextStyle(fontSize: 8),
-          ),
-        ),
-        pw.Expanded(
-          child: pw.LayoutBuilder(
-            builder: (context, constraints) {
-              return pw.Container(
-                height: 10,
-                color: PdfColors.teal50,
-                child: pw.Align(
-                  alignment: pw.Alignment.centerLeft,
-                  child: pw.Container(
-                    width: constraints!.maxWidth * percent,
-                    height: 10,
-                    color: PdfColors.teal600,
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-        pw.SizedBox(width: 8),
-        pw.Text(
-          '$value',
-          style: pw.TextStyle(
-            fontSize: 9,
-            fontWeight: pw.FontWeight.bold,
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-  final fileName =
-      '${fileNamePrefix}_${startDate.year}_${startDate.month}_${startDate.day}.pdf';
-
-  pdf.addPage(
-    pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(28),
-      build: (context) => [
-        pw.Container(
-          width: double.infinity,
-          padding: const pw.EdgeInsets.all(18),
-          decoration: pw.BoxDecoration(
-            color: PdfColors.blue900,
-            borderRadius: pw.BorderRadius.circular(14),
-          ),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text('ZümreNet',
-                  style: pw.TextStyle(
-                    color: PdfColors.white,
-                    fontSize: 26,
-                    fontWeight: pw.FontWeight.bold,
-                  )),
-              pw.SizedBox(height: 4),
-              pw.Text('Kullanım Analiz Raporu',
-                  style: const pw.TextStyle(color: PdfColors.white, fontSize: 15)),
-              pw.SizedBox(height: 10),
-              pw.Text(dateTitle,
-                  style: pw.TextStyle(
-                    color: PdfColors.greenAccent100,
-                    fontSize: 18,
-                    fontWeight: pw.FontWeight.bold,
-                  )),
-            ],
-          ),
-        ),
-        pw.SizedBox(height: 18),
-        pw.Row(
-          children: [
-            pw.Expanded(child: statBox('Öğrenci', '${studentMap.length}')),
-            pw.SizedBox(width: 8),
-            pw.Expanded(child: statBox('Öğretmen', '${teacherIds.length}')),
-            pw.SizedBox(width: 8),
-            pw.Expanded(child: statBox('Çözülen Soru', '$totalQuestions')),
-            pw.SizedBox(width: 8),
-            pw.Expanded(child: statBox('Aktif Zümre', '${subjectTotals.length}')),
-            pw.SizedBox(width: 8),
-            pw.Expanded(child: statBox('Ort. Soru', average.toStringAsFixed(1))),
-          ],
-        ),
-        pw.SizedBox(height: 22),
-        pw.Text('Ders / Zümre Dağılımı',
-            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-        pw.SizedBox(height: 10),
-        if (subjectTotals.isEmpty)
-          pw.Text('Bu tarih aralığında çözülen soru bulunamadı.')
-        else
-          ...subjectTotals.entries.map((e) => subjectBar(e.key, e.value)),
-
-pw.Text(
-  'Etüt Analizi',
-  style: pw.TextStyle(
-    fontSize: 20,
-    fontWeight: pw.FontWeight.bold,
-    color: PdfColors.teal800,
-  ),
-),
-
-pw.SizedBox(height: 14),
-
-pw.Row(
-  children: [
-    pw.Expanded(
-      child: statBox(
-        'Etüt Oturumu',
-        '$totalStudySessions',
-      ),
-    ),
-    pw.SizedBox(width: 8),
-    pw.Expanded(
-      child: statBox(
-        'Farklı Öğrenci',
-        '${uniqueStudyStudentIds.length}',
-      ),
-    ),
-    pw.SizedBox(width: 8),
-    pw.Expanded(
-      child: statBox(
-        'Toplam Katılım',
-        '$totalStudyAttendances',
-      ),
-    ),
-    pw.SizedBox(width: 8),
-    pw.Expanded(
-      child: statBox(
-        'Ort. Öğrenci',
-        averageStudentsPerStudy.toStringAsFixed(1),
-      ),
-    ),
-  ],
-),
-
-pw.SizedBox(height: 18),
-
-pw.Container(
-  width: double.infinity,
-  padding: const pw.EdgeInsets.all(12),
-  decoration: pw.BoxDecoration(
-    color: PdfColors.teal50,
-    borderRadius: pw.BorderRadius.circular(8),
-    border: pw.Border.all(color: PdfColors.teal200),
-  ),
-  child: pw.Row(
-    children: [
-      pw.Text(
-        'En yoğun saat: ',
-        style: pw.TextStyle(
-          fontWeight: pw.FontWeight.bold,
-          color: PdfColors.teal900,
-        ),
-      ),
-      pw.Text(
-        busiestStudyHour,
-        style: const pw.TextStyle(
-          color: PdfColors.teal900,
-        ),
-      ),
-    ],
-  ),
-),
-
-pw.SizedBox(height: 20),
-
-pw.Text(
-  'Saatlere Göre Etüt Yoğunluğu',
-  style: pw.TextStyle(
-    fontSize: 16,
-    fontWeight: pw.FontWeight.bold,
-  ),
-),
-
-pw.SizedBox(height: 10),
-
-if (sortedStudyHourlyEntries.isEmpty)
-  pw.Text(
-    'Bu tarih aralığında etüt kaydı bulunamadı.',
-    style: const pw.TextStyle(fontSize: 10),
-  )
-else
-  ...sortedStudyHourlyEntries.map(
-    (entry) => studyDensityBar(
-      entry.key,
-      entry.value,
-    ),
-  ),
-
-pw.SizedBox(height: 20),
-
-pw.Text(
-  'Etüt Oturumları',
-  style: pw.TextStyle(
-    fontSize: 16,
-    fontWeight: pw.FontWeight.bold,
-  ),
-),
-
-pw.SizedBox(height: 8),
-
-if (studySessionRows.isEmpty)
-  pw.Text('Etüt oturumu bulunamadı.')
-else
-  pw.Table.fromTextArray(
-    headers: [
-      'Başlangıç',
-      'Bitiş',
-      'Öğrenci',
-      'Görevli Öğretmen',
-    ],
-    data: studySessionRows.map((session) {
-      return [
-        shortDateTime(session['startedAt']),
-        shortDateTime(session['endedAt']),
-        '${session['studentCount']}',
-        session['dutyTeacherName'],
-      ];
-    }).toList(),
-    headerDecoration: const pw.BoxDecoration(
-      color: PdfColors.teal100,
-    ),
-    headerStyle: pw.TextStyle(
-      fontWeight: pw.FontWeight.bold,
-      fontSize: 8,
-    ),
-    cellStyle: const pw.TextStyle(fontSize: 7.5),
-    cellPadding: const pw.EdgeInsets.all(5),
-  ),
-  pw.SizedBox(height: 20),
-
-pw.Text(
-  'Öğrenci Aktivite Analizi',
-  style: pw.TextStyle(
-    fontSize: 20,
-    fontWeight: pw.FontWeight.bold,
-    color: PdfColors.blue900,
-  ),
-),
-
-pw.SizedBox(height: 6),
-
-pw.Text(
-  'Zümre soru çözümü ve etüt katılımının birlikte özeti',
-  style: const pw.TextStyle(
-    fontSize: 10,
-    color: PdfColors.blueGrey700,
-  ),
-),
-
-pw.SizedBox(height: 14),
-
-if (activeStudentRows.isEmpty)
-  pw.Text('Bu tarih aralığında öğrenci aktivitesi bulunamadı.')
-else
-  pw.Table.fromTextArray(
-    headers: [
-      'Öğrenci',
-      'Sınıf',
-      'Alan',
-      'Çözülen Soru',
-      'Etüt',
-      'Aktivite',
-    ],
-    data: activeStudentRows.take(25).map((student) {
-      final classText =
-          '${student['className']}'
-          '${student['branch'].toString().isNotEmpty ? '-${student['branch']}' : ''}';
-
-      return [
-        student['studentName'],
-        classText,
-        student['department'],
-        '${student['solvedQuestions']}',
-        '${student['studyCount']}',
-        '${student['activityScore']}',
-      ];
-    }).toList(),
-    headerDecoration: const pw.BoxDecoration(
-      color: PdfColors.blueGrey100,
-    ),
-    headerStyle: pw.TextStyle(
-      fontWeight: pw.FontWeight.bold,
-      fontSize: 8,
-    ),
-    cellStyle: const pw.TextStyle(fontSize: 7.5),
-    cellPadding: const pw.EdgeInsets.all(5),
-  ),
-        pw.SizedBox(height: 22),
-        pw.Text('Öğrenci Kullanım Özeti',
-            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-        pw.SizedBox(height: 8),
-        pw.Table.fromTextArray(
-          headers: ['Öğrenci', 'Sınıf', 'Alan', 'Toplam', 'Son İşlem', 'Son Öğretmen'],
-          data: studentMap.values.map((student) {
-            final classText =
-                '${student['className']}${student['branch'] != '' ? '-${student['branch']}' : ''}';
-            return [
-              student['studentName'],
-              classText,
-              student['department'],
-              '${student['total']}',
-              shortDateTime(student['lastCompleted']),
-              student['lastTeacher'],
-            ];
-          }).toList(),
-          headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey100),
-          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
-          cellStyle: const pw.TextStyle(fontSize: 7.5),
-          cellPadding: const pw.EdgeInsets.all(5),
-        ),
-        pw.SizedBox(height: 22),
-        pw.Text('İşlem Geçmişi',
-            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-        pw.SizedBox(height: 8),
-        pw.Table.fromTextArray(
-          headers: ['Tarih/Saat', 'Öğrenci', 'Öğretmen', 'Ders', 'Soru'],
-          data: historyRows.map((row) {
-            return [
-              shortDateTime(row['completedAt']),
-              row['studentName'],
-              row['teacherName'],
-              row['subject'],
-              '${row['questionCount']}',
-            ];
-          }).toList(),
-          headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey100),
-          headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
-          cellStyle: const pw.TextStyle(fontSize: 7),
-          cellPadding: const pw.EdgeInsets.all(4),
-        ),
-      ],
-    ),
-  );
-  _hidePdfLoadingDialog();
-
-  await Printing.sharePdf(
-    bytes: await pdf.save(),
-    filename: fileName,
-  );
-}
 
   Future<void> _loadStats() async {
     try {
@@ -1409,116 +1146,117 @@ else
       );
     }
   }
+
   Map<String, dynamic> _parseUtf8JsonResponse(http.Response response) {
-  final body = utf8.decode(response.bodyBytes);
-  return Map<String, dynamic>.from(jsonDecode(body));
-}
+    final body = utf8.decode(response.bodyBytes);
+    return Map<String, dynamic>.from(jsonDecode(body));
+  }
 
   Future<void> _pickEdesisFile(String type) async {
-  const smartImportBaseUrl =
-      'https://zumrenet-smart-import-542741706921.us-central1.run.app';
+    const smartImportBaseUrl =
+        'https://zumrenet-smart-import-542741706921.europe-west1.run.app';
 
-  try {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['csv', 'txt', 'xls', 'xlsx'],
-      withData: true,
-    );
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv', 'txt', 'xls', 'xlsx'],
+        withData: true,
+      );
 
-    if (result == null || result.files.single.bytes == null) return;
+      if (result == null || result.files.single.bytes == null) return;
 
-    final file = result.files.single;
-    final fileBase64 = base64Encode(file.bytes!);
-    final currentUser = FirebaseAuth.instance.currentUser;
-    final idToken = await currentUser?.getIdToken();
+      final file = result.files.single;
+      final fileBase64 = base64Encode(file.bytes!);
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final idToken = await currentUser?.getIdToken();
 
-    if (idToken == null || idToken.isEmpty) {
-      throw Exception('Smart Import için geçerli admin oturumu bulunamadı.');
+      if (idToken == null || idToken.isEmpty) {
+        throw Exception('Smart Import için geçerli admin oturumu bulunamadı.');
+      }
+
+      if (!mounted) return;
+      _showExcelLoadingDialog();
+
+      final response = await http.post(
+        Uri.parse('$smartImportBaseUrl/analyze'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'fileBase64': fileBase64,
+          'fileName': file.name,
+          'type': type,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Smart Import analiz hatası: ${response.body}');
+      }
+      final analyzeData = _parseUtf8JsonResponse(response);
+
+      if (!mounted) return;
+      _hideExcelLoadingDialog();
+
+      final confirm = await _showImportAnalysisDialog(
+        type: type,
+        data: analyzeData,
+      );
+
+      if (confirm != true) return;
+
+      final validRows = List.from(analyzeData['validRows'] ?? []);
+
+      if (validRows.isEmpty) {
+        throw Exception('Aktarılacak geçerli kayıt bulunamadı.');
+      }
+
+      if (!mounted) return;
+      _showExcelLoadingDialog();
+
+      final importResponse = await http.post(
+        Uri.parse('$smartImportBaseUrl/import'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'type': analyzeData['type'],
+          'validRows': validRows,
+        }),
+      );
+
+      if (importResponse.statusCode != 200) {
+        throw Exception('Smart Import aktarım hatası: ${importResponse.body}');
+      }
+      final importData = _parseUtf8JsonResponse(importResponse);
+
+      final summary = {
+        'totalValid': importData['totalValid'] ?? 0,
+        'created': importData['created'] ?? 0,
+        'updated': importData['updated'] ?? 0,
+        'failed': importData['failed'] ?? 0,
+      };
+
+      if (!mounted) return;
+      _hideExcelLoadingDialog();
+
+      await _showImportResultDialog(
+        importData: importData,
+        summary: summary,
+      );
+
+      await _loadStats();
+    } catch (e) {
+      if (!mounted) return;
+
+      _hideExcelLoadingDialog();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Aktarım hatası: $e')),
+      );
     }
-
-    if (!mounted) return;
-    _showExcelLoadingDialog();
-
-    final response = await http.post(
-      Uri.parse('$smartImportBaseUrl/analyze'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $idToken',
-      },
-      body: jsonEncode({
-        'fileBase64': fileBase64,
-        'fileName': file.name,
-        'type': type,
-      }),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Smart Import analiz hatası: ${response.body}');
-    }
-final analyzeData = _parseUtf8JsonResponse(response);
-
-    if (!mounted) return;
-    _hideExcelLoadingDialog();
-
-    final confirm = await _showImportAnalysisDialog(
-      type: type,
-      data: analyzeData,
-    );
-
-    if (confirm != true) return;
-
-    final validRows = List.from(analyzeData['validRows'] ?? []);
-
-    if (validRows.isEmpty) {
-      throw Exception('Aktarılacak geçerli kayıt bulunamadı.');
-    }
-
-    if (!mounted) return;
-    _showExcelLoadingDialog();
-
-    final importResponse = await http.post(
-      Uri.parse('$smartImportBaseUrl/import'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $idToken',
-      },
-      body: jsonEncode({
-        'type': analyzeData['type'],
-        'validRows': validRows,
-      }),
-    );
-
-    if (importResponse.statusCode != 200) {
-      throw Exception('Smart Import aktarım hatası: ${importResponse.body}');
-    }
-final importData = _parseUtf8JsonResponse(importResponse);
-
-    final summary = {
-      'totalValid': importData['totalValid'] ?? 0,
-      'created': importData['created'] ?? 0,
-      'updated': importData['updated'] ?? 0,
-      'failed': importData['failed'] ?? 0,
-    };
-
-    if (!mounted) return;
-    _hideExcelLoadingDialog();
-
-    await _showImportResultDialog(
-      importData: importData,
-      summary: summary,
-    );
-
-    await _loadStats();
-  } catch (e) {
-    if (!mounted) return;
-
-    _hideExcelLoadingDialog();
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Aktarım hatası: $e')),
-    );
   }
-}
 
   Future<bool?> _showImportAnalysisDialog({
     required String type,
@@ -1579,23 +1317,23 @@ final importData = _parseUtf8JsonResponse(importResponse);
                   _analysisLine('Hatalı kayıt', '${data['invalidCount'] ?? 0}'),
                   _analysisLine('Yok sayılan sütun', '${ignored.length}'),
                   if (ignored.isNotEmpty) ...[
-  const SizedBox(height: 8),
-  const Text(
-    'Yok sayılan başlıklar',
-    style: TextStyle(
-      color: Colors.orangeAccent,
-      fontWeight: FontWeight.bold,
-    ),
-  ),
-  const SizedBox(height: 6),
-  Text(
-    ignored.map((e) {
-      final item = Map<String, dynamic>.from(e);
-      return item['original'].toString();
-    }).join(', '),
-    style: const TextStyle(color: Colors.white70),
-  ),
-],
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Yok sayılan başlıklar',
+                      style: TextStyle(
+                        color: Colors.orangeAccent,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      ignored.map((e) {
+                        final item = Map<String, dynamic>.from(e);
+                        return item['original'].toString();
+                      }).join(', '),
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ],
                   if (missing.isNotEmpty) ...[
                     const SizedBox(height: 14),
                     const Text(
@@ -1631,9 +1369,10 @@ final importData = _parseUtf8JsonResponse(importResponse);
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Text(
-type == 'student'
-    ? '${row['fullName']} • ${row['className']}-${row['branch']} • ${row['department'] ?? ''} • ${row['username']}'
-    : '${row['fullName']} • ${(row['subjects'] is List && row['subjects'].isNotEmpty) ? row['subjects'].join(', ') : 'Branş yok'} • ${row['username']}',                          style: const TextStyle(color: Colors.white70),
+                          type == 'student'
+                              ? '${row['fullName']} • ${row['className']}-${row['branch']} • ${row['department'] ?? ''} • ${row['username']}'
+                              : '${row['fullName']} • ${(row['subjects'] is List && row['subjects'].isNotEmpty) ? row['subjects'].join(', ') : 'Branş yok'} • ${row['username']}',
+                          style: const TextStyle(color: Colors.white70),
                         ),
                       );
                     }),
@@ -1927,23 +1666,23 @@ type == 'student'
                     ),
                     const SizedBox(height: 12),
                     _quickActionCard(
-  icon: Icons.picture_as_pdf_rounded,
-  title: 'PDF Rapor Oluştur',
-  subtitle: 'Günlük veya tarih aralığına göre PDF raporu oluşturulur',
-  color: Colors.redAccent,
-  onTap: _showPdfReportDialog,
-),  
-                                        const SizedBox(height: 12),
+                      icon: Icons.picture_as_pdf_rounded,
+                      title: 'Rapor Merkezi',
+                      subtitle: 'Kurum ve sınıf PDF raporları oluşturulur',
+                      color: Colors.redAccent,
+                      onTap: _showPdfReportDialog,
+                    ),
+                    const SizedBox(height: 12),
                     _quickActionCard(
                       icon: Icons.schedule_rounded,
                       title: 'Çalışma Saatleri',
-                      subtitle: 'Hafta içi, hafta sonu ve öğle arası vakitleri ayarlanır',
+                      subtitle:
+                          'Hafta içi, hafta sonu ve öğle arası vakitleri ayarlanır',
                       color: Colors.purpleAccent,
                       onTap: _showZumreScheduleDialog,
                     ),
-                    
                   ],
-                ),         
+                ),
         ),
         if (_isImporting)
           Container(
@@ -1970,7 +1709,6 @@ type == 'student'
       ],
     );
   }
-  
 
   Widget _sectionTitle(String title) {
     return Text(
@@ -2058,365 +1796,369 @@ type == 'student'
       ),
     );
   }
+
   Future<void> _showZumreScheduleDialog() async {
-  final doc = await _firestore.collection('settings').doc('zumreSchedule').get();
+    final doc =
+        await _firestore.collection('settings').doc('zumreSchedule').get();
 
-  _weekdaySlots.clear();
-  _weekendSlots.clear();
-  _weekdayStudySlots.clear();
-_weekendStudySlots.clear();
+    _weekdaySlots.clear();
+    _weekendSlots.clear();
+    _weekdayStudySlots.clear();
+    _weekendStudySlots.clear();
 
-  if (doc.exists) {
-    final data = doc.data() ?? {};
-    final weekday = List.from(data['weekdaySlots'] ?? []);
-    final weekend = List.from(data['weekendSlots'] ?? []);
-    final weekdayStudy = List.from(data['weekdayStudySlots'] ?? []);
-final weekendStudy = List.from(data['weekendStudySlots'] ?? []);
-    final lunch = Map<String, dynamic>.from(data['lunchBreak'] ?? {});
+    if (doc.exists) {
+      final data = doc.data() ?? {};
+      final weekday = List.from(data['weekdaySlots'] ?? []);
+      final weekend = List.from(data['weekendSlots'] ?? []);
+      final weekdayStudy = List.from(data['weekdayStudySlots'] ?? []);
+      final weekendStudy = List.from(data['weekendStudySlots'] ?? []);
+      final lunch = Map<String, dynamic>.from(data['lunchBreak'] ?? {});
 
-    _weekdaySlots.addAll(
-      weekday.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
+      _weekdaySlots.addAll(
+        weekday.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
+      );
+
+      _weekendSlots.addAll(
+        weekend.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
+      );
+
+      _weekdayStudySlots.addAll(
+        weekdayStudy
+            .map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
+      );
+
+      _weekendStudySlots.addAll(
+        weekendStudy
+            .map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
+      );
+
+      _lunchStart = lunch['start'] ?? '12:20';
+      _lunchEnd = lunch['end'] ?? '13:00';
+    }
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 560),
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF071A3A),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Zaman Yönetimi',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Zümre, etüt ve öğle arası vakitlerini yönetin',
+                        style: TextStyle(color: Colors.white60),
+                      ),
+                      const SizedBox(height: 20),
+                      _scheduleSection(
+                        title: 'Hafta İçi Zümre Saatleri',
+                        slots: _weekdaySlots,
+                        color: Colors.greenAccent,
+                        onAdd: () {
+                          setDialogState(() {
+                            _weekdaySlots
+                                .add({'start': '10:40', 'end': '11:20'});
+                          });
+                        },
+                        onDelete: (index) {
+                          setDialogState(() => _weekdaySlots.removeAt(index));
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      _scheduleSection(
+                        title: 'Hafta Sonu Zümre Saatleri',
+                        slots: _weekendSlots,
+                        color: Colors.orangeAccent,
+                        onAdd: () {
+                          setDialogState(() {
+                            _weekendSlots
+                                .add({'start': '13:00', 'end': '14:00'});
+                          });
+                        },
+                        onDelete: (index) {
+                          setDialogState(() => _weekendSlots.removeAt(index));
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      _scheduleSection(
+                        title: 'Hafta İçi Etüt Saatleri',
+                        slots: _weekdayStudySlots,
+                        color: Colors.cyanAccent,
+                        onAdd: () {
+                          setDialogState(() {
+                            _weekdayStudySlots
+                                .add({'start': '17:00', 'end': '18:00'});
+                          });
+                        },
+                        onDelete: (index) {
+                          setDialogState(
+                              () => _weekdayStudySlots.removeAt(index));
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      _scheduleSection(
+                        title: 'Hafta Sonu Etüt Saatleri',
+                        slots: _weekendStudySlots,
+                        color: Colors.pinkAccent,
+                        onAdd: () {
+                          setDialogState(() {
+                            _weekendStudySlots
+                                .add({'start': '15:00', 'end': '16:00'});
+                          });
+                        },
+                        onDelete: (index) {
+                          setDialogState(
+                              () => _weekendStudySlots.removeAt(index));
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      _lunchSection(),
+                      const SizedBox(height: 22),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text('Vazgeç'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                await _firestore
+                                    .collection('settings')
+                                    .doc('zumreSchedule')
+                                    .set({
+                                  'weekdaySlots': _weekdaySlots,
+                                  'weekendSlots': _weekendSlots,
+                                  'weekdayStudySlots': _weekdayStudySlots,
+                                  'weekendStudySlots': _weekendStudySlots,
+                                  'lunchBreak': {
+                                    'start': _lunchStart,
+                                    'end': _lunchEnd,
+                                  },
+                                  'updatedAt': FieldValue.serverTimestamp(),
+                                });
+
+                                if (ctx.mounted) Navigator.pop(ctx);
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Saatler güncellendi'),
+                                  ),
+                                );
+                              },
+                              child: const Text('Kaydet'),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
-
-    _weekendSlots.addAll(
-      weekend.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
-    );
-
-    _weekdayStudySlots.addAll(
-      weekdayStudy.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
-    );
-
-    _weekendStudySlots.addAll(
-      weekendStudy.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
-    );
-
-    _lunchStart = lunch['start'] ?? '12:20';
-    _lunchEnd = lunch['end'] ?? '13:00';
   }
 
-  if (!mounted) return;
-
-  await showDialog(
-    context: context,
-    builder: (ctx) {
-      return StatefulBuilder(
-        builder: (context, setDialogState) {
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 560),
-              padding: const EdgeInsets.all(22),
-              decoration: BoxDecoration(
-                color: const Color(0xFF071A3A),
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: Colors.white24),
+  Widget _scheduleSection({
+    required String title,
+    required List<Map<String, String>> slots,
+    required Color color,
+    required VoidCallback onAdd,
+    required Function(int index) onDelete,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.access_time, color: color),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
               ),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              IconButton(
+                onPressed: onAdd,
+                icon: Icon(Icons.add_circle, color: color),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (slots.isEmpty)
+            const Text(
+              'Henüz saat eklenmedi.',
+              style: TextStyle(color: Colors.white60),
+            )
+          else
+            ...List.generate(slots.length, (index) {
+              final slot = slots[index];
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
                   children: [
-                    const Text(
-                      'Zaman Yönetimi',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
+                    Expanded(
+                      child: TextFormField(
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(4),
+                          _TimeTextInputFormatter(),
+                        ],
+                        initialValue: slot['start'],
+                        style: const TextStyle(color: Colors.white),
+                        decoration: _timeInputDecoration('Başlangıç'),
+                        onChanged: (value) => slot['start'] = value,
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Zümre, etüt ve öğle arası vakitlerini yönetin',
-                      style: TextStyle(color: Colors.white60),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: slot['end'],
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(4),
+                          _TimeTextInputFormatter(),
+                        ],
+                        style: const TextStyle(color: Colors.white),
+                        decoration: _timeInputDecoration('Bitiş'),
+                        onChanged: (value) => slot['end'] = value,
+                      ),
                     ),
-                    const SizedBox(height: 20),
-                    _scheduleSection(
-                      title: 'Hafta İçi Zümre Saatleri',
-                      slots: _weekdaySlots,
-                      color: Colors.greenAccent,
-                      onAdd: () {
-                        setDialogState(() {
-                          _weekdaySlots.add({'start': '10:40', 'end': '11:20'});
-                        });
-                      },
-                      onDelete: (index) {
-                        setDialogState(() => _weekdaySlots.removeAt(index));
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                    _scheduleSection(
-                      title: 'Hafta Sonu Zümre Saatleri',
-                      slots: _weekendSlots,
-                      color: Colors.orangeAccent,
-                      onAdd: () {
-                        setDialogState(() {
-                          _weekendSlots.add({'start': '13:00', 'end': '14:00'});
-                        });
-                      },
-                      onDelete: (index) {
-                        setDialogState(() => _weekendSlots.removeAt(index));
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                    
-_scheduleSection(
-  title: 'Hafta İçi Etüt Saatleri',
-  slots: _weekdayStudySlots,
-  color: Colors.cyanAccent,
-  onAdd: () {
-    setDialogState(() {
-      _weekdayStudySlots.add({'start': '17:00', 'end': '18:00'});
-    });
-  },
-  onDelete: (index) {
-    setDialogState(() => _weekdayStudySlots.removeAt(index));
-  },
-),
-
-const SizedBox(height: 20),
-
-_scheduleSection(
-  title: 'Hafta Sonu Etüt Saatleri',
-  slots: _weekendStudySlots,
-  color: Colors.pinkAccent,
-  onAdd: () {
-    setDialogState(() {
-      _weekendStudySlots.add({'start': '15:00', 'end': '16:00'});
-    });
-  },
-  onDelete: (index) {
-    setDialogState(() => _weekendStudySlots.removeAt(index));
-  },
-),
-                    const SizedBox(height: 16),
-                    _lunchSection(),
-                    const SizedBox(height: 22),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text('Vazgeç'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              await _firestore
-                                  .collection('settings')
-                                  .doc('zumreSchedule')
-                                 .set({
-  'weekdaySlots': _weekdaySlots,
-  'weekendSlots': _weekendSlots,
-  'weekdayStudySlots': _weekdayStudySlots,
-  'weekendStudySlots': _weekendStudySlots,
-  'lunchBreak': {
-    'start': _lunchStart,
-    'end': _lunchEnd,
-  },
-  'updatedAt': FieldValue.serverTimestamp(),
-});
-
-                              if (ctx.mounted) Navigator.pop(ctx);
-
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Saatler güncellendi'),
-                                ),
-                              );
-                            },
-                            child: const Text('Kaydet'),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
+                    IconButton(
+                      onPressed: () => onDelete(index),
+                      icon: const Icon(Icons.delete_outline,
+                          color: Colors.redAccent),
                     ),
                   ],
                 ),
-              ),
-            ),
-          );
-        },
-      );
-    },
-  );
-}
+              );
+            }),
+        ],
+      ),
+    );
+  }
 
-Widget _scheduleSection({
-  required String title,
-  required List<Map<String, String>> slots,
-  required Color color,
-  required VoidCallback onAdd,
-  required Function(int index) onDelete,
-}) {
-  return Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: Colors.white12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.access_time, color: color),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
+  Widget _lunchSection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.restaurant_rounded, color: Colors.redAccent),
+              SizedBox(width: 10),
+              Text(
+                'Öğle Arası',
+                style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
                 ),
               ),
-            ),
-            IconButton(
-              onPressed: onAdd,
-              icon: Icon(Icons.add_circle, color: color),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        if (slots.isEmpty)
-          const Text(
-            'Henüz saat eklenmedi.',
-            style: TextStyle(color: Colors.white60),
-          )
-        else
-          ...List.generate(slots.length, (index) {
-            final slot = slots[index];
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      keyboardType: TextInputType.number,
-inputFormatters: [
-  FilteringTextInputFormatter.digitsOnly,
-  LengthLimitingTextInputFormatter(4),
-  _TimeTextInputFormatter(),
-],
-                      initialValue: slot['start'],
-                      style: const TextStyle(color: Colors.white),
-                      decoration: _timeInputDecoration('Başlangıç'),
-                      onChanged: (value) => slot['start'] = value,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  
-                  Expanded(
-                    child: TextFormField(
-  initialValue: slot['end'],
-  keyboardType: TextInputType.number,
-  inputFormatters: [
-    FilteringTextInputFormatter.digitsOnly,
-    LengthLimitingTextInputFormatter(4),
-    _TimeTextInputFormatter(),
-  ],
-  style: const TextStyle(color: Colors.white),
-  decoration: _timeInputDecoration('Bitiş'),
-  onChanged: (value) => slot['end'] = value,
-),
-                  ),
-                  IconButton(
-                    onPressed: () => onDelete(index),
-                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                  ),
-                ],
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  initialValue: _lunchStart,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(4),
+                    _TimeTextInputFormatter(),
+                  ],
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _timeInputDecoration('Başlangıç'),
+                  onChanged: (value) => _lunchStart = value,
+                ),
               ),
-            );
-          }),
-      ],
-    ),
-  );
-}
-
-
-Widget _lunchSection() {
-  return Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(22),
-      border: Border.all(color: Colors.white12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Row(
-          children: [
-            Icon(Icons.restaurant_rounded, color: Colors.redAccent),
-            SizedBox(width: 10),
-            Text(
-              'Öğle Arası',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextFormField(
+                  initialValue: _lunchEnd,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(4),
+                    _TimeTextInputFormatter(),
+                  ],
+                  style: const TextStyle(color: Colors.white),
+                  decoration: _timeInputDecoration('Bitiş'),
+                  onChanged: (value) => _lunchEnd = value,
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-   Expanded(
-  child: TextFormField(
-    initialValue: _lunchStart,
-    keyboardType: TextInputType.number,
-    inputFormatters: [
-      FilteringTextInputFormatter.digitsOnly,
-      LengthLimitingTextInputFormatter(4),
-      _TimeTextInputFormatter(),
-    ],
-    style: const TextStyle(color: Colors.white),
-    decoration: _timeInputDecoration('Başlangıç'),
-    onChanged: (value) => _lunchStart = value,
-  ),
-),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
-const SizedBox(width: 10),
-
-Expanded(
-  child: TextFormField(
-    initialValue: _lunchEnd,
-    keyboardType: TextInputType.number,
-    inputFormatters: [
-      FilteringTextInputFormatter.digitsOnly,
-      LengthLimitingTextInputFormatter(4),
-      _TimeTextInputFormatter(),
-    ],
-    style: const TextStyle(color: Colors.white),
-    decoration: _timeInputDecoration('Bitiş'),
-    onChanged: (value) => _lunchEnd = value,
-  ),
-),
-          ],
-        ),
-      ],
-    ),
-  );
-}
-
-InputDecoration _timeInputDecoration(String label) {
-  return InputDecoration(
-    labelText: label,
-    labelStyle: const TextStyle(color: Colors.white60),
-    hintText: '09:00',
-    hintStyle: const TextStyle(color: Colors.white38),
-    filled: true,
-    fillColor: Colors.white.withOpacity(0.08),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide.none,
-    ),
-  );
-}
+  InputDecoration _timeInputDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.white60),
+      hintText: '09:00',
+      hintStyle: const TextStyle(color: Colors.white38),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.08),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
+      ),
+    );
+  }
 
   Widget _quickActionCard({
     required IconData icon,
@@ -2653,6 +2395,7 @@ class UserManagementPage extends StatefulWidget {
   @override
   State<UserManagementPage> createState() => _UserManagementPageState();
 }
+
 class _TimeTextInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -2684,23 +2427,24 @@ class _TimeTextInputFormatter extends TextInputFormatter {
 class _UserManagementPageState extends State<UserManagementPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseFunctions _functions =
-      FirebaseFunctions.instanceFor(region: 'us-central1');
+      FirebaseFunctions.instanceFor(region: 'europe-central1');
 
   final List<String> _roles = ['admin', 'teacher', 'student', 'studyGuard'];
   String _roleLabel(String role) {
-  switch (role.trim()) {
-    case 'admin':
-      return 'Yönetici';
-    case 'teacher':
-      return 'Öğretmen';
-    case 'student':
-      return 'Öğrenci';
-    case 'studyGuard':
-      return 'Etüt Görevlisi';
-    default:
-      return role;
+    switch (role.trim()) {
+      case 'admin':
+        return 'Yönetici';
+      case 'teacher':
+        return 'Öğretmen';
+      case 'student':
+        return 'Öğrenci';
+      case 'studyGuard':
+        return 'Etüt Görevlisi';
+      default:
+        return role;
+    }
   }
-}
+
   final List<String> _allSubjects = [
     'MATEMATİK',
     'FİZİK',
@@ -2754,27 +2498,27 @@ class _UserManagementPageState extends State<UserManagementPage> {
               ),
             ),
             Padding(
-  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-  child: TextField(
-    style: const TextStyle(color: Colors.white),
-    decoration: InputDecoration(
-      hintText: 'Kullanıcı ara...',
-      hintStyle: const TextStyle(color: Colors.white54),
-      prefixIcon: const Icon(Icons.search, color: Colors.white70),
-      filled: true,
-      fillColor: Colors.white.withOpacity(0.10),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(20),
-        borderSide: BorderSide.none,
-      ),
-    ),
-    onChanged: (value) {
-      setState(() {
-        _userSearchQuery = value.trim().toLowerCase();
-      });
-    },
-  ),
-),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: TextField(
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Kullanıcı ara...',
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  prefixIcon: const Icon(Icons.search, color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.10),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                onChanged: (value) {
+                  setState(() {
+                    _userSearchQuery = value.trim().toLowerCase();
+                  });
+                },
+              ),
+            ),
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
                 stream: _firestore.collection('users').snapshots(),
@@ -2794,40 +2538,42 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     );
                   }
 
-                 final allUsers = snapshot.data!.docs;
-String normalizeForSearch(String str) {
-  return str
-      .toLowerCase()
-      .replaceAll('ı', 'i')
-      .replaceAll('ğ', 'g')
-      .replaceAll('ü', 'u')
-      .replaceAll('ş', 's')
-      .replaceAll('ö', 'o')
-      .replaceAll('ç', 'c')
-      .replaceAll('İ', 'i');
-}
+                  final allUsers = snapshot.data!.docs;
+                  String normalizeForSearch(String str) {
+                    return str
+                        .toLowerCase()
+                        .replaceAll('ı', 'i')
+                        .replaceAll('ğ', 'g')
+                        .replaceAll('ü', 'u')
+                        .replaceAll('ş', 's')
+                        .replaceAll('ö', 'o')
+                        .replaceAll('ç', 'c')
+                        .replaceAll('İ', 'i');
+                  }
 
-final users = allUsers.where((doc) {
-  final data = doc.data() as Map<String, dynamic>;
+                  final users = allUsers.where((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
 
-  final searchableRaw = [
-    data['fullName'],
-    data['name'],
-    data['surname'],
-    data['email'],
-    data['role'],
-    data['username'],
-    data['className'],
-    data['branch'],
-    data['department'],
-    if (data['subjects'] is List) (data['subjects'] as List).join(' '),
-  ].where((e) => e != null).join(' ');
+                    final searchableRaw = [
+                      data['fullName'],
+                      data['name'],
+                      data['surname'],
+                      data['email'],
+                      data['role'],
+                      data['username'],
+                      data['className'],
+                      data['branch'],
+                      data['department'],
+                      if (data['subjects'] is List)
+                        (data['subjects'] as List).join(' '),
+                    ].where((e) => e != null).join(' ');
 
-  final searchable = normalizeForSearch(searchableRaw);
-  final query = normalizeForSearch(_userSearchQuery);
+                    final searchable = normalizeForSearch(searchableRaw);
+                    final query = normalizeForSearch(_userSearchQuery);
 
-  return _userSearchQuery.isEmpty || searchable.contains(query);
-}).toList();
+                    return _userSearchQuery.isEmpty ||
+                        searchable.contains(query);
+                  }).toList();
 
                   return ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
@@ -2900,7 +2646,6 @@ final users = allUsers.where((doc) {
                                       fontSize: 12,
                                     ),
                                   ),
-
                                 ],
                               ),
                             ),
@@ -2938,7 +2683,6 @@ final users = allUsers.where((doc) {
   }
 
   Future<void> _showUserDialog({
-    
     String? editingUid,
     Map<String, dynamic>? existingData,
   }) async {
@@ -2947,59 +2691,57 @@ final users = allUsers.where((doc) {
     const String domain = '@bilimkalesi.com';
 
     String email = existingData?['email'] ?? '';
-String password = '';
-String newPassword = '';
+    String password = '';
+    String newPassword = '';
 
-String firstName = existingData?['name']?.toString() ?? '';
-String surname = existingData?['surname']?.toString() ?? '';
+    String firstName = existingData?['name']?.toString() ?? '';
+    String surname = existingData?['surname']?.toString() ?? '';
 
-String className = existingData?['className']?.toString() ?? '';
-String branch = existingData?['branch']?.toString() ?? '';
-String department = existingData?['department']?.toString() ?? '';
-String studentNo = existingData?['studentNo']?.toString() ?? '';
-String username = existingData?['username']?.toString() ?? '';
+    String className = existingData?['className']?.toString() ?? '';
+    String branch = existingData?['branch']?.toString() ?? '';
+    String department = existingData?['department']?.toString() ?? '';
+    String studentNo = existingData?['studentNo']?.toString() ?? '';
+    String username = existingData?['username']?.toString() ?? '';
 
-String role =
-    existingData?['role']?.toString().trim() ?? 'student';
+    String role = existingData?['role']?.toString().trim() ?? 'student';
 
-if (!_roles.contains(role)) {
-  role = 'student';
-}
-final List<String> selectedSubjects = [];
-
-final rawSubjects = existingData?['subjects'];
-
-if (rawSubjects is List) {
-  for (final item in rawSubjects) {
-    final value = item.toString().trim();
-
-    if (value.isNotEmpty) {
-      selectedSubjects.add((value),
-      );
+    if (!_roles.contains(role)) {
+      role = 'student';
     }
-  }
-} else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
-  final parts = rawSubjects.split(RegExp(r'[,;/|]'));
+    final List<String> selectedSubjects = [];
 
-  for (final item in parts) {
-    final value = item.trim();
+    final rawSubjects = existingData?['subjects'];
 
-    if (value.isNotEmpty) {
-      selectedSubjects.add((value)
-      );
+    if (rawSubjects is List) {
+      for (final item in rawSubjects) {
+        final value = item.toString().trim();
+
+        if (value.isNotEmpty) {
+          selectedSubjects.add(
+            (value),
+          );
+        }
+      }
+    } else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
+      final parts = rawSubjects.split(RegExp(r'[,;/|]'));
+
+      for (final item in parts) {
+        final value = item.trim();
+
+        if (value.isNotEmpty) {
+          selectedSubjects.add((value));
+        }
+      }
     }
-  }
-}
 
-final String? legacyBranch = existingData?['branch']?.toString().trim();
+    final String? legacyBranch = existingData?['branch']?.toString().trim();
 
-if (role == 'teacher' &&
-    selectedSubjects.isEmpty &&
-    legacyBranch != null &&
-    legacyBranch.isNotEmpty) {
-  selectedSubjects.add(legacyBranch
-  );
-}
+    if (role == 'teacher' &&
+        selectedSubjects.isEmpty &&
+        legacyBranch != null &&
+        legacyBranch.isNotEmpty) {
+      selectedSubjects.add(legacyBranch);
+    }
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -3061,197 +2803,207 @@ if (role == 'teacher' &&
                     const SizedBox(height: 16),
                     Flexible(
                       child: SingleChildScrollView(
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextFormField(
-  initialValue: username,
-  decoration: const InputDecoration(
-    labelText: 'Kullanıcı Adı',
-    helperText: 'Girişte kullanılacak kullanıcı adıdır. E-posta otomatik oluşturulur.',
-    suffixText: '@bilimkalesi.com',
-  ),
-  onChanged: (val) {
-    username = val.trim().replaceAll(' ', '').toLowerCase();
-    email = '$username$domain';
-  },
-  validator: (val) {
-    if (val == null || val.trim().isEmpty) {
-      return 'Kullanıcı adı zorunlu';
-    }
-    return null;
-  },
-),
-                    if (!isEditing) ...[
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        decoration: const InputDecoration(labelText: 'Şifre'),
-                        obscureText: true,
-                        onChanged: (val) => password = val,
-                        validator: (val) => val == null || val.length < 6
-                            ? 'Şifre en az 6 karakter'
-                            : null,
-                      ),
-                    ],
-                    if (isEditing) ...[
-  const SizedBox(height: 8),
-  TextFormField(
-    decoration: const InputDecoration(
-      labelText: 'Yeni Şifre',
-      helperText: 'Boş bırakırsanız şifre değişmez',
-    ),
-    obscureText: true,
-    onChanged: (val) => newPassword = val,
-    validator: (val) {
-      if (val == null || val.isEmpty) return null;
-      if (val.length < 6) return 'Şifre en az 6 karakter olmalı';
-      return null;
-    },
-  ),
-],
-                    const SizedBox(height: 8),
-                   TextFormField(
-  initialValue: firstName,
-  decoration: const InputDecoration(
-    labelText: 'Ad',
-    hintText: 'Örneğin: Mehmet Ali',
-  ),
-  textCapitalization: TextCapitalization.words,
-  onChanged: (val) => firstName = val.trim(),
-  validator: (val) {
-    if (val == null || val.trim().isEmpty) {
-      return 'Ad zorunludur';
-    }
-    return null;
-  },
-),
+                        child: Form(
+                          key: formKey,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TextFormField(
+                                initialValue: username,
+                                decoration: const InputDecoration(
+                                  labelText: 'Kullanıcı Adı',
+                                  helperText:
+                                      'Girişte kullanılacak kullanıcı adıdır. E-posta otomatik oluşturulur.',
+                                  suffixText: '@bilimkalesi.com',
+                                ),
+                                onChanged: (val) {
+                                  username = val
+                                      .trim()
+                                      .replaceAll(' ', '')
+                                      .toLowerCase();
+                                  email = '$username$domain';
+                                },
+                                validator: (val) {
+                                  if (val == null || val.trim().isEmpty) {
+                                    return 'Kullanıcı adı zorunlu';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              if (!isEditing) ...[
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  decoration:
+                                      const InputDecoration(labelText: 'Şifre'),
+                                  obscureText: true,
+                                  onChanged: (val) => password = val,
+                                  validator: (val) =>
+                                      val == null || val.length < 6
+                                          ? 'Şifre en az 6 karakter'
+                                          : null,
+                                ),
+                              ],
+                              if (isEditing) ...[
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  decoration: const InputDecoration(
+                                    labelText: 'Yeni Şifre',
+                                    helperText:
+                                        'Boş bırakırsanız şifre değişmez',
+                                  ),
+                                  obscureText: true,
+                                  onChanged: (val) => newPassword = val,
+                                  validator: (val) {
+                                    if (val == null || val.isEmpty) return null;
+                                    if (val.length < 6)
+                                      return 'Şifre en az 6 karakter olmalı';
+                                    return null;
+                                  },
+                                ),
+                              ],
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                initialValue: firstName,
+                                decoration: const InputDecoration(
+                                  labelText: 'Ad',
+                                  hintText: 'Örneğin: Mehmet Ali',
+                                ),
+                                textCapitalization: TextCapitalization.words,
+                                onChanged: (val) => firstName = val.trim(),
+                                validator: (val) {
+                                  if (val == null || val.trim().isEmpty) {
+                                    return 'Ad zorunludur';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                initialValue: surname,
+                                decoration: const InputDecoration(
+                                  labelText: 'Soyad',
+                                  hintText: 'Örneğin: Yılmaz',
+                                ),
+                                textCapitalization: TextCapitalization.words,
+                                onChanged: (val) => surname = val.trim(),
+                                validator: (val) {
+                                  if (val == null || val.trim().isEmpty) {
+                                    return 'Soyad zorunludur';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              DropdownButtonFormField<String>(
+                                value: role,
+                                decoration: const InputDecoration(
+                                  labelText: 'Rol',
+                                ),
+                                items: _roles.map((roleValue) {
+                                  return DropdownMenuItem<String>(
+                                    value: roleValue,
+                                    child: Text(_roleLabel(roleValue)),
+                                  );
+                                }).toList(),
+                                onChanged: (value) {
+                                  if (value == null) return;
 
-const SizedBox(height: 12),
+                                  setStateDialog(() {
+                                    role = value;
 
-TextFormField(
-  initialValue: surname,
-  decoration: const InputDecoration(
-    labelText: 'Soyad',
-    hintText: 'Örneğin: Yılmaz',
-  ),
-  textCapitalization: TextCapitalization.words,
-  onChanged: (val) => surname = val.trim(),
-  validator: (val) {
-    if (val == null || val.trim().isEmpty) {
-      return 'Soyad zorunludur';
-    }
-    return null;
-  },
-),
-                    const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-  value: role,
-  decoration: const InputDecoration(
-    labelText: 'Rol',
-  ),
-  items: _roles.map((roleValue) {
-    return DropdownMenuItem<String>(
-      value: roleValue,
-      child: Text(_roleLabel(roleValue)),
-    );
-  }).toList(),
-  onChanged: (value) {
-    if (value == null) return;
+                                    if (role != 'teacher') {
+                                      selectedSubjects.clear();
+                                    }
+                                  });
+                                },
+                              ),
+                              if (role == 'student') ...[
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  initialValue: className,
+                                  decoration:
+                                      const InputDecoration(labelText: 'Sınıf'),
+                                  onChanged: (val) => className = val.trim(),
+                                ),
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  initialValue: branch,
+                                  decoration:
+                                      const InputDecoration(labelText: 'Şube'),
+                                  onChanged: (val) => branch = val.trim(),
+                                ),
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  initialValue: department,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Alan / Bölüm'),
+                                  onChanged: (val) => department = val.trim(),
+                                ),
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  initialValue: studentNo,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Öğrenci No'),
+                                  onChanged: (val) => studentNo = val.trim(),
+                                ),
+                              ],
+                              if (role == 'teacher') ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.grey),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Verdiği Ders',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      ..._allSubjects.map((final subject) {
+                                        final groupValue =
+                                            selectedSubjects.isNotEmpty
+                                                ? selectedSubjects.first
+                                                : null;
 
-    setStateDialog(() {
-      role = value;
-
-      if (role != 'teacher') {
-        selectedSubjects.clear();
-      }
-    });
-  },
-),
-                    if (role == 'student') ...[
-  const SizedBox(height: 8),
-  TextFormField(
-    initialValue: className,
-    decoration: const InputDecoration(labelText: 'Sınıf'),
-    onChanged: (val) => className = val.trim(),
-  ),
-  const SizedBox(height: 8),
-  TextFormField(
-    initialValue: branch,
-    decoration: const InputDecoration(labelText: 'Şube'),
-    onChanged: (val) => branch = val.trim(),
-  ),
-  const SizedBox(height: 8),
-  TextFormField(
-    initialValue: department,
-    decoration: const InputDecoration(labelText: 'Alan / Bölüm'),
-    onChanged: (val) => department = val.trim(),
-  ),
-  const SizedBox(height: 8),
-  TextFormField(
-    initialValue: studentNo,
-    decoration: const InputDecoration(labelText: 'Öğrenci No'),
-    onChanged: (val) => studentNo = val.trim(),
-  ),
-],
-if (role == 'teacher') ...[
-  const SizedBox(height: 12),
-  Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      border: Border.all(color: Colors.grey),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Verdiği Ders',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
-        ..._allSubjects.map((final subject) {
-          final groupValue = selectedSubjects.isNotEmpty
-              ? selectedSubjects.first
-              : null;
-
-          return RadioListTile<String>(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            value: subject,
-            groupValue: groupValue,
-            title: Text(subject),
-            onChanged: (value) {
-              if (value == null) return;
-              setStateDialog(() {
-                selectedSubjects
-                  ..clear()
-                  ..add(value);
-              });
-            },
-          );
-        }),
-      ],
-    ),
-  ),
-],
-                          ],
+                                        return RadioListTile<String>(
+                                          contentPadding: EdgeInsets.zero,
+                                          dense: true,
+                                          value: subject,
+                                          groupValue: groupValue,
+                                          title: Text(subject),
+                                          onChanged: (value) {
+                                            if (value == null) return;
+                                            setStateDialog(() {
+                                              selectedSubjects
+                                                ..clear()
+                                                ..add(value);
+                                            });
+                                          },
+                                        );
+                                      }),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                       ),
-           
-                ),
                     ),
-          
                     const SizedBox(height: 18),
                     Row(
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                onPressed: () => Navigator.pop(ctx),
+                            onPressed: () => Navigator.pop(ctx),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.white,
                               side: const BorderSide(color: Colors.white38),
@@ -3278,78 +3030,80 @@ if (role == 'teacher') ...[
                               if (!formKey.currentState!.validate()) return;
 
                               setState(() => _isLoading = true);
-try {
-  final cleanFirstName =
-      firstName.replaceAll(RegExp(r'\s+'), ' ').trim();
+                              try {
+                                final cleanFirstName = firstName
+                                    .replaceAll(RegExp(r'\s+'), ' ')
+                                    .trim();
 
-  final cleanSurname =
-      surname.replaceAll(RegExp(r'\s+'), ' ').trim();
+                                final cleanSurname = surname
+                                    .replaceAll(RegExp(r'\s+'), ' ')
+                                    .trim();
 
-  final fullName = '$cleanFirstName $cleanSurname'
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
+                                final fullName = '$cleanFirstName $cleanSurname'
+                                    .replaceAll(RegExp(r'\s+'), ' ')
+                                    .trim();
 
-  if (isEditing) {
-    await _updateUser(
-      editingUid,
-      email,
-      cleanFirstName,
-      cleanSurname,
-      fullName,
-      role,
-      selectedSubjects,
-      username,
-      className,
-      branch,
-      department,
-      studentNo,
-    );
+                                if (isEditing) {
+                                  await _updateUser(
+                                    editingUid,
+                                    email,
+                                    cleanFirstName,
+                                    cleanSurname,
+                                    fullName,
+                                    role,
+                                    selectedSubjects,
+                                    username,
+                                    className,
+                                    branch,
+                                    department,
+                                    studentNo,
+                                  );
 
-    if (newPassword.trim().isNotEmpty) {
-      await _updateUserPassword(
-        uid: editingUid,
-        password: newPassword.trim(),
-      );
-    }
-  } else {
-    await _createUser(
-      email,
-      password,
-      cleanFirstName,
-      cleanSurname,
-      fullName,
-      role,
-      selectedSubjects,
-      username,
-      className,
-      branch,
-      department,
-      studentNo,
-    );
-  }
-                              if (ctx.mounted) Navigator.pop(ctx);
+                                  if (newPassword.trim().isNotEmpty) {
+                                    await _updateUserPassword(
+                                      uid: editingUid,
+                                      password: newPassword.trim(),
+                                    );
+                                  }
+                                } else {
+                                  await _createUser(
+                                    email,
+                                    password,
+                                    cleanFirstName,
+                                    cleanSurname,
+                                    fullName,
+                                    role,
+                                    selectedSubjects,
+                                    username,
+                                    className,
+                                    branch,
+                                    department,
+                                    studentNo,
+                                  );
+                                }
+                                if (ctx.mounted) Navigator.pop(ctx);
 
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    isEditing
-                                        ? 'Kullanıcı güncellendi'
-                                        : 'Kullanıcı oluşturuldu',
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      isEditing
+                                          ? 'Kullanıcı güncellendi'
+                                          : 'Kullanıcı oluşturuldu',
+                                    ),
                                   ),
-                                ),
-                              );
-                            } catch (e) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Hata: ${_adminFunctionErrorMessage(e)}',
+                                );
+                              } catch (e) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Hata: ${_adminFunctionErrorMessage(e)}',
+                                    ),
                                   ),
-                                ),
-                              );
-                            } finally {
-                              if (mounted) setState(() => _isLoading = false);
-                            }
-                          },
+                                );
+                              } finally {
+                                if (mounted) setState(() => _isLoading = false);
+                              }
+                            },
                             child: Text(isEditing ? 'Güncelle' : 'Oluştur'),
                           ),
                         ),
@@ -3364,108 +3118,109 @@ try {
       ),
     );
   }
+
   Future<void> _updateUserPassword({
-  required String uid,
-  required String password,
-}) async {
-  final callable = _functions.httpsCallable('updateUserPassword');
+    required String uid,
+    required String password,
+  }) async {
+    final callable = _functions.httpsCallable('updateUserPassword');
 
-  await callable.call({
-    'uid': uid,
-    'password': password,
-  });
-}
-
-String _adminFunctionErrorMessage(Object error) {
-  if (error is FirebaseFunctionsException) {
-    final message = error.message?.trim();
-
-    if (message != null && message.isNotEmpty) {
-      return message;
-    }
-
-    switch (error.code) {
-      case 'permission-denied':
-        return 'Bu işlem için yetkiniz bulunmuyor.';
-      case 'already-exists':
-        return 'Bu kullanıcı adı zaten kullanılıyor.';
-      case 'failed-precondition':
-        return 'Bu kullanıcının aktif bir işlemi bulunuyor.';
-      case 'not-found':
-        return 'Kullanıcı kaydı bulunamadı.';
-      case 'invalid-argument':
-        return 'Girilen bilgileri kontrol edin.';
-      default:
-        return 'İşlem tamamlanamadı.';
-    }
+    await callable.call({
+      'uid': uid,
+      'password': password,
+    });
   }
 
-  return error.toString();
-}
+  String _adminFunctionErrorMessage(Object error) {
+    if (error is FirebaseFunctionsException) {
+      final message = error.message?.trim();
+
+      if (message != null && message.isNotEmpty) {
+        return message;
+      }
+
+      switch (error.code) {
+        case 'permission-denied':
+          return 'Bu işlem için yetkiniz bulunmuyor.';
+        case 'already-exists':
+          return 'Bu kullanıcı adı zaten kullanılıyor.';
+        case 'failed-precondition':
+          return 'Bu kullanıcının aktif bir işlemi bulunuyor.';
+        case 'not-found':
+          return 'Kullanıcı kaydı bulunamadı.';
+        case 'invalid-argument':
+          return 'Girilen bilgileri kontrol edin.';
+        default:
+          return 'İşlem tamamlanamadı.';
+      }
+    }
+
+    return error.toString();
+  }
 
   Future<void> _createUser(
-  String email,
-  String password,
-  String firstName,
-  String surname,
-  String fullName,
-  String role,
-  List<String> subjects,
-  String username,
-  String className,
-  String branch,
-  String department,
-  String studentNo,
-) async {
-  final callable = _functions.httpsCallable('adminCreateUser');
+    String email,
+    String password,
+    String firstName,
+    String surname,
+    String fullName,
+    String role,
+    List<String> subjects,
+    String username,
+    String className,
+    String branch,
+    String department,
+    String studentNo,
+  ) async {
+    final callable = _functions.httpsCallable('adminCreateUser');
 
-  await callable.call({
-    'email': email,
-    'username': username,
-    'name': firstName,
-    'surname': surname,
-    'fullName': fullName,
-    'role': role,
-    'subjects': subjects,
-    'className': className,
-    'branch': branch,
-    'department': department,
-    'studentNo': studentNo,
-    'password': password,
-  });
-}
-Future<void> _updateUser(
-  String uid,
-  String newEmail,
-  String firstName,
-  String surname,
-  String fullName,
-  String newRole,
-  List<String> subjects,
-  String username,
-  String className,
-  String branch,
-  String department,
-  String studentNo,
-) async {
-  final callable = _functions.httpsCallable('adminUpdateUser');
+    await callable.call({
+      'email': email,
+      'username': username,
+      'name': firstName,
+      'surname': surname,
+      'fullName': fullName,
+      'role': role,
+      'subjects': subjects,
+      'className': className,
+      'branch': branch,
+      'department': department,
+      'studentNo': studentNo,
+      'password': password,
+    });
+  }
 
-  await callable.call({
-    'uid': uid,
-    'email': newEmail,
-    'username': username,
-    'name': firstName,
-    'surname': surname,
-    'fullName': fullName,
-    'role': newRole,
-    'subjects': subjects,
-    'className': className,
-    'branch': branch,
-    'department': department,
-    'studentNo': studentNo,
-  });
-}
-  
+  Future<void> _updateUser(
+    String uid,
+    String newEmail,
+    String firstName,
+    String surname,
+    String fullName,
+    String newRole,
+    List<String> subjects,
+    String username,
+    String className,
+    String branch,
+    String department,
+    String studentNo,
+  ) async {
+    final callable = _functions.httpsCallable('adminUpdateUser');
+
+    await callable.call({
+      'uid': uid,
+      'email': newEmail,
+      'username': username,
+      'name': firstName,
+      'surname': surname,
+      'fullName': fullName,
+      'role': newRole,
+      'subjects': subjects,
+      'className': className,
+      'branch': branch,
+      'department': department,
+      'studentNo': studentNo,
+    });
+  }
 
   Future<void> _deleteUser(String uid, String email) async {
     final confirm = await showDialog<bool>(
@@ -3576,7 +3331,8 @@ Future<void> _updateUser(
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Silme hatası: ${_adminFunctionErrorMessage(e)}')),
+        SnackBar(
+            content: Text('Silme hatası: ${_adminFunctionErrorMessage(e)}')),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);

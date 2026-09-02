@@ -6,7 +6,7 @@ Bu doküman mevcut kaynak kod okunarak hazırlanmıştır. Kodda görülmeyen ö
 
 ## Teknoloji ve Mimari
 
-ZümreNet bir Flutter uygulamasıdır. Firebase Authentication, Cloud Firestore, Cloud Functions, Firebase Hosting, Python/FastAPI tabanlı Cloud Run Smart Import servisi, `pdf` ve `printing` paketleri kullanılır.
+ZümreNet bir Flutter uygulamasıdır. Firebase Authentication, Cloud Firestore, Cloud Functions, Firebase Hosting, Python/FastAPI tabanlı Cloud Run Smart Import servisi, Python/FastAPI tabanlı Cloud Run Reports servisi ve Flutter tarafında PDF byte paylaşımı için `printing` paketi kullanılır.
 
 Uygulama giriş noktası `lib/main.dart` dosyasıdır. Firebase web yapılandırması burada yapılır. Web ortamında Auth persistence `Persistence.LOCAL` olarak ayarlanır. Giriş sonrası yönlendirme `FirebaseAuth.instance.authStateChanges()` ile başlar, ardından `users/{uid}` belgesindeki `role` alanı okunur.
 
@@ -62,7 +62,7 @@ Görevli branş öğretmeni seçilirse seçilen öğretmenin mevcut `teacherStat
 
 ### Admin
 
-Admin ekranı istatistik, PDF rapor, zaman yönetimi, Smart Import ve kullanıcı yönetimini içerir. Kullanıcı yönetiminde create/update/delete/password işlemleri server callable Cloud Functions üzerinden yürütülür; Firebase Authentication ve `users/{uid}` tek kullanıcı lifecycle olarak ele alınır.
+Admin ekranı istatistik, Rapor Merkezi, zaman yönetimi, Smart Import ve kullanıcı yönetimini içerir. Kullanıcı yönetiminde create/update/delete/password işlemleri server callable Cloud Functions üzerinden yürütülür; Firebase Authentication ve `users/{uid}` tek kullanıcı lifecycle olarak ele alınır.
 
 ## Firestore Veri Modeli
 
@@ -335,6 +335,7 @@ Cloud Functions:
 Cloud Run:
 
 - Smart Import analiz ve import işlerinden sorumludur.
+- Reports servisi kurum/sınıf PDF raporlarını üretir.
 - FastAPI ve Firebase Admin SDK kullanır.
 - Flutter Admin ekranından doğrudan HTTP ile çağrılır.
 
@@ -346,38 +347,31 @@ Uygulama tarafı:
 
 ## PDF Raporlama
 
-PDF raporlama Admin ekranında yapılır. `queues` koleksiyonundan `status == completed` ve `completedAt` tarih aralığına göre veri çekilir. `studySessions` koleksiyonundan `startedAt` tarih aralığına göre etüt verisi çekilir.
+Güncel hedef mimaride PDF raporlama Admin ekranında üretilmez. Admin ekranındaki Rapor Merkezi Firebase ID token ile `cloud_run_reports` FastAPI servisine HTTP çağrısı yapar ve dönen PDF byte'ını `Printing.sharePdf` ile kullanıcıya açar/paylaştırır.
 
-Raporda kodda görülen bölümler:
+Cloud Run Reports endpointleri:
 
-- Genel özet
-- Ders / zümre dağılımı
-- Etüt analizi
-- Saatlere göre etüt yoğunluğu
-- Etüt oturumları
-- Öğrenci aktivite analizi
-- Öğrenci kullanım özeti
-- İşlem geçmişi
+- `POST /reports/institution-summary`: `KURUM FAALİYET ÖZETİ`
+- `POST /reports/class-tracking`: `SINIF TAKİP RAPORU`
+- `POST /reports/class-activity`: `SINIF FAALİYET TAKİP RAPORU`
 
-Kod davranışı notu: Belirgin ayrı bir branş analizi bölümü yoktur. Sınıf/şube/alan bilgileri öğrenci tablolarında kullanılır.
+Rapor auth davranışı:
 
-Performans notu: PDF üretimi sırasında her queue için ilgili öğrenci belgesi okunur ve her etüt session için `students` alt koleksiyonu çekilir. Büyük veri setlerinde N+1 okuma ve yavaşlama riski vardır.
+- Eksik/geçersiz Authorization Bearer token `401` döndürür.
+- Token geçerli olup `users/{uid}.role != admin` ise `403` döndürür.
+- Token veya parola loglanmaz.
+
+Zümre soru metriği kuralı: `queues` koleksiyonunda `status == completed` olan ve `completedAt` değeri rapor aralığına giren her belge 1 tamamlanan soru sayılır. `questionCount` üzerinden ortalama veya toplam üretilmez.
+
+Etüt metriği kuralı: Yalnızca `studySessions.status == completed` oturumları rapora girer. Oturum süreleri mevcut `startedAt` ve `endedAt` alanlarından okunur; geçmiş raporlar güncel çalışma programına göre yeniden yorumlanmaz. Etüt öğrenci sayısı `studySessions/{sessionId}/students` kayıtlarındaki distinct öğrenci üzerinden gruplanır. Eski completed etütlerde `studentCount` negatif veya hatalı olabilir; rapor motoru bu alanı negatif göstermemeli ve gerçek katılım için öğrenci alt kayıtlarını esas almalıdır.
+
+Performans notu: Rapor motoru Firestore verisini toplu sorgularla çeker ve Python içinde gruplar. Queue için `status + completedAt`, completed study session için `status + startedAt`, etüt öğrenci collection group sorgusu için `students.checkedAt` indeksleri `firestore.indexes.json` içinde tanımlıdır. Sınıf listesi `users.role == student` üzerinden alınır; sınıf raporu için `users.className` eşitlik filtresi kullanılır.
 
 ## Firestore Rules ve Index Durumu
 
-Repo içinde `firestore.rules` ve `firestore.indexes.json` dosyaları bulunmadı. `firebase.json` içinde Firestore rules veya index yapılandırması da görülmedi.
+Repo içinde `firestore.rules` ve `firestore.indexes.json` dosyaları bulunur. `firebase.json` Firestore rules ve indexes dosyalarını işaret eder.
 
-Bu nedenle mevcut kaynak repo üzerinden şu write işlemlerinin rules tarafından izinli olup olmadığı doğrulanamıyor:
-
-- Öğrenci queue oluşturma
-- Öğrenci queue iptali
-- `cooldownUntil` yazma/silme
-- Öğretmen queue update, başlatma, tamamlama, iptal, transfer
-- StudyGuard öğrenci etüt güncelleme
-- StudyGuard görevli öğretmen `teacherStatus` güncelleme
-- Admin kullanıcı ve settings yönetimi
-
-Yeni geliştirmelerde deploy edilmiş rules kaynağı ayrıca bulunmalı ve her write buna göre kontrol edilmelidir.
+Yeni geliştirmelerde her write işlemi için repo içindeki güncel rules dosyası ve deploy edilmiş Firebase rules davranışı birlikte kontrol edilmelidir. Raporlama servisi client rules'a değil Firebase Admin SDK yetkisine dayanır; bu nedenle servis içinde admin token doğrulaması zorunlu güvenlik sınırıdır.
 
 ## Teknik Borçlar
 
