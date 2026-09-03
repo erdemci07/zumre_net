@@ -224,6 +224,26 @@ class StatisticsPage extends StatefulWidget {
   State<StatisticsPage> createState() => _StatisticsPageState();
 }
 
+class _ReportClassOption {
+  const _ReportClassOption({
+    required this.className,
+    required this.branch,
+    required this.department,
+  });
+
+  final String className;
+  final String branch;
+  final String department;
+
+  String get displayName => [
+        className,
+        if (branch.isNotEmpty) branch,
+        if (department.isNotEmpty) department,
+      ].join('-');
+
+  String get key => '$className|$branch|$department';
+}
+
 class _StatisticsPageState extends State<StatisticsPage> {
   static const String _reportsBaseUrl =
       'https://zumrenet-reports-542741706921.europe-west1.run.app';
@@ -325,7 +345,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               Expanded(
                 child: Text(
                   'PDF raporu hazırlanıyor...\n'
-                  'Rapor motoru seçilen aralıktaki verileri işliyor.',
+                  'Seçilen aralıktaki veriler işleniyor.',
                   style: TextStyle(color: Colors.white70, height: 1.35),
                 ),
               ),
@@ -369,23 +389,34 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return DateTimeRange(start: today, end: today);
   }
 
-  Future<List<String>> _loadReportClassOptions() async {
+  Future<List<_ReportClassOption>> _loadReportClassOptions() async {
     final snapshot = await _firestore
         .collection('users')
         .where('role', isEqualTo: 'student')
         .get();
 
-    final classes = snapshot.docs
-        .map((doc) => '${doc.data()['className'] ?? ''}'.trim())
-        .where((className) => className.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort((a, b) => a.compareTo(b));
+    final optionMap = <String, _ReportClassOption>{};
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final className = '${data['className'] ?? ''}'.trim();
+      if (className.isEmpty) continue;
+
+      final option = _ReportClassOption(
+        className: className,
+        branch: '${data['branch'] ?? ''}'.trim(),
+        department: '${data['department'] ?? ''}'.trim(),
+      );
+      optionMap[option.key] = option;
+    }
+
+    final classes = optionMap.values.toList()
+      ..sort((a, b) => a.displayName.compareTo(b.displayName));
 
     return classes;
   }
 
-  Future<String?> _showReportClassPicker() async {
+  Future<_ReportClassOption?> _showReportClassPicker() async {
     final classes = await _loadReportClassOptions();
     if (!mounted) return null;
 
@@ -400,7 +431,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
     var selectedClass = classes.first;
 
-    return showDialog<String>(
+    return showDialog<_ReportClassOption>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
@@ -466,7 +497,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
+                    DropdownButtonFormField<_ReportClassOption>(
                       initialValue: selectedClass,
                       dropdownColor: const Color(0xFF071A3A),
                       isExpanded: true,
@@ -488,9 +519,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       style: const TextStyle(color: Colors.white),
                       items: classes
                           .map(
-                            (className) => DropdownMenuItem(
-                              value: className,
-                              child: Text(className),
+                            (classOption) => DropdownMenuItem(
+                              value: classOption,
+                              child: Text(classOption.displayName),
                             ),
                           )
                           .toList(),
@@ -532,15 +563,17 @@ class _StatisticsPageState extends State<StatisticsPage> {
     required DateTime startDate,
     required DateTime endDate,
   }) async {
-    final className = await _showReportClassPicker();
-    if (className == null || className.isEmpty) return;
+    final selectedClass = await _showReportClassPicker();
+    if (selectedClass == null || selectedClass.className.isEmpty) return;
 
     await _requestReportPdf(
       endpoint: endpoint,
       fallbackFileName: fallbackFileName,
       startDate: startDate,
       endDate: endDate,
-      className: className,
+      className: selectedClass.className,
+      branch: selectedClass.branch,
+      department: selectedClass.department,
     );
   }
 
@@ -556,6 +589,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
     required DateTime startDate,
     required DateTime endDate,
     String? className,
+    String? branch,
+    String? department,
   }) async {
     var loadingShown = false;
 
@@ -582,6 +617,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
           'startDate': _formatIsoDate(startDate),
           'endDate': _formatIsoDate(endDate),
           if (className != null) 'className': className,
+          if (branch != null && branch.isNotEmpty) 'branch': branch,
+          if (department != null && department.isNotEmpty)
+            'department': department,
         }),
       );
 
@@ -822,17 +860,56 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                         isStart: true,
                                         setDialogState: setDialogState,
                                       ),
-                                      icon:
-                                          const Icon(Icons.first_page_rounded),
+                                      icon: const Icon(
+                                        Icons.calendar_today_rounded,
+                                        size: 16,
+                                      ),
                                       label: const Text('Başlangıç'),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.lightBlueAccent,
+                                        backgroundColor: Colors.white
+                                            .withValues(alpha: 0.06),
+                                        side: BorderSide(
+                                          color: Colors.lightBlueAccent
+                                              .withValues(alpha: 0.32),
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(15),
+                                        ),
+                                      ),
                                     ),
                                     OutlinedButton.icon(
                                       onPressed: () => pickDate(
                                         isStart: false,
                                         setDialogState: setDialogState,
                                       ),
-                                      icon: const Icon(Icons.last_page_rounded),
+                                      icon: const Icon(
+                                        Icons.event_available_rounded,
+                                        size: 17,
+                                      ),
                                       label: const Text('Bitiş'),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.lightBlueAccent,
+                                        backgroundColor: Colors.white
+                                            .withValues(alpha: 0.06),
+                                        side: BorderSide(
+                                          color: Colors.lightBlueAccent
+                                              .withValues(alpha: 0.32),
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(15),
+                                        ),
+                                      ),
                                     ),
                                   ];
 
@@ -1417,7 +1494,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           onPressed: data['ok'] == true
                               ? () => Navigator.pop(ctx, true)
                               : null,
-                          child: const Text('Firebase’e Aktar'),
+                          child: const Text('Sunucuya Aktar'),
                         ),
                       ),
                     ],
@@ -1496,7 +1573,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               ),
               const SizedBox(height: 18),
               const Text(
-                'Aktarım Tamamlandı',
+                'Sunucuya Aktarım Tamamlandı',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 22,

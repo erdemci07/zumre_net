@@ -267,7 +267,12 @@ def normalize_study_attendance(doc, session_map: dict[str, StudySession]) -> Stu
         return None
 
 
-def fetch_class_students(db, class_name: str) -> list[StudentReportRow]:
+def fetch_class_students(
+    db,
+    class_name: str,
+    branch: str = "",
+    department: str = "",
+) -> list[StudentReportRow]:
     query = (
         db.collection("users")
         .where(filter=FieldFilter("role", "==", "student"))
@@ -278,6 +283,13 @@ def fetch_class_students(db, class_name: str) -> list[StudentReportRow]:
     try:
         for doc in query.stream():
             data = doc.to_dict() or {}
+            student_branch = _clean(data.get("branch"))
+            student_department = _clean(data.get("department"))
+            if branch and student_branch != branch:
+                continue
+            if department and student_department != department:
+                continue
+
             students.append(
                 StudentReportRow(
                     student_id=doc.id,
@@ -286,8 +298,8 @@ def fetch_class_students(db, class_name: str) -> list[StudentReportRow]:
                         "Öğrenci",
                     ),
                     class_name=_clean(data.get("className")),
-                    branch=_clean(data.get("branch")),
-                    department=_clean(data.get("department")),
+                    branch=student_branch,
+                    department=student_department,
                 )
             )
     except Exception as exc:
@@ -316,14 +328,33 @@ def build_institution_summary(start_date: str, end_date: str) -> InstitutionSumm
     )
 
 
-def build_class_report(class_name: str, start_date: str, end_date: str) -> ClassReportData:
+def build_class_report(
+    class_name: str,
+    start_date: str,
+    end_date: str,
+    branch: str | None = None,
+    department: str | None = None,
+) -> ClassReportData:
     db = firestore.client()
     clean_class_name = _clean(class_name)
     if not clean_class_name:
         raise ValueError("Sınıf seçimi zorunludur.")
 
+    clean_branch = _clean(branch)
+    clean_department = _clean(department)
+    report_class_name = "-".join(
+        value
+        for value in [clean_class_name, clean_branch, clean_department]
+        if value
+    )
+
     date_range = parse_date_range(start_date, end_date)
-    students = fetch_class_students(db, clean_class_name)
+    students = fetch_class_students(
+        db,
+        clean_class_name,
+        branch=clean_branch,
+        department=clean_department,
+    )
     student_map = {student.student_id: student for student in students}
     queues = fetch_completed_queues(db, date_range)
     sessions = fetch_completed_study_sessions(db, date_range)
@@ -349,7 +380,7 @@ def build_class_report(class_name: str, start_date: str, end_date: str) -> Class
         student.study_attendances.sort(key=lambda item: item.started_at)
 
     return ClassReportData(
-        class_name=clean_class_name,
+        class_name=report_class_name,
         date_range=date_range,
         students=students,
     )

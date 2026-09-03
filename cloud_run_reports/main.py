@@ -34,6 +34,8 @@ class ReportRequest(BaseModel):
     start_date: str = Field(alias="startDate")
     end_date: str = Field(alias="endDate")
     class_name: str | None = Field(default=None, alias="className")
+    branch: str | None = None
+    department: str | None = None
 
 
 def _safe_filename(value: str) -> str:
@@ -77,12 +79,15 @@ def _build_pdf(
                 request.class_name.strip(),
                 request.start_date,
                 request.end_date,
+                branch=request.branch,
+                department=request.department,
             )
         else:
             data = build_institution_summary(request.start_date, request.end_date)
 
         pdf_bytes = renderer.render(data)
-        class_part = f"{_safe_filename(request.class_name or '')}_" if class_required else ""
+        class_label = data.class_name if class_required else ""
+        class_part = f"{_safe_filename(class_label)}_" if class_required else ""
         filename = (
             f"{class_part}{report_name}_{request.start_date}_{request.end_date}.pdf"
         )
