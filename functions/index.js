@@ -333,6 +333,64 @@ function buildRuntimeScheduleState(scheduleData, now = new Date()) {
   };
 }
 
+function resolveInstitutionMode(runtimeData = {}, now = new Date()) {
+  const nowParts = getIstanbulDateParts(now);
+  const mode = runtimeData.institutionMode || "active";
+
+  if (mode === "closed" && runtimeData.closedDate === nowParts.dateKey) {
+    return {
+      institutionMode: "closed",
+      closedDate: runtimeData.closedDate,
+      examType: null,
+      examEndsAt: null,
+    };
+  }
+
+  if (mode === "exam") {
+    const examEndsAt = timestampToDate(runtimeData.examEndsAt);
+    if (examEndsAt && examEndsAt > now) {
+      return {
+        institutionMode: "exam",
+        closedDate: null,
+        examType: runtimeData.examType || null,
+        examEndsAt: runtimeData.examEndsAt,
+      };
+    }
+  }
+
+  return {
+    institutionMode: "active",
+    closedDate: null,
+    examType: null,
+    examEndsAt: null,
+  };
+}
+
+function buildEffectiveRuntimeState(
+  scheduleData,
+  runtimeData = {},
+  now = new Date()
+) {
+  const scheduleState = buildRuntimeScheduleState(scheduleData, now);
+  const institutionState = resolveInstitutionMode(runtimeData, now);
+
+  if (institutionState.institutionMode === "active") {
+    return {
+      ...scheduleState,
+      ...institutionState,
+    };
+  }
+
+  return {
+    ...scheduleState,
+    isZumreOpen: false,
+    isStudyOpen: false,
+    isLunchBreak: false,
+    currentPeriod: institutionState.institutionMode,
+    ...institutionState,
+  };
+}
+
 /*
  * Bir etüt oturumunun hangi yönetici tanımlı saat aralığına
  * ait olduğunu başlangıç zamanından bulur.
@@ -485,12 +543,16 @@ async function completeTimedOutZumreQueues(scheduleData, now = new Date()) {
   };
 }
 
-async function deleteWaitingZumreQueuesWhenClosed(scheduleData, now = new Date()) {
+async function deleteWaitingZumreQueuesWhenClosed(
+  scheduleData,
+  now = new Date(),
+  options = {}
+) {
   const nowParts = getIstanbulDateParts(now);
   const currentMinutes = nowParts.hour * 60 + nowParts.minute;
   const currentZumreSlots = getZumreSlots(scheduleData, nowParts.weekday);
 
-  if (isNowInSlots(currentMinutes, currentZumreSlots)) {
+  if (!options.forceClosed && isNowInSlots(currentMinutes, currentZumreSlots)) {
     return {
       checkedCount: 0,
       deletedCount: 0,
@@ -1113,6 +1175,128 @@ exports.updateUserPassword = onCall(
   }
 );
 
+exports.setInstitutionMode = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const adminUid = await assertAdminCaller(request);
+    const mode = cleanText(request.data?.mode).toLowerCase();
+    const runtimeRef = db.collection("settings").doc("runtimeState");
+    const now = new Date();
+    const scheduleDoc = await db
+      .collection("settings")
+      .doc("zumreSchedule")
+      .get();
+    const scheduleData = scheduleDoc.data() || {};
+
+    if (!["active", "closed", "exam"].includes(mode)) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Geçersiz kurum modu."
+      );
+    }
+
+    if (mode === "active") {
+      const runtimeState = buildEffectiveRuntimeState(
+        scheduleData,
+        { institutionMode: "active" },
+        now
+      );
+
+      await runtimeRef.set(
+        {
+          ...runtimeState,
+          closedDate: null,
+          examStartedAt: null,
+          updatedAt: fieldValue.serverTimestamp(),
+          updatedBy: adminUid,
+        },
+        { merge: true }
+      );
+
+      return { ok: true, mode: "active" };
+    }
+
+    if (mode === "closed") {
+      const closedDate = getIstanbulDateParts(now).dateKey;
+      const runtimeState = buildEffectiveRuntimeState(
+        scheduleData,
+        {
+          institutionMode: "closed",
+          closedDate,
+        },
+        now
+      );
+
+      await runtimeRef.set(
+        {
+          ...runtimeState,
+          examStartedAt: null,
+          updatedAt: fieldValue.serverTimestamp(),
+          updatedBy: adminUid,
+        },
+        { merge: true }
+      );
+
+      await deleteWaitingZumreQueuesWhenClosed({}, now, {
+        forceClosed: true,
+      });
+
+      return { ok: true, mode: "closed" };
+    }
+
+    const examType = cleanText(request.data?.examType).toLowerCase();
+    const durationMinutes =
+      examType === "tyt" ? 165 : examType === "ayt" ? 180 : 0;
+
+    if (durationMinutes === 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Deneme türü TYT veya AYT olmalıdır."
+      );
+    }
+
+    const startTimestamp = admin.firestore.Timestamp.now();
+    const endTimestamp = admin.firestore.Timestamp.fromMillis(
+      startTimestamp.toMillis() + durationMinutes * 60 * 1000
+    );
+    const runtimeState = buildEffectiveRuntimeState(
+      scheduleData,
+      {
+        institutionMode: "exam",
+        examType,
+        examEndsAt: endTimestamp,
+      },
+      now
+    );
+
+    await runtimeRef.set(
+      {
+        ...runtimeState,
+        closedDate: null,
+        examStartedAt: startTimestamp,
+        updatedAt: fieldValue.serverTimestamp(),
+        updatedBy: adminUid,
+      },
+      { merge: true }
+    );
+
+    await deleteWaitingZumreQueuesWhenClosed({}, now, {
+      forceClosed: true,
+    });
+    const studyCloseResult = await closeActiveStudySessionsForInstitutionMode();
+
+    return {
+      ok: true,
+      mode: "exam",
+      examType,
+      examEndsAt: endTimestamp.toDate().toISOString(),
+      closedStudySessions: studyCloseResult.closedCount,
+    };
+  }
+);
+
 // ============================================================
 // ETÜT OTURUMU KAPATMA
 // ============================================================
@@ -1286,6 +1470,36 @@ async function closeStudySession(sessionDoc) {
   }
 }
 
+async function closeActiveStudySessionsForInstitutionMode() {
+  const activeSessionsSnapshot = await db
+    .collection("studySessions")
+    .where("status", "==", "active")
+    .get();
+
+  let checkedCount = 0;
+  let closedCount = 0;
+  let failedCount = 0;
+
+  for (const sessionDoc of activeSessionsSnapshot.docs) {
+    checkedCount += 1;
+
+    try {
+      const closed = await closeStudySession(sessionDoc);
+      if (closed) {
+        closedCount += 1;
+      }
+    } catch (error) {
+      failedCount += 1;
+    }
+  }
+
+  return {
+    checkedCount,
+    closedCount,
+    failedCount,
+  };
+}
+
 // ============================================================
 // SUNUCU TARAFI GENEL ZAMAN DURUMU
 // ============================================================
@@ -1311,31 +1525,35 @@ exports.syncRuntimeSchedule = onSchedule(
       return;
     }
 
-    const runtimeState = buildRuntimeScheduleState(
+    const now = new Date();
+    const runtimeRef = db.collection("settings").doc("runtimeState");
+    const runtimeDoc = await runtimeRef.get();
+    const runtimeState = buildEffectiveRuntimeState(
       scheduleDoc.data() || {},
-      new Date()
+      runtimeDoc.data() || {},
+      now
     );
 
-    await db
-      .collection("settings")
-      .doc("runtimeState")
-      .set(
-        {
-          ...runtimeState,
-          updatedAt: fieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+    await runtimeRef.set(
+      {
+        ...runtimeState,
+        updatedAt: fieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 
     const timeoutResult = await completeTimedOutZumreQueues(
       scheduleDoc.data() || {},
-      new Date()
+      now
     );
     const waitingCleanupResult = await deleteWaitingZumreQueuesWhenClosed(
       scheduleDoc.data() || {},
-      new Date()
+      now,
+      {
+        forceClosed: runtimeState.institutionMode !== "active",
+      }
     );
-    const teacherStatusResult = await syncTeacherStatuses(new Date());
+    const teacherStatusResult = await syncTeacherStatuses(now);
 
     console.log("Runtime zaman durumu güncellendi.", {
       ...runtimeState,
@@ -1377,6 +1595,21 @@ exports.syncStudySessions = onSchedule(
     }
 
     const scheduleData = scheduleDoc.data() || {};
+    const now = new Date();
+    const runtimeDoc = await db
+      .collection("settings")
+      .doc("runtimeState")
+      .get();
+    const institutionState = resolveInstitutionMode(
+      runtimeDoc.data() || {},
+      now
+    );
+
+    if (institutionState.institutionMode === "exam") {
+      const result = await closeActiveStudySessionsForInstitutionMode();
+      console.log("Deneme modu aktif etüt kontrolü tamamlandı.", result);
+      return;
+    }
 
     const activeSessionsSnapshot = await db
       .collection("studySessions")
@@ -1387,8 +1620,6 @@ exports.syncStudySessions = onSchedule(
       console.log("Aktif etüt oturumu bulunamadı.");
       return;
     }
-
-    const now = new Date();
 
     let checkedCount = 0;
     let closedCount = 0;

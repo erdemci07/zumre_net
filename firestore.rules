@@ -42,6 +42,34 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function runtimeState() {
+      return get(
+        /databases/$(database)/documents/settings/runtimeState
+      ).data;
+    }
+
+    function isFreshRuntimeState() {
+      return runtimeState().updatedAt is timestamp
+        && runtimeState().updatedAt > request.time - duration.value(5, "m");
+    }
+
+    function isInstitutionOverrideActive() {
+      return runtimeState().institutionMode in ["closed", "exam"];
+    }
+
+    function canStartZumreQueue() {
+      return isFreshRuntimeState()
+        && runtimeState().isZumreOpen == true
+        && runtimeState().isLunchBreak != true
+        && !isInstitutionOverrideActive();
+    }
+
+    function canStartStudySession() {
+      return isFreshRuntimeState()
+        && runtimeState().isStudyOpen == true
+        && !isInstitutionOverrideActive();
+    }
+
     // =========================================================
     // SETTINGS — ZÜMRE / ETÜT / ÖĞLE ARASI SAATLERİ
     // =========================================================
@@ -112,10 +140,12 @@ service cloud.firestore {
 
       allow create: if isStudent()
         && request.resource.data.studentId == request.auth.uid
-        && request.resource.data.status == "waiting";
+        && request.resource.data.status == "waiting"
+        && canStartZumreQueue();
 
       allow create: if isTeacher()
         && request.resource.data.teacherId == request.auth.uid
+        && canStartZumreQueue()
         && (
           request.resource.data.status == "waiting"
           || request.resource.data.status == "in_progress"
@@ -171,7 +201,8 @@ service cloud.firestore {
 
       allow create: if isStudyGuard()
         && request.resource.data.staffId == request.auth.uid
-        && request.resource.data.status == "active";
+        && request.resource.data.status == "active"
+        && canStartStudySession();
 
       allow update: if isStudyGuard()
         && resource.data.staffId == request.auth.uid

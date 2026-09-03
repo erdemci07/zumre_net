@@ -10,6 +10,7 @@ class TeacherHomeScreen extends StatefulWidget {
   @override
   State<TeacherHomeScreen> createState() => _TeacherHomeScreenState();
 }
+
 class _TimeTextInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -37,6 +38,7 @@ class _TimeTextInputFormatter extends TextInputFormatter {
     );
   }
 }
+
 class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -48,6 +50,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   bool _isZumreOpenNow = false;
   bool _isTeacherWorkingNow = false;
   bool _isLunchNow = false;
+  bool _isInstitutionBlockingZumre = false;
   String _zumreSlotText = '';
   String _nextZumreText = '';
   int? _zumreRemainingMinutes;
@@ -72,193 +75,222 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   bool _cachedZumreIsWeekend = false;
   static const Duration _runtimeStateMaxAge = Duration(minutes: 3);
 
-@override
-void initState() {
-  super.initState();
-  _initTeacherPage();
-}
+  @override
+  void initState() {
+    super.initState();
+    _initTeacherPage();
+  }
 
-Future<void> _initTeacherPage() async {
-  _listenTeacherInfo();
-  await _loadTeacherAvailability();
-  await _loadTodaySolvedCount();
-  _listenRuntimeScheduleState();
-  _zumrePillTimer = Timer.periodic(
-    const Duration(seconds: 30),
-    (_) => _refreshZumrePillFromCache(),
-  );
-}
+  Future<void> _initTeacherPage() async {
+    _listenTeacherInfo();
+    await _loadTeacherAvailability();
+    await _loadTodaySolvedCount();
+    _listenRuntimeScheduleState();
+    _zumrePillTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshZumrePillFromCache(),
+    );
+  }
+
   int _timeToMinutes(String time) {
-  final parts = time.split(':');
-  if (parts.length != 2) return 0;
+    final parts = time.split(':');
+    if (parts.length != 2) return 0;
 
-  final hour = int.tryParse(parts[0]) ?? 0;
-  final minute = int.tryParse(parts[1]) ?? 0;
+    final hour = int.tryParse(parts[0]) ?? 0;
+    final minute = int.tryParse(parts[1]) ?? 0;
 
-  return hour * 60 + minute;
-}
-
-String _dayKey(DateTime date) {
-  switch (date.weekday) {
-    case DateTime.monday:
-      return 'monday';
-    case DateTime.tuesday:
-      return 'tuesday';
-    case DateTime.wednesday:
-      return 'wednesday';
-    case DateTime.thursday:
-      return 'thursday';
-    case DateTime.friday:
-      return 'friday';
-    case DateTime.saturday:
-      return 'saturday';
-    case DateTime.sunday:
-      return 'sunday';
-    default:
-      return 'monday';
-  }
-}
-
-String _todayDateKey() {
-  final now = DateTime.now();
-  return '${now.year.toString().padLeft(4, '0')}-'
-      '${now.month.toString().padLeft(2, '0')}-'
-      '${now.day.toString().padLeft(2, '0')}';
-}
-
-bool _hasManualAbsentOverrideToday([String? dateKey]) {
-  return (dateKey ?? _manualAbsentDate) == _todayDateKey();
-}
-
-bool _isNowInSlots(
-  DateTime now,
-  List<Map<String, dynamic>> slots,
-) {
-  final nowMinutes = now.hour * 60 + now.minute;
-
-  for (final slot in slots) {
-    final start = _timeToMinutes('${slot['start']}');
-    final end = _timeToMinutes('${slot['end']}');
-
-    if (end <= start) {
-  continue;
-}
-
-if (nowMinutes >= start && nowMinutes < end) {
-  return true;
-}
+    return hour * 60 + minute;
   }
 
-  return false;
-}
-
-List<Map<String, dynamic>> _availabilitySlotsFromData(
-  Map<String, dynamic> data,
-  DateTime now,
-) {
-  final rawAvailability = data['weeklyAvailability'];
-  if (rawAvailability is! Map) return [];
-
-  final rawSlots = rawAvailability[_dayKey(now)];
-  if (rawSlots is! List) return [];
-
-  return rawSlots
-      .whereType<Map>()
-      .map((slot) => Map<String, dynamic>.from(slot))
-      .toList();
-}
-
-bool _isTeacherScheduledFromData(Map<String, dynamic> data, DateTime now) {
-  return _isNowInSlots(now, _availabilitySlotsFromData(data, now));
-}
-
-String _resolveBaseTeacherStatus(Map<String, dynamic> data) {
-  if (_hasManualAbsentOverrideToday(data['manualAbsentDate']?.toString())) {
-    return 'absent';
+  String _dayKey(DateTime date) {
+    switch (date.weekday) {
+      case DateTime.monday:
+        return 'monday';
+      case DateTime.tuesday:
+        return 'tuesday';
+      case DateTime.wednesday:
+        return 'wednesday';
+      case DateTime.thursday:
+        return 'thursday';
+      case DateTime.friday:
+        return 'friday';
+      case DateTime.saturday:
+        return 'saturday';
+      case DateTime.sunday:
+        return 'sunday';
+      default:
+        return 'monday';
+    }
   }
 
-  return _isTeacherScheduledFromData(data, DateTime.now())
-      ? 'available'
-      : 'absent';
-}
-
-String _resolveEffectiveTeacherStatus({
-  required Map<String, List<Map<String, String>>> weeklyAvailability,
-  required String currentStatus,
-  required String? manualAbsentDate,
-  required Timestamp? breakUntil,
-}) {
-  if (currentStatus == 'studyGuard') {
-    return 'studyGuard';
+  String _todayDateKey() {
+    final now = DateTime.now();
+    return '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
   }
 
-  if (_hasManualAbsentOverrideToday(manualAbsentDate)) {
-    return 'absent';
+  bool _hasManualAbsentOverrideToday([String? dateKey]) {
+    return (dateKey ?? _manualAbsentDate) == _todayDateKey();
   }
 
-  if (breakUntil != null && breakUntil.toDate().isAfter(DateTime.now())) {
-    return 'break';
-  }
+  bool _isNowInSlots(
+    DateTime now,
+    List<Map<String, dynamic>> slots,
+  ) {
+    final nowMinutes = now.hour * 60 + now.minute;
 
-  final now = DateTime.now();
-  final slots = (weeklyAvailability[_dayKey(now)] ?? [])
-      .map((slot) => Map<String, dynamic>.from(slot))
-      .toList();
+    for (final slot in slots) {
+      final start = _timeToMinutes('${slot['start']}');
+      final end = _timeToMinutes('${slot['end']}');
 
-  return _isNowInSlots(now, slots) ? 'available' : 'absent';
-}
+      if (end <= start) {
+        continue;
+      }
 
-int _breakRemainingMinutes(Timestamp? breakUntil) {
-  if (breakUntil == null) return 0;
+      if (nowMinutes >= start && nowMinutes < end) {
+        return true;
+      }
+    }
 
-  final seconds = breakUntil.toDate().difference(DateTime.now()).inSeconds;
-  if (seconds <= 0) return 0;
-
-  return (seconds / 60).ceil();
-}
-
-bool _sameTimestamp(Timestamp? first, Timestamp? second) {
-  if (first == null || second == null) return false;
-
-  return first.toDate().millisecondsSinceEpoch ==
-      second.toDate().millisecondsSinceEpoch;
-}
-
-bool _isFreshRuntimeState(Map<String, dynamic>? data) {
-  if (data == null ||
-      data['isZumreOpen'] is! bool ||
-      data['isLunchBreak'] is! bool ||
-      data['updatedAt'] is! Timestamp) {
     return false;
   }
 
-  final updatedAt = (data['updatedAt'] as Timestamp).toDate();
-  final age = DateTime.now().difference(updatedAt);
+  List<Map<String, dynamic>> _availabilitySlotsFromData(
+    Map<String, dynamic> data,
+    DateTime now,
+  ) {
+    final rawAvailability = data['weeklyAvailability'];
+    if (rawAvailability is! Map) return [];
 
-  return age >= Duration.zero && age <= _runtimeStateMaxAge;
-}
+    final rawSlots = rawAvailability[_dayKey(now)];
+    if (rawSlots is! List) return [];
 
-Map<String, bool>? _runtimeZumreState(Map<String, dynamic>? data) {
-  if (!_isFreshRuntimeState(data)) return null;
+    return rawSlots
+        .whereType<Map>()
+        .map((slot) => Map<String, dynamic>.from(slot))
+        .toList();
+  }
 
-  return {
-    'isZumreOpen': data!['isZumreOpen'] == true,
-    'isLunchBreak': data['isLunchBreak'] == true,
-  };
-}
+  bool _isTeacherScheduledFromData(Map<String, dynamic> data, DateTime now) {
+    return _isNowInSlots(now, _availabilitySlotsFromData(data, now));
+  }
 
-void _listenRuntimeScheduleState() {
-  _runtimeStateSubscription?.cancel();
-  _runtimeStateSubscription = _firestore
-      .collection('settings')
-      .doc('runtimeState')
-      .snapshots()
-      .listen((_) async {
-    await _checkScheduleAvailability();
-  }, onError: (_) async {
-    await _checkScheduleAvailability();
-  });
-}
+  String _resolveBaseTeacherStatus(Map<String, dynamic> data) {
+    if (_hasManualAbsentOverrideToday(data['manualAbsentDate']?.toString())) {
+      return 'absent';
+    }
+
+    return _isTeacherScheduledFromData(data, DateTime.now())
+        ? 'available'
+        : 'absent';
+  }
+
+  String _resolveEffectiveTeacherStatus({
+    required Map<String, List<Map<String, String>>> weeklyAvailability,
+    required String currentStatus,
+    required String? manualAbsentDate,
+    required Timestamp? breakUntil,
+  }) {
+    if (currentStatus == 'studyGuard') {
+      return 'studyGuard';
+    }
+
+    if (_hasManualAbsentOverrideToday(manualAbsentDate)) {
+      return 'absent';
+    }
+
+    if (breakUntil != null && breakUntil.toDate().isAfter(DateTime.now())) {
+      return 'break';
+    }
+
+    final now = DateTime.now();
+    final slots = (weeklyAvailability[_dayKey(now)] ?? [])
+        .map((slot) => Map<String, dynamic>.from(slot))
+        .toList();
+
+    return _isNowInSlots(now, slots) ? 'available' : 'absent';
+  }
+
+  int _breakRemainingMinutes(Timestamp? breakUntil) {
+    if (breakUntil == null) return 0;
+
+    final seconds = breakUntil.toDate().difference(DateTime.now()).inSeconds;
+    if (seconds <= 0) return 0;
+
+    return (seconds / 60).ceil();
+  }
+
+  bool _sameTimestamp(Timestamp? first, Timestamp? second) {
+    if (first == null || second == null) return false;
+
+    return first.toDate().millisecondsSinceEpoch ==
+        second.toDate().millisecondsSinceEpoch;
+  }
+
+  bool _isFreshRuntimeState(Map<String, dynamic>? data) {
+    if (data == null ||
+        data['isZumreOpen'] is! bool ||
+        data['isLunchBreak'] is! bool ||
+        data['updatedAt'] is! Timestamp) {
+      return false;
+    }
+
+    final updatedAt = (data['updatedAt'] as Timestamp).toDate();
+    final age = DateTime.now().difference(updatedAt);
+
+    return age >= Duration.zero && age <= _runtimeStateMaxAge;
+  }
+
+  String? _institutionBlockMessage(Map<String, dynamic>? data) {
+    if (data == null) return null;
+
+    final mode = '${data['institutionMode'] ?? 'active'}';
+    if (mode == 'closed' && data['closedDate'] == _todayDateKey()) {
+      return 'Kurum Kapalı';
+    }
+
+    final examEndsAt = data['examEndsAt'];
+    if (mode == 'exam' &&
+        examEndsAt is Timestamp &&
+        examEndsAt.toDate().isAfter(DateTime.now())) {
+      return 'Deneme modu aktif.';
+    }
+
+    return null;
+  }
+
+  Map<String, dynamic>? _runtimeZumreState(Map<String, dynamic>? data) {
+    final institutionMessage = _institutionBlockMessage(data);
+    if (institutionMessage != null) {
+      return {
+        'isZumreOpen': false,
+        'isLunchBreak': false,
+        'message': institutionMessage,
+      };
+    }
+
+    if (!_isFreshRuntimeState(data)) return null;
+
+    return {
+      'isZumreOpen': data!['isZumreOpen'] == true,
+      'isLunchBreak': data['isLunchBreak'] == true,
+      'message': null,
+    };
+  }
+
+  void _listenRuntimeScheduleState() {
+    _runtimeStateSubscription?.cancel();
+    _runtimeStateSubscription = _firestore
+        .collection('settings')
+        .doc('runtimeState')
+        .snapshots()
+        .listen((_) async {
+      await _checkScheduleAvailability();
+    }, onError: (_) async {
+      await _checkScheduleAvailability();
+    });
+  }
 
   @override
   void dispose() {
@@ -338,6 +370,7 @@ void _listenRuntimeScheduleState() {
   }
 
   void _refreshZumrePillFromCache() {
+    if (_isInstitutionBlockingZumre) return;
     if (_cachedZumreSlots.isEmpty || !mounted) return;
 
     final uiState = _zumreUiStateFromSlots(
@@ -351,22 +384,21 @@ void _listenRuntimeScheduleState() {
     setState(() {
       _isZumreOpenNow = isOpen;
       _zumreSlotText = isOpen ? uiState['slotText']?.toString() ?? '' : '';
-      _nextZumreText =
-          isOpen ? '' : uiState['nextZumreText']?.toString() ?? '';
+      _nextZumreText = isOpen ? '' : uiState['nextZumreText']?.toString() ?? '';
       _zumreRemainingMinutes =
           isOpen && remainingMinutes is int ? remainingMinutes : null;
     });
   }
 
- void _resetActiveQuestionTimer() {
-  _activeQuestionTimer?.cancel();
-  _activeQuestionTimer = null;
-  _activeTimerQueueId = null;
-  _activeTimerLimitMinutes = null;
-  _warnedQueueKey = null;
-  _isTimeDialogOpen = false;
-  _elapsedSeconds = 0;
-}
+  void _resetActiveQuestionTimer() {
+    _activeQuestionTimer?.cancel();
+    _activeQuestionTimer = null;
+    _activeTimerQueueId = null;
+    _activeTimerLimitMinutes = null;
+    _warnedQueueKey = null;
+    _isTimeDialogOpen = false;
+    _elapsedSeconds = 0;
+  }
 
   void _startActiveQuestionTimer({
     required String queueId,
@@ -390,13 +422,12 @@ void _listenRuntimeScheduleState() {
 
     final initialElapsed =
         DateTime.now().difference(startedAt.toDate()).inSeconds;
-        _elapsedSeconds = initialElapsed;
+    _elapsedSeconds = initialElapsed;
 
     _activeQuestionTimer = Timer.periodic(
       const Duration(seconds: 1),
       (_) {
-        final elapsed =
-            DateTime.now().difference(startedAt.toDate()).inSeconds;
+        final elapsed = DateTime.now().difference(startedAt.toDate()).inSeconds;
 
         if (mounted) {
           setState(() {
@@ -416,133 +447,134 @@ void _listenRuntimeScheduleState() {
       },
     );
   }
- Future<bool> _confirmAction({
-  required String title,
-  required String message,
-  required String confirmText,
-  IconData icon = Icons.help_outline,
-  Color color = Colors.green,
-}) async {
-  final result = await showDialog<bool>(
-    context: context,
-    barrierDismissible: false,
-    builder: (ctx) {
-      return Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF06312E),
-                Color(0xFF008A5C),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: Colors.white24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircleAvatar(
-                radius: 34,
-                backgroundColor: color.withOpacity(0.18),
-                child: Icon(icon, color: color, size: 36),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, height: 1.35),
-              ),
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Vazgeç'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: color,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: Text(confirmText),
-                    ),
-                  ),
+
+  Future<bool> _confirmAction({
+    required String title,
+    required String message,
+    required String confirmText,
+    IconData icon = Icons.help_outline,
+    Color color = Colors.green,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF06312E),
+                  Color(0xFF008A5C),
                 ],
               ),
-            ],
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 34,
+                  backgroundColor: color.withOpacity(0.18),
+                  child: Icon(icon, color: color, size: 36),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, height: 1.35),
+                ),
+                const SizedBox(height: 22),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Vazgeç'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: color,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: Text(confirmText),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
 
-  return result == true;
-}
-Future<void> _checkScheduleAvailability() async {
-  final now = DateTime.now();
-  final todayKey = _dayKey(now);
-  final isWeekend =
-      now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
-
-  final settingsDoc =
-      await _firestore.collection('settings').doc('zumreSchedule').get();
-
-  final settings = settingsDoc.data() ?? {};
-
-  final rawZumreSlots = isWeekend
-      ? List.from(settings['weekendSlots'] ?? [])
-      : List.from(settings['weekdaySlots'] ?? []);
-
-  final zumreSlots = rawZumreSlots
-      .map((e) => Map<String, dynamic>.from(e))
-      .toList();
-  _cachedZumreSlots = zumreSlots;
-  _cachedZumreIsWeekend = isWeekend;
-
-  final lunch = Map<String, dynamic>.from(settings['lunchBreak'] ?? {});
-
-  final teacherSlots = (_weeklyAvailability[todayKey] ?? [])
-      .map((e) => Map<String, dynamic>.from(e))
-      .toList();
-
-  final zumreUiState = _zumreUiStateFromSlots(now, zumreSlots, isWeekend);
-  final isZumreOpen = zumreUiState['isZumreOpen'] == true;
-  final isTeacherWorking = _isNowInSlots(now, teacherSlots);
-
-  bool isLunch = false;
-  if (lunch.isNotEmpty) {
-    isLunch = _isNowInSlots(now, [
-      {
-        'start': lunch['start'] ?? '12:20',
-        'end': lunch['end'] ?? '13:00',
-      }
-    ]);
+    return result == true;
   }
 
-  var effectiveZumreOpen = isZumreOpen;
-  var effectiveLunch = isLunch;
+  Future<void> _checkScheduleAvailability() async {
+    final now = DateTime.now();
+    final todayKey = _dayKey(now);
+    final isWeekend =
+        now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
 
-  if (!settingsDoc.exists) {
+    final settingsDoc =
+        await _firestore.collection('settings').doc('zumreSchedule').get();
+
+    final settings = settingsDoc.data() ?? {};
+
+    final rawZumreSlots = isWeekend
+        ? List.from(settings['weekendSlots'] ?? [])
+        : List.from(settings['weekdaySlots'] ?? []);
+
+    final zumreSlots =
+        rawZumreSlots.map((e) => Map<String, dynamic>.from(e)).toList();
+    _cachedZumreSlots = zumreSlots;
+    _cachedZumreIsWeekend = isWeekend;
+
+    final lunch = Map<String, dynamic>.from(settings['lunchBreak'] ?? {});
+
+    final teacherSlots = (_weeklyAvailability[todayKey] ?? [])
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+
+    final zumreUiState = _zumreUiStateFromSlots(now, zumreSlots, isWeekend);
+    final isZumreOpen = zumreUiState['isZumreOpen'] == true;
+    final isTeacherWorking = _isNowInSlots(now, teacherSlots);
+
+    bool isLunch = false;
+    if (lunch.isNotEmpty) {
+      isLunch = _isNowInSlots(now, [
+        {
+          'start': lunch['start'] ?? '12:20',
+          'end': lunch['end'] ?? '13:00',
+        }
+      ]);
+    }
+
+    var effectiveZumreOpen = isZumreOpen;
+    var effectiveLunch = isLunch;
+    String? runtimeMessage;
+
     try {
       final runtimeDoc =
           await _firestore.collection('settings').doc('runtimeState').get();
@@ -551,409 +583,442 @@ Future<void> _checkScheduleAvailability() async {
       if (runtimeState != null) {
         effectiveZumreOpen = runtimeState['isZumreOpen'] ?? isZumreOpen;
         effectiveLunch = runtimeState['isLunchBreak'] ?? isLunch;
+        runtimeMessage = runtimeState['message']?.toString();
       }
     } catch (_) {}
+
+    String message;
+
+    if (runtimeMessage != null) {
+      message = runtimeMessage;
+    } else if (!effectiveZumreOpen) {
+      message = 'Şu an zümre saati aktif değil.';
+    } else if (effectiveLunch) {
+      message = 'Şu an öğle arası.';
+    } else if (!isTeacherWorking) {
+      message = 'Bugün çalışma programınıza göre kurumda değilsiniz.';
+    } else if (_teacherStatus == 'absent') {
+      message = 'Kurumda değil olarak görünüyorsunuz.';
+    } else if (_teacherStatus == 'break') {
+      message = 'Şu an moladasınız.';
+    } else {
+      message = 'Zümre saati aktif. Öğrenci ekleyebilirsiniz.';
+    }
+
+    if (!mounted) return;
+
+    final remainingMinutes = zumreUiState['remainingMinutes'];
+
+    setState(() {
+      _isInstitutionBlockingZumre = runtimeMessage != null;
+      _isZumreOpenNow = effectiveZumreOpen;
+      _isTeacherWorkingNow = isTeacherWorking;
+      _isLunchNow = effectiveLunch;
+      _zumreSlotText =
+          effectiveZumreOpen ? zumreUiState['slotText']?.toString() ?? '' : '';
+      _nextZumreText = effectiveZumreOpen
+          ? ''
+          : zumreUiState['nextZumreText']?.toString() ?? '';
+      _zumreRemainingMinutes = effectiveZumreOpen && remainingMinutes is int
+          ? remainingMinutes
+          : null;
+      _scheduleMessage = message;
+    });
   }
 
-  String message;
+  Future<void> _showAvailabilityDialog() async {
+    final days = {
+      'monday': 'Pazartesi',
+      'tuesday': 'Salı',
+      'wednesday': 'Çarşamba',
+      'thursday': 'Perşembe',
+      'friday': 'Cuma',
+      'saturday': 'Cumartesi',
+      'sunday': 'Pazar',
+    };
 
-  if (!effectiveZumreOpen) {
-    message = 'Şu an zümre saati aktif değil.';
-  } else if (effectiveLunch) {
-    message = 'Şu an öğle arası.';
-} else if (!isTeacherWorking) {
-  message = 'Bugün çalışma programınıza göre kurumda değilsiniz.';
-} else if (_teacherStatus == 'absent') {
-    message = 'Kurumda değil olarak görünüyorsunuz.';
-  } else if (_teacherStatus == 'break') {
-    message = 'Şu an moladasınız.';
-  } else {
-    message = 'Zümre saati aktif. Öğrenci ekleyebilirsiniz.';
-  }
+    final temp = <String, List<Map<String, String>>>{};
 
-  if (!mounted) return;
+    for (final key in days.keys) {
+      temp[key] = List<Map<String, String>>.from(
+        (_weeklyAvailability[key] ?? []).map(
+          (e) => {
+            'start': e['start'] ?? '09:00',
+            'end': e['end'] ?? '17:00',
+          },
+        ),
+      );
+    }
 
-final remainingMinutes = zumreUiState['remainingMinutes'];
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 560),
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFF06312E),
+                      Color(0xFF008A5C),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Kurumda Bulunduğum Saatler',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Hangi gün ve saat aralıklarında kurumda olduğunuzu belirtin.',
+                        style: TextStyle(color: Colors.white60),
+                      ),
+                      const SizedBox(height: 18),
+                      ...days.entries.map((day) {
+                        final slots = temp[day.key] ?? [];
 
-setState(() {
-  _isZumreOpenNow = effectiveZumreOpen;
-  _isTeacherWorkingNow = isTeacherWorking;
-  _isLunchNow = effectiveLunch;
-  _zumreSlotText =
-      effectiveZumreOpen ? zumreUiState['slotText']?.toString() ?? '' : '';
-  _nextZumreText =
-      effectiveZumreOpen ? '' : zumreUiState['nextZumreText']?.toString() ?? '';
-  _zumreRemainingMinutes =
-      effectiveZumreOpen && remainingMinutes is int ? remainingMinutes : null;
-  _scheduleMessage = message;
-});
-}
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      day.value,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    onPressed: () {
+                                      setDialogState(() {
+                                        temp[day.key]!.add({
+                                          'start': '09:00',
+                                          'end': '17:00',
+                                        });
+                                      });
+                                    },
+                                    icon: const Icon(
+                                      Icons.add_circle,
+                                      color: Colors.greenAccent,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (slots.isEmpty)
+                                const Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    'Bu gün kurumda değilim.',
+                                    style: TextStyle(color: Colors.white54),
+                                  ),
+                                )
+                              else
+                                ...List.generate(slots.length, (index) {
+                                  final slot = slots[index];
 
-Future<void> _showAvailabilityDialog() async {
-  final days = {
-    'monday': 'Pazartesi',
-    'tuesday': 'Salı',
-    'wednesday': 'Çarşamba',
-    'thursday': 'Perşembe',
-    'friday': 'Cuma',
-    'saturday': 'Cumartesi',
-    'sunday': 'Pazar',
-  };
+                                  return Row(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            const Padding(
+                                              padding: EdgeInsets.only(
+                                                  left: 14, bottom: 6),
+                                              child: Text(
+                                                'Başlangıç',
+                                                style: TextStyle(
+                                                  color: Colors.white60,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                            TextFormField(
+                                              initialValue: slot['start'],
+                                              keyboardType:
+                                                  TextInputType.number,
+                                              inputFormatters: [
+                                                FilteringTextInputFormatter
+                                                    .digitsOnly,
+                                                LengthLimitingTextInputFormatter(
+                                                    4),
+                                                _TimeTextInputFormatter(),
+                                              ],
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 17,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                              decoration: InputDecoration(
+                                                hintText: '09:00',
+                                                hintStyle: const TextStyle(
+                                                    color: Colors.white38),
+                                                filled: true,
+                                                fillColor: Colors.white
+                                                    .withOpacity(0.09),
+                                                contentPadding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 16,
+                                                  vertical: 17,
+                                                ),
+                                                border: OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(18),
+                                                  borderSide: BorderSide.none,
+                                                ),
+                                                enabledBorder:
+                                                    OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(18),
+                                                  borderSide: BorderSide(
+                                                    color: Colors.white
+                                                        .withOpacity(0.08),
+                                                  ),
+                                                ),
+                                                focusedBorder:
+                                                    OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(18),
+                                                  borderSide: const BorderSide(
+                                                    color: Colors.greenAccent,
+                                                    width: 1.3,
+                                                  ),
+                                                ),
+                                              ),
+                                              onChanged: (value) {
+                                                slot['start'] = value;
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            const Padding(
+                                              padding: EdgeInsets.only(
+                                                  left: 14, bottom: 6),
+                                              child: Text(
+                                                'Bitiş',
+                                                style: TextStyle(
+                                                  color: Colors.white60,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                            TextFormField(
+                                              initialValue: slot['end'],
+                                              keyboardType:
+                                                  TextInputType.number,
+                                              inputFormatters: [
+                                                FilteringTextInputFormatter
+                                                    .digitsOnly,
+                                                LengthLimitingTextInputFormatter(
+                                                    4),
+                                                _TimeTextInputFormatter(),
+                                              ],
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 17,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                              decoration: InputDecoration(
+                                                hintText: '17:00',
+                                                hintStyle: const TextStyle(
+                                                    color: Colors.white38),
+                                                filled: true,
+                                                fillColor: Colors.white
+                                                    .withOpacity(0.09),
+                                                contentPadding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 16,
+                                                  vertical: 17,
+                                                ),
+                                                border: OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(18),
+                                                  borderSide: BorderSide.none,
+                                                ),
+                                                enabledBorder:
+                                                    OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(18),
+                                                  borderSide: BorderSide(
+                                                    color: Colors.white
+                                                        .withOpacity(0.08),
+                                                  ),
+                                                ),
+                                                focusedBorder:
+                                                    OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(18),
+                                                  borderSide: const BorderSide(
+                                                    color: Colors.greenAccent,
+                                                    width: 1.3,
+                                                  ),
+                                                ),
+                                              ),
+                                              onChanged: (value) {
+                                                slot['end'] = value;
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      IconButton(
+                                        onPressed: () {
+                                          setDialogState(() {
+                                            temp[day.key]!.removeAt(index);
+                                          });
+                                        },
+                                        icon: const Icon(
+                                          Icons.delete_outline,
+                                          color: Colors.redAccent,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }),
+                            ],
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text('Vazgeç'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                final uid = _auth.currentUser!.uid;
+                                final nextStatus =
+                                    _resolveEffectiveTeacherStatus(
+                                  weeklyAvailability: temp,
+                                  currentStatus: _teacherStatus,
+                                  manualAbsentDate: _manualAbsentDate,
+                                  breakUntil: _breakUntil,
+                                );
+                                final updateData = <String, dynamic>{
+                                  'weeklyAvailability': temp,
+                                  'updatedAt': FieldValue.serverTimestamp(),
+                                };
 
-  final temp = <String, List<Map<String, String>>>{};
+                                if (nextStatus != 'studyGuard') {
+                                  updateData['teacherStatus'] = nextStatus;
+                                }
 
-  for (final key in days.keys) {
-    temp[key] = List<Map<String, String>>.from(
-      (_weeklyAvailability[key] ?? []).map(
-        (e) => {
-          'start': e['start'] ?? '09:00',
-          'end': e['end'] ?? '17:00',
-        },
-      ),
+                                if (_breakUntil != null &&
+                                    !_breakUntil!
+                                        .toDate()
+                                        .isAfter(DateTime.now())) {
+                                  updateData['breakUntil'] =
+                                      FieldValue.delete();
+                                }
+
+                                await _firestore
+                                    .collection('users')
+                                    .doc(uid)
+                                    .update(updateData);
+
+                                if (!mounted) return;
+
+                                setState(() {
+                                  _weeklyAvailability = temp;
+                                  if (nextStatus != 'studyGuard') {
+                                    _teacherStatus = nextStatus;
+                                  }
+                                });
+                                await _checkScheduleAvailability();
+
+                                if (ctx.mounted) Navigator.pop(ctx);
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Kurum saatleriniz güncellendi'),
+                                  ),
+                                );
+                              },
+                              child: const Text('Kaydet'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
-  await showDialog(
-    context: context,
-    builder: (ctx) {
-      return StatefulBuilder(
-        builder: (context, setDialogState) {
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 560),
-              padding: const EdgeInsets.all(22),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFF06312E),
-                    Color(0xFF008A5C),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Kurumda Bulunduğum Saatler',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Hangi gün ve saat aralıklarında kurumda olduğunuzu belirtin.',
-                      style: TextStyle(color: Colors.white60),
-                    ),
-                    const SizedBox(height: 18),
+  Future<void> _loadTeacherAvailability() async {
+    final uid = _auth.currentUser!.uid;
+    final doc = await _firestore.collection('users').doc(uid).get();
 
-                    ...days.entries.map((day) {
-                      final slots = temp[day.key] ?? [];
+    final data = doc.data();
+    final raw = Map<String, dynamic>.from(data?['weeklyAvailability'] ?? {});
 
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    day.value,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ),
-                                IconButton(
-                                  onPressed: () {
-                                    setDialogState(() {
-                                      temp[day.key]!.add({
-                                        'start': '09:00',
-                                        'end': '17:00',
-                                      });
-                                    });
-                                  },
-                                  icon: const Icon(
-                                    Icons.add_circle,
-                                    color: Colors.greenAccent,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (slots.isEmpty)
-                              const Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  'Bu gün kurumda değilim.',
-                                  style: TextStyle(color: Colors.white54),
-                                ),
-                              )
-                            else
-                              ...List.generate(slots.length, (index) {
-                                final slot = slots[index];
+    final parsed = <String, List<Map<String, String>>>{};
 
-                                return Row(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          const Padding(
-                                            padding: EdgeInsets.only(left: 14, bottom: 6),
-                                            child: Text(
-                                              'Başlangıç',
-                                              style: TextStyle(
-                                                color: Colors.white60,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                          TextFormField(
-                                            initialValue: slot['start'],
-                                            keyboardType: TextInputType.number,
-                                            inputFormatters: [
-                                              FilteringTextInputFormatter.digitsOnly,
-                                              LengthLimitingTextInputFormatter(4),
-                                              _TimeTextInputFormatter(),
-                                            ],
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 17,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                            decoration: InputDecoration(
-                                              hintText: '09:00',
-                                              hintStyle: const TextStyle(color: Colors.white38),
-                                              filled: true,
-                                              fillColor: Colors.white.withOpacity(0.09),
-                                              contentPadding: const EdgeInsets.symmetric(
-                                                horizontal: 16,
-                                                vertical: 17,
-                                              ),
-                                              border: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(18),
-                                                borderSide: BorderSide.none,
-                                              ),
-                                              enabledBorder: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(18),
-                                                borderSide: BorderSide(
-                                                  color: Colors.white.withOpacity(0.08),
-                                                ),
-                                              ),
-                                              focusedBorder: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(18),
-                                                borderSide: const BorderSide(
-                                                  color: Colors.greenAccent,
-                                                  width: 1.3,
-                                                ),
-                                              ),
-                                            ),
-                                            onChanged: (value) {
-                                              slot['start'] = value;
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                    ),
+    for (final entry in raw.entries) {
+      final list = List.from(entry.value ?? []);
+      parsed[entry.key] = list.map((e) {
+        final item = Map<String, dynamic>.from(e);
+        return {
+          'start': '${item['start']}',
+          'end': '${item['end']}',
+        };
+      }).toList();
+    }
 
-                                    const SizedBox(width: 10),
+    if (!mounted) return;
 
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          const Padding(
-                                            padding: EdgeInsets.only(left: 14, bottom: 6),
-                                            child: Text(
-                                              'Bitiş',
-                                              style: TextStyle(
-                                                color: Colors.white60,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                          TextFormField(
-                                            initialValue: slot['end'],
-                                            keyboardType: TextInputType.number,
-                                            inputFormatters: [
-                                              FilteringTextInputFormatter.digitsOnly,
-                                              LengthLimitingTextInputFormatter(4),
-                                              _TimeTextInputFormatter(),
-                                            ],
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 17,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                            decoration: InputDecoration(
-                                              hintText: '17:00',
-                                              hintStyle: const TextStyle(color: Colors.white38),
-                                              filled: true,
-                                              fillColor: Colors.white.withOpacity(0.09),
-                                              contentPadding: const EdgeInsets.symmetric(
-                                                horizontal: 16,
-                                                vertical: 17,
-                                              ),
-                                              border: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(18),
-                                                borderSide: BorderSide.none,
-                                              ),
-                                              enabledBorder: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(18),
-                                                borderSide: BorderSide(
-                                                  color: Colors.white.withOpacity(0.08),
-                                                ),
-                                              ),
-                                              focusedBorder: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(18),
-                                                borderSide: const BorderSide(
-                                                  color: Colors.greenAccent,
-                                                  width: 1.3,
-                                                ),
-                                              ),
-                                            ),
-                                            onChanged: (value) {
-                                              slot['end'] = value;
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-
-                                    IconButton(
-                                      onPressed: () {
-                                        setDialogState(() {
-                                          temp[day.key]!.removeAt(index);
-                                        });
-                                      },
-                                      icon: const Icon(
-                                        Icons.delete_outline,
-                                        color: Colors.redAccent,
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              }),
-                          ],
-                        ),
-                      );
-                    }),
-
-                    const SizedBox(height: 16),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text('Vazgeç'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              final uid = _auth.currentUser!.uid;
-                              final nextStatus = _resolveEffectiveTeacherStatus(
-                                weeklyAvailability: temp,
-                                currentStatus: _teacherStatus,
-                                manualAbsentDate: _manualAbsentDate,
-                                breakUntil: _breakUntil,
-                              );
-                              final updateData = <String, dynamic>{
-                                'weeklyAvailability': temp,
-                                'updatedAt': FieldValue.serverTimestamp(),
-                              };
-
-                              if (nextStatus != 'studyGuard') {
-                                updateData['teacherStatus'] = nextStatus;
-                              }
-
-                              if (_breakUntil != null &&
-                                  !_breakUntil!.toDate().isAfter(DateTime.now())) {
-                                updateData['breakUntil'] = FieldValue.delete();
-                              }
-
-                              await _firestore
-                                  .collection('users')
-                                  .doc(uid)
-                                  .update(updateData);
-
-                              if (!mounted) return;
-
-                              setState(() {
-                                _weeklyAvailability = temp;
-                                if (nextStatus != 'studyGuard') {
-                                  _teacherStatus = nextStatus;
-                                }
-                              });
-                              await _checkScheduleAvailability();
-
-                              if (ctx.mounted) Navigator.pop(ctx);
-
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Kurum saatleriniz güncellendi'),
-                                ),
-                              );
-                            },
-                            child: const Text('Kaydet'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      );
-    },
-  );
-}
-Future<void> _loadTeacherAvailability() async {
-  final uid = _auth.currentUser!.uid;
-  final doc = await _firestore.collection('users').doc(uid).get();
-
-  final data = doc.data();
-  final raw = Map<String, dynamic>.from(data?['weeklyAvailability'] ?? {});
-
-  final parsed = <String, List<Map<String, String>>>{};
-
-  for (final entry in raw.entries) {
-    final list = List.from(entry.value ?? []);
-    parsed[entry.key] = list.map((e) {
-      final item = Map<String, dynamic>.from(e);
-      return {
-        'start': '${item['start']}',
-        'end': '${item['end']}',
-      };
-    }).toList();
+    setState(() {
+      _weeklyAvailability = parsed;
+    });
   }
-
-  if (!mounted) return;
-
-  setState(() {
-    _weeklyAvailability = parsed;
-  });
-}
 
   Future<void> _showTimeExceededDialog(String queueId) async {
     if (!mounted) return;
@@ -1055,14 +1120,12 @@ Future<void> _loadTeacherAvailability() async {
                       if (ctx.mounted) Navigator.pop(ctx);
                       await _markAsSolved(queueId);
                     },
-                    
                     icon: const Icon(Icons.check),
                     label: const Text('Çözüldü'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       foregroundColor: Colors.white,
                     ),
-                    
                   ),
                 ),
               ],
@@ -1070,10 +1133,7 @@ Future<void> _loadTeacherAvailability() async {
           ),
         );
       },
-      
     );
-    
-    
 
     _isTimeDialogOpen = false;
   }
@@ -1183,30 +1243,29 @@ Future<void> _loadTeacherAvailability() async {
     _teacherSubscription?.cancel();
     _teacherSubscription =
         _firestore.collection('users').doc(uid).snapshots().listen((doc) {
+      if (!doc.exists || !mounted) return;
 
-    if (!doc.exists || !mounted) return;
+      final data = doc.data();
 
-    final data = doc.data();
+      String? subject;
+      if (data?['subjects'] is List && data!['subjects'].isNotEmpty) {
+        subject = data['subjects'][0];
+      } else if (data?['subject'] != null) {
+        subject = data?['subject'];
+      }
 
-    String? subject;
-    if (data?['subjects'] is List && data!['subjects'].isNotEmpty) {
-      subject = data['subjects'][0];
-    } else if (data?['subject'] != null) {
-      subject = data?['subject'];
-    }
+      setState(() {
+        _teacherName = data?['name'] ?? data?['email'] ?? 'Öğretmen';
+        _teacherSubject = subject ?? 'Ders';
+        _teacherStatus = data?['teacherStatus'] ?? 'available';
+        _manualAbsentDate = data?['manualAbsentDate']?.toString();
+        _breakUntil = data?['breakUntil'] is Timestamp
+            ? data!['breakUntil'] as Timestamp
+            : null;
+      });
 
-    setState(() {
-      _teacherName = data?['name'] ?? data?['email'] ?? 'Öğretmen';
-      _teacherSubject = subject ?? 'Ders';
-      _teacherStatus = data?['teacherStatus'] ?? 'available';
-      _manualAbsentDate = data?['manualAbsentDate']?.toString();
-      _breakUntil = data?['breakUntil'] is Timestamp
-          ? data!['breakUntil'] as Timestamp
-          : null;
-    });
-
-    _configureBreakCountdown();
-    _checkScheduleAvailability();
+      _configureBreakCountdown();
+      _checkScheduleAvailability();
     });
   }
 
@@ -1446,17 +1505,15 @@ Future<void> _loadTeacherAvailability() async {
   Future<void> _showAddStudentDialog() async {
     await _checkScheduleAvailability();
 
-final canAddStudent =
-    _teacherStatus == 'available' &&
-    _isZumreOpenNow &&
-    !_isLunchNow;
+    final canAddStudent =
+        _teacherStatus == 'available' && _isZumreOpenNow && !_isLunchNow;
 
-if (!canAddStudent) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(_scheduleMessage)),
-  );
-  return;
-}
+    if (!canAddStudent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_scheduleMessage)),
+      );
+      return;
+    }
     String? selectedStudentId;
     String? selectedStudentName;
     String searchText = '';
@@ -1466,14 +1523,12 @@ if (!canAddStudent) {
         .snapshots();
     final activeQueuesStream = _firestore
         .collection('queues')
-        .where('status', whereIn: ['waiting', 'in_progress'])
-        .snapshots();
+        .where('status', whereIn: ['waiting', 'in_progress']).snapshots();
 
     await showDialog(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
-          
           builder: (context, setDialogState) {
             return Dialog(
               backgroundColor: Colors.transparent,
@@ -1534,272 +1589,284 @@ if (!canAddStudent) {
                     ),
                     const SizedBox(height: 18),
                     TextField(
-  style: const TextStyle(color: Colors.white),
-  decoration: InputDecoration(
-    hintText: 'Öğrenci ara...',
-    hintStyle: const TextStyle(color: Colors.white54),
-    prefixIcon: const Icon(Icons.search, color: Colors.white70),
-    filled: true,
-    fillColor: Colors.white.withOpacity(0.10),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(18),
-      borderSide: BorderSide.none,
-    ),
-  ),
-  onChanged: (value) {
-    setDialogState(() {
-      searchText = value;
-      selectedStudentId = null;
-      selectedStudentName = null;
-    });
-  },
-),
-
-const SizedBox(height: 12),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Öğrenci ara...',
+                        hintStyle: const TextStyle(color: Colors.white54),
+                        prefixIcon:
+                            const Icon(Icons.search, color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          searchText = value;
+                          selectedStudentId = null;
+                          selectedStudentName = null;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
                     Container(
-  height: 320,
-  decoration: BoxDecoration(
-    color: Colors.white.withOpacity(0.08),
-    borderRadius: BorderRadius.circular(18),
-    border: Border.all(color: Colors.white12),
-  ),
-  child: StreamBuilder<QuerySnapshot>(
-    stream: studentsStream,
-    builder: (context, studentsSnapshot) {
-      if (studentsSnapshot.hasError) {
-        return Text(
-          'Öğrenciler yüklenemedi: ${studentsSnapshot.error}',
-          style: const TextStyle(color: Colors.redAccent),
-        );
-      }
+                      height: 320,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: StreamBuilder<QuerySnapshot>(
+                        stream: studentsStream,
+                        builder: (context, studentsSnapshot) {
+                          if (studentsSnapshot.hasError) {
+                            return Text(
+                              'Öğrenciler yüklenemedi: ${studentsSnapshot.error}',
+                              style: const TextStyle(color: Colors.redAccent),
+                            );
+                          }
 
-      if (!studentsSnapshot.hasData) {
-        return const Center(child: CircularProgressIndicator());
-      }
+                          if (!studentsSnapshot.hasData) {
+                            return const Center(
+                                child: CircularProgressIndicator());
+                          }
 
-      return StreamBuilder<QuerySnapshot>(
-        stream: activeQueuesStream,
-        builder: (context, queuesSnapshot) {
-          if (queuesSnapshot.hasError) {
-            return Text(
-              'Sıra bilgisi yüklenemedi: ${queuesSnapshot.error}',
-              style: const TextStyle(color: Colors.redAccent),
-            );
-          }
+                          return StreamBuilder<QuerySnapshot>(
+                            stream: activeQueuesStream,
+                            builder: (context, queuesSnapshot) {
+                              if (queuesSnapshot.hasError) {
+                                return Text(
+                                  'Sıra bilgisi yüklenemedi: ${queuesSnapshot.error}',
+                                  style:
+                                      const TextStyle(color: Colors.redAccent),
+                                );
+                              }
 
-          if (!queuesSnapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+                              if (!queuesSnapshot.hasData) {
+                                return const Center(
+                                    child: CircularProgressIndicator());
+                              }
 
-          final activeStudentIds = queuesSnapshot.data!.docs
-              .map((doc) =>
-                  (doc.data() as Map<String, dynamic>)['studentId'])
-              .where((id) => id != null)
-              .toSet();
-          final now = DateTime.now();
-          final filteredStudents = studentsSnapshot.data!.docs.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
+                              final activeStudentIds = queuesSnapshot.data!.docs
+                                  .map((doc) => (doc.data()
+                                      as Map<String, dynamic>)['studentId'])
+                                  .where((id) => id != null)
+                                  .toSet();
+                              final now = DateTime.now();
+                              final filteredStudents =
+                                  studentsSnapshot.data!.docs.where((doc) {
+                                final data = doc.data() as Map<String, dynamic>;
 
-            final cooldownUntil = data['cooldownUntil'] as Timestamp?;
-            final isInCooldown =
-                cooldownUntil != null && cooldownUntil.toDate().isAfter(now);
-            final isInActiveQueue = activeStudentIds.contains(doc.id);
-            final isInStudySession = data['isInStudySession'] == true;
+                                final cooldownUntil =
+                                    data['cooldownUntil'] as Timestamp?;
+                                final isInCooldown = cooldownUntil != null &&
+                                    cooldownUntil.toDate().isAfter(now);
+                                final isInActiveQueue =
+                                    activeStudentIds.contains(doc.id);
+                                final isInStudySession =
+                                    data['isInStudySession'] == true;
 
-            if (isInActiveQueue || isInCooldown || isInStudySession) {
-              return false;
-            }
+                                if (isInActiveQueue ||
+                                    isInCooldown ||
+                                    isInStudySession) {
+                                  return false;
+                                }
 
-            final name =
-                (data['fullName'] ?? data['name'] ?? data['email'] ?? '')
-                    .toString()
-                    .toLowerCase();
-            final username = (data['username'] ?? '')
-                .toString()
-                .toLowerCase();
-            final query = searchText.toLowerCase().trim();
+                                final name = (data['fullName'] ??
+                                        data['name'] ??
+                                        data['email'] ??
+                                        '')
+                                    .toString()
+                                    .toLowerCase();
+                                final username = (data['username'] ?? '')
+                                    .toString()
+                                    .toLowerCase();
+                                final query = searchText.toLowerCase().trim();
 
-            return query.isEmpty ||
-                name.contains(query) ||
-                username.contains(query);
-          }).toList();
+                                return query.isEmpty ||
+                                    name.contains(query) ||
+                                    username.contains(query);
+                              }).toList();
 
-          final selectedStillVisible = selectedStudentId == null ||
-              filteredStudents.any((doc) => doc.id == selectedStudentId);
+                              final selectedStillVisible =
+                                  selectedStudentId == null ||
+                                      filteredStudents.any(
+                                          (doc) => doc.id == selectedStudentId);
 
-          if (!selectedStillVisible) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              setDialogState(() {
-                selectedStudentId = null;
-                selectedStudentName = null;
-              });
-            });
-          }
+                              if (!selectedStillVisible) {
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  setDialogState(() {
+                                    selectedStudentId = null;
+                                    selectedStudentName = null;
+                                  });
+                                });
+                              }
 
-          if (filteredStudents.isEmpty) {
-            return const Center(
-              child: Text(
-                'Öğrenci bulunamadı',
-                style: TextStyle(color: Colors.white60),
-              ),
-            );
-          }
+                              if (filteredStudents.isEmpty) {
+                                return const Center(
+                                  child: Text(
+                                    'Öğrenci bulunamadı',
+                                    style: TextStyle(color: Colors.white60),
+                                  ),
+                                );
+                              }
 
-          return ListView.builder(
-            itemCount: filteredStudents.length,
-            itemBuilder: (context, index) {
-              final doc = filteredStudents[index];
-              final data = doc.data() as Map<String, dynamic>;
+                              return ListView.builder(
+                                itemCount: filteredStudents.length,
+                                itemBuilder: (context, index) {
+                                  final doc = filteredStudents[index];
+                                  final data =
+                                      doc.data() as Map<String, dynamic>;
 
-            final fullName =
-                data['fullName'] ??
-                data['name'] ??
-                data['email'] ??
-                'Öğrenci';
+                                  final fullName = data['fullName'] ??
+                                      data['name'] ??
+                                      data['email'] ??
+                                      'Öğrenci';
 
-            final className = data['className'] ?? '';
-            final department = data['department'] ?? '';
-            final selected = selectedStudentId == doc.id;
+                                  final className = data['className'] ?? '';
+                                  final department = data['department'] ?? '';
+                                  final selected = selectedStudentId == doc.id;
 
-            return ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.green,
-                child: const Icon(
-                  Icons.person,
-                  color: Colors.white,
-                ),
-              ),
-              title: Text(
-                fullName,
-                style: const TextStyle(color: Colors.white),
-              ),
-              subtitle: Text(
-                '$className • $department',
-                style: const TextStyle(
-                  color: Colors.white60,
-                  fontSize: 12,
-                ),
-              ),
-              trailing: selected
-                  ? const Icon(
-                      Icons.check_circle,
-                      color: Colors.greenAccent,
-                    )
-                  : null,
-              selected: selected,
-              onTap: () {
-                setDialogState(() {
-                  selectedStudentId = doc.id;
-                  selectedStudentName = fullName;
-                });
-              },
-            );
-          },
-        );
-        },
-      );
-    },
-  ),
-      ),
-      const SizedBox(height: 22),
-      SizedBox(
-        width: double.infinity,
-        height: 54,
+                                  return ListTile(
+                                    leading: CircleAvatar(
+                                      backgroundColor: Colors.green,
+                                      child: const Icon(
+                                        Icons.person,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    title: Text(
+                                      fullName,
+                                      style:
+                                          const TextStyle(color: Colors.white),
+                                    ),
+                                    subtitle: Text(
+                                      '$className • $department',
+                                      style: const TextStyle(
+                                        color: Colors.white60,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    trailing: selected
+                                        ? const Icon(
+                                            Icons.check_circle,
+                                            color: Colors.greenAccent,
+                                          )
+                                        : null,
+                                    selected: selected,
+                                    onTap: () {
+                                      setDialogState(() {
+                                        selectedStudentId = doc.id;
+                                        selectedStudentName = fullName;
+                                      });
+                                    },
+                                  );
+                                },
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 54,
                       child: ElevatedButton.icon(
                         onPressed: selectedStudentId == null
                             ? null
-                              : () async {
-                                  try {
-                                    final teacherId = _auth.currentUser!.uid;
-                                    final selectedId = selectedStudentId;
+                            : () async {
+                                try {
+                                  final teacherId = _auth.currentUser!.uid;
+                                  final selectedId = selectedStudentId;
 
-                                    if (selectedId == null) return;
+                                  if (selectedId == null) return;
 
-                                    await _checkScheduleAvailability();
+                                  await _checkScheduleAvailability();
 
-                                    if (_teacherStatus != 'available' ||
-                                        !_isZumreOpenNow ||
-                                        _isLunchNow) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text(_scheduleMessage)),
-                                      );
-                                      return;
-                                    }
+                                  if (_teacherStatus != 'available' ||
+                                      !_isZumreOpenNow ||
+                                      _isLunchNow) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text(_scheduleMessage)),
+                                    );
+                                    return;
+                                  }
 
-                                    final teacherDoc = await _firestore
-                                        .collection('users')
-                                        .doc(teacherId)
-                                        .get();
-                                    final teacherData =
-                                        teacherDoc.data() ?? {};
+                                  final teacherDoc = await _firestore
+                                      .collection('users')
+                                      .doc(teacherId)
+                                      .get();
+                                  final teacherData = teacherDoc.data() ?? {};
 
-                                    if (!teacherDoc.exists ||
-                                        teacherData['teacherStatus']
-                                                ?.toString()
-                                                .trim() !=
-                                            'available') {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Durumunuz müsait değil. Öğrenci sıraya eklenemedi.',
-                                          ),
+                                  if (!teacherDoc.exists ||
+                                      teacherData['teacherStatus']
+                                              ?.toString()
+                                              .trim() !=
+                                          'available') {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Durumunuz müsait değil. Öğrenci sıraya eklenemedi.',
                                         ),
-                                      );
-                                      return;
-                                    }
+                                      ),
+                                    );
+                                    return;
+                                  }
 
-                                    final selectedStudentDoc = await _firestore
-                                        .collection('users')
-                                        .doc(selectedId)
-                                        .get();
-                                    final selectedStudentData =
-                                        selectedStudentDoc.data() ?? {};
+                                  final selectedStudentDoc = await _firestore
+                                      .collection('users')
+                                      .doc(selectedId)
+                                      .get();
+                                  final selectedStudentData =
+                                      selectedStudentDoc.data() ?? {};
 
-                                    if (selectedStudentData['isInStudySession'] ==
-                                        true) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Bu öğrenci şu anda etütte görünüyor.',
-                                          ),
+                                  if (selectedStudentData['isInStudySession'] ==
+                                      true) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Bu öğrenci şu anda etütte görünüyor.',
                                         ),
-                                      );
-                                      return;
-                                    }
+                                      ),
+                                    );
+                                    return;
+                                  }
 
-                                    final selectedActiveQueue = await _firestore
-                                        .collection('queues')
-                                        .where('studentId', isEqualTo: selectedId)
-                                        .where(
-                                          'status',
-                                          whereIn: ['waiting', 'in_progress'],
-                                        )
-                                        .limit(1)
-                                        .get();
+                                  final selectedActiveQueue = await _firestore
+                                      .collection('queues')
+                                      .where('studentId', isEqualTo: selectedId)
+                                      .where(
+                                        'status',
+                                        whereIn: ['waiting', 'in_progress'],
+                                      )
+                                      .limit(1)
+                                      .get();
 
-                                    if (selectedActiveQueue.docs.isNotEmpty) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Bu öğrencinin zaten aktif zümre sırası var.',
-                                          ),
+                                  if (selectedActiveQueue.docs.isNotEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Bu öğrencinin zaten aktif zümre sırası var.',
                                         ),
-                                      );
-                                      return;
-                                    }
+                                      ),
+                                    );
+                                    return;
+                                  }
 
-                                    final activeSnapshot = await _firestore
-                                        .collection('queues')
-                                        .where('teacherId', isEqualTo: teacherId)
+                                  final activeSnapshot = await _firestore
+                                      .collection('queues')
+                                      .where('teacherId', isEqualTo: teacherId)
                                       .where('status', isEqualTo: 'in_progress')
                                       .get();
 
                                   final hasActiveQuestion =
                                       activeSnapshot.docs.isNotEmpty;
 
-await _firestore
-    .collection('queues')
-    .add({
+                                  await _firestore.collection('queues').add({
                                     'studentId': selectedId,
                                     'studentName': selectedStudentName,
                                     'teacherId': teacherId,
@@ -1889,115 +1956,114 @@ await _firestore
       'startedAt': Timestamp.now(),
     });
   }
+
   Future<void> _startWaitingQueueSafely({
-  required QueryDocumentSnapshot queueDoc,
-  required int queueIndex,
-}) async {
-  final teacherId = _auth.currentUser!.uid;
-  final queueData = queueDoc.data() as Map<String, dynamic>;
+    required QueryDocumentSnapshot queueDoc,
+    required int queueIndex,
+  }) async {
+    final teacherId = _auth.currentUser!.uid;
+    final queueData = queueDoc.data() as Map<String, dynamic>;
 
-  final targetStudentName =
-      queueData['studentName']?.toString() ?? 'Bu öğrenci';
+    final targetStudentName =
+        queueData['studentName']?.toString() ?? 'Bu öğrenci';
 
-  try {
-    final activeSnapshot = await _firestore
-        .collection('queues')
-        .where('teacherId', isEqualTo: teacherId)
-        .where('status', isEqualTo: 'in_progress')
-        .limit(1)
-        .get();
+    try {
+      final activeSnapshot = await _firestore
+          .collection('queues')
+          .where('teacherId', isEqualTo: teacherId)
+          .where('status', isEqualTo: 'in_progress')
+          .limit(1)
+          .get();
 
-    QueryDocumentSnapshot? activeQueue;
+      QueryDocumentSnapshot? activeQueue;
 
-    if (activeSnapshot.docs.isNotEmpty) {
-      activeQueue = activeSnapshot.docs.first;
+      if (activeSnapshot.docs.isNotEmpty) {
+        activeQueue = activeSnapshot.docs.first;
 
-      if (activeQueue.id == queueDoc.id) {
-        return;
+        if (activeQueue.id == queueDoc.id) {
+          return;
+        }
+
+        final activeData = activeQueue.data() as Map<String, dynamic>;
+
+        final activeStudentName =
+            activeData['studentName']?.toString() ?? 'Mevcut öğrenci';
+
+        final finishCurrent = await _confirmAction(
+          title: 'Aktif soru bulunuyor',
+          message:
+              '$activeStudentName isimli öğrencinin sorusu hâlâ çözülüyor. '
+              '$targetStudentName isimli öğrenciyi başlatmak için mevcut soru '
+              'çözüldü olarak işaretlenecek. Devam etmek istiyor musunuz?',
+          confirmText: 'Bitir ve Başlat',
+          icon: Icons.warning_amber_rounded,
+          color: Colors.orangeAccent,
+        );
+
+        if (!finishCurrent) return;
       }
 
-      final activeData =
-          activeQueue.data() as Map<String, dynamic>;
+      if (queueIndex > 0) {
+        final skipCount = queueIndex;
 
-      final activeStudentName =
-          activeData['studentName']?.toString() ?? 'Mevcut öğrenci';
+        final continueOutOfOrder = await _confirmAction(
+          title: 'Sıra önceliği uyarısı',
+          message: '$targetStudentName isimli öğrencinin önünde '
+              '$skipCount öğrenci bulunuyor. Buna rağmen bu öğrencinin '
+              'sorusunu önce başlatmak istiyor musunuz?',
+          confirmText: 'Yine de Başlat',
+          icon: Icons.low_priority_rounded,
+          color: Colors.orangeAccent,
+        );
 
-      final finishCurrent = await _confirmAction(
-        title: 'Aktif soru bulunuyor',
-        message:
-            '$activeStudentName isimli öğrencinin sorusu hâlâ çözülüyor. '
-            '$targetStudentName isimli öğrenciyi başlatmak için mevcut soru '
-            'çözüldü olarak işaretlenecek. Devam etmek istiyor musunuz?',
-        confirmText: 'Bitir ve Başlat',
-        icon: Icons.warning_amber_rounded,
-        color: Colors.orangeAccent,
-      );
+        if (!continueOutOfOrder) return;
+      }
 
-      if (!finishCurrent) return;
-    }
+      final batch = _firestore.batch();
 
-    if (queueIndex > 0) {
-      final skipCount = queueIndex;
+      if (activeQueue != null) {
+        batch.update(activeQueue.reference, {
+          'status': 'completed',
+          'completedAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
 
-      final continueOutOfOrder = await _confirmAction(
-        title: 'Sıra önceliği uyarısı',
-        message:
-            '$targetStudentName isimli öğrencinin önünde '
-            '$skipCount öğrenci bulunuyor. Buna rağmen bu öğrencinin '
-            'sorusunu önce başlatmak istiyor musunuz?',
-        confirmText: 'Yine de Başlat',
-        icon: Icons.low_priority_rounded,
-        color: Colors.orangeAccent,
-      );
-
-      if (!continueOutOfOrder) return;
-    }
-
-    final batch = _firestore.batch();
-
-    if (activeQueue != null) {
-      batch.update(activeQueue.reference, {
-        'status': 'completed',
-        'completedAt': FieldValue.serverTimestamp(),
+      batch.update(queueDoc.reference, {
+        'status': 'in_progress',
+        'startedAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
-    }
 
-    batch.update(queueDoc.reference, {
-      'status': 'in_progress',
-      'startedAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+      await batch.commit();
 
-    await batch.commit();
+      _resetActiveQuestionTimer();
 
-    _resetActiveQuestionTimer();
+      if (!mounted) return;
 
-    if (!mounted) return;
+      if (activeQueue != null) {
+        setState(() {
+          _todaySolved++;
+        });
+      }
 
-    if (activeQueue != null) {
-      setState(() {
-        _todaySolved++;
-      });
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '$targetStudentName isimli öğrencinin sorusu başlatıldı.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$targetStudentName isimli öğrencinin sorusu başlatıldı.',
+          ),
         ),
-      ),
-    );
-  } catch (e) {
-    if (!mounted) return;
+      );
+    } catch (e) {
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Soru başlatılamadı: $e'),
-      ),
-    );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Soru başlatılamadı: $e'),
+        ),
+      );
+    }
   }
-}
 
   Future<void> _markAsSolved(String queueId) async {
     try {
@@ -2047,318 +2113,315 @@ await _firestore
       );
     }
   }
-Future<void> _showTransferDialog({
-  required String queueId,
-  required String subject, required studentName,
-}) async {
-  final currentTeacherId = _auth.currentUser!.uid;
 
-  String normalizeValue(dynamic value) {
-    return value
-        .toString()
-        .trim()
-        .toLowerCase()
-        .replaceAll('ı', 'i')
-        .replaceAll('ş', 's')
-        .replaceAll('ğ', 'g')
-        .replaceAll('ü', 'u')
-        .replaceAll('ö', 'o')
-        .replaceAll('ç', 'c');
-  }
+  Future<void> _showTransferDialog({
+    required String queueId,
+    required String subject,
+    required studentName,
+  }) async {
+    final currentTeacherId = _auth.currentUser!.uid;
 
-  try {
-    final teachersSnapshot = await _firestore
-        .collection('users')
-        .where('role', isEqualTo: 'teacher')
-        .get();
+    String normalizeValue(dynamic value) {
+      return value
+          .toString()
+          .trim()
+          .toLowerCase()
+          .replaceAll('ı', 'i')
+          .replaceAll('ş', 's')
+          .replaceAll('ğ', 'g')
+          .replaceAll('ü', 'u')
+          .replaceAll('ö', 'o')
+          .replaceAll('ç', 'c');
+    }
 
-    final normalizedSubject = normalizeValue(subject);
+    try {
+      final teachersSnapshot = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'teacher')
+          .get();
 
-    final availableTeachers = teachersSnapshot.docs.where((doc) {
-      if (doc.id == currentTeacherId) return false;
+      final normalizedSubject = normalizeValue(subject);
 
-      final data = doc.data();
+      final availableTeachers = teachersSnapshot.docs.where((doc) {
+        if (doc.id == currentTeacherId) return false;
 
-      final status =
-          data['teacherStatus']?.toString().trim() ?? 'absent';
+        final data = doc.data();
 
-      if (status != 'available') return false;
+        final status = data['teacherStatus']?.toString().trim() ?? 'absent';
 
-      final List<String> teacherSubjects = [];
+        if (status != 'available') return false;
 
-final rawSubjects = data['subjects'];
+        final List<String> teacherSubjects = [];
 
-if (rawSubjects is List) {
-  teacherSubjects.addAll(
-    rawSubjects
-        .map((e) => e.toString().trim())
-        .where((e) => e.isNotEmpty),
-  );
-} else if (rawSubjects is String &&
-    rawSubjects.trim().isNotEmpty) {
-  teacherSubjects.addAll(
-    rawSubjects
-        .split(RegExp(r'[,;/|]'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty),
-  );
-} else if (rawSubjects is String &&
-    rawSubjects.trim().isNotEmpty) {
-  teacherSubjects.addAll(
-    rawSubjects
-        .split(RegExp(r'[,;/|]'))
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty),
-  );
-} else if (rawSubjects is String &&
-          rawSubjects.trim().isNotEmpty) {
-        teacherSubjects.addAll(
-          rawSubjects
-              .split(RegExp(r'[,;/|]'))
-              .map((item) => item.trim())
-              .where((item) => item.isNotEmpty),
+        final rawSubjects = data['subjects'];
+
+        if (rawSubjects is List) {
+          teacherSubjects.addAll(
+            rawSubjects
+                .map((e) => e.toString().trim())
+                .where((e) => e.isNotEmpty),
+          );
+        } else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
+          teacherSubjects.addAll(
+            rawSubjects
+                .split(RegExp(r'[,;/|]'))
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty),
+          );
+        } else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
+          teacherSubjects.addAll(
+            rawSubjects
+                .split(RegExp(r'[,;/|]'))
+                .map((item) => item.trim())
+                .where((item) => item.isNotEmpty),
+          );
+        } else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
+          teacherSubjects.addAll(
+            rawSubjects
+                .split(RegExp(r'[,;/|]'))
+                .map((item) => item.trim())
+                .where((item) => item.isNotEmpty),
+          );
+        }
+
+        final legacyBranch = data['branch']?.toString().trim() ?? '';
+
+        final legacySubject = data['subject']?.toString().trim() ?? '';
+
+        if (legacyBranch.isNotEmpty) {
+          teacherSubjects.add(legacyBranch);
+        }
+
+        if (legacySubject.isNotEmpty) {
+          teacherSubjects.add(legacySubject);
+        }
+
+        return teacherSubjects.any(
+          (teacherSubject) =>
+              normalizeValue(teacherSubject) == normalizedSubject,
         );
+      }).toList();
+
+      if (!mounted) return;
+
+      if (availableTeachers.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '$subject branşında devredilebilecek müsait öğretmen bulunamadı.',
+            ),
+          ),
+        );
+        return;
       }
 
-      final legacyBranch =
-          data['branch']?.toString().trim() ?? '';
+      final selectedTeacher =
+          await showDialog<QueryDocumentSnapshot<Map<String, dynamic>>>(
+        context: context,
+        builder: (ctx) {
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            child: Container(
+              constraints: const BoxConstraints(
+                maxWidth: 520,
+                maxHeight: 560,
+              ),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF123C69),
+                    Color(0xFF1E6B50),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.swap_horiz_rounded,
+                        color: Colors.greenAccent,
+                        size: 30,
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Soruyu Devret',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 21,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(
+                          Icons.close,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '$subject branşındaki müsait öğretmenlerden birini seçiniz.',
+                    style: const TextStyle(
+                      color: Colors.white60,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: availableTeachers.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final teacher = availableTeachers[index];
+                        final data = teacher.data();
 
-      final legacySubject =
-          data['subject']?.toString().trim() ?? '';
+                        final name = data['fullName'] ??
+                            data['name'] ??
+                            data['email'] ??
+                            'Öğretmen';
 
-      if (legacyBranch.isNotEmpty) {
-        teacherSubjects.add(legacyBranch);
-      }
+                        final subjects = data['subjects'] is List
+                            ? (data['subjects'] as List).join(', ')
+                            : subject;
 
-      if (legacySubject.isNotEmpty) {
-        teacherSubjects.add(legacySubject);
-      }
-
-      return teacherSubjects.any(
-        (teacherSubject) =>
-            normalizeValue(teacherSubject) == normalizedSubject,
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () => Navigator.pop(ctx, teacher),
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.09),
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(color: Colors.white12),
+                            ),
+                            child: Row(
+                              children: [
+                                const CircleAvatar(
+                                  backgroundColor: Colors.green,
+                                  child: Icon(
+                                    Icons.person,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '$name',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        subjects,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white60,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(
+                                  Icons.chevron_right,
+                                  color: Colors.white54,
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       );
-    }).toList();
 
-    if (!mounted) return;
+      if (selectedTeacher == null) return;
 
-    if (availableTeachers.isEmpty) {
+      final selectedData = selectedTeacher.data();
+
+      final selectedTeacherName = selectedData['fullName'] ??
+          selectedData['name'] ??
+          selectedData['email'] ??
+          'Öğretmen';
+
+      final confirm = await _confirmAction(
+        title: 'Soru devredilsin mi?',
+        message:
+            'Bu soru $selectedTeacherName isimli öğretmene devredilecek. Devam etmek istiyor musunuz?',
+        confirmText: 'Devret',
+        icon: Icons.swap_horiz_rounded,
+        color: Colors.green,
+      );
+
+      if (!confirm) return;
+
+      await _firestore.collection('queues').doc(queueId).update({
+        'teacherId': selectedTeacher.id,
+        'teacherName': selectedTeacherName,
+        'status': 'waiting',
+        'transferredAt': FieldValue.serverTimestamp(),
+        'transferredFromTeacherId': currentTeacherId,
+        'transferredFromTeacherName': _teacherName,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '$subject branşında devredilebilecek müsait öğretmen bulunamadı.',
+            'Soru $selectedTeacherName isimli öğretmene devredildi.',
           ),
         ),
       );
-      return;
-    }
+    } catch (e) {
+      if (!mounted) return;
 
-    final selectedTeacher =
-        await showDialog<QueryDocumentSnapshot<Map<String, dynamic>>>(
-      context: context,
-      builder: (ctx) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          child: Container(
-            constraints: const BoxConstraints(
-              maxWidth: 520,
-              maxHeight: 560,
-            ),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF123C69),
-                  Color(0xFF1E6B50),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(26),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.swap_horiz_rounded,
-                      color: Colors.greenAccent,
-                      size: 30,
-                    ),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text(
-                        'Soruyu Devret',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 21,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      icon: const Icon(
-                        Icons.close,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '$subject branşındaki müsait öğretmenlerden birini seçiniz.',
-                  style: const TextStyle(
-                    color: Colors.white60,
-                    fontSize: 12.5,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Flexible(
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: availableTeachers.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final teacher = availableTeachers[index];
-                      final data = teacher.data();
-
-                      final name = data['fullName'] ??
-                          data['name'] ??
-                          data['email'] ??
-                          'Öğretmen';
-
-                      final subjects = data['subjects'] is List
-                          ? (data['subjects'] as List).join(', ')
-                          : subject;
-
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(18),
-                        onTap: () => Navigator.pop(ctx, teacher),
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.09),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: Colors.white12),
-                          ),
-                          child: Row(
-                            children: [
-                              const CircleAvatar(
-                                backgroundColor: Colors.green,
-                                child: Icon(
-                                  Icons.person,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '$name',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      subjects,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white60,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const Icon(
-                                Icons.chevron_right,
-                                color: Colors.white54,
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (selectedTeacher == null) return;
-
-    final selectedData = selectedTeacher.data();
-
-    final selectedTeacherName = selectedData['fullName'] ??
-        selectedData['name'] ??
-        selectedData['email'] ??
-        'Öğretmen';
-
-    final confirm = await _confirmAction(
-      title: 'Soru devredilsin mi?',
-      message:
-          'Bu soru $selectedTeacherName isimli öğretmene devredilecek. Devam etmek istiyor musunuz?',
-      confirmText: 'Devret',
-      icon: Icons.swap_horiz_rounded,
-      color: Colors.green,
-    );
-
-    if (!confirm) return;
-
-    await _firestore.collection('queues').doc(queueId).update({
-      'teacherId': selectedTeacher.id,
-      'teacherName': selectedTeacherName,
-      'status': 'waiting',
-      'transferredAt': FieldValue.serverTimestamp(),
-      'transferredFromTeacherId': currentTeacherId,
-      'transferredFromTeacherName': _teacherName,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Soru $selectedTeacherName isimli öğretmene devredildi.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Soru devredilemedi: $e'),
         ),
-      ),
-    );
-  } catch (e) {
-    if (!mounted) return;
+      );
+    }
+  }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Soru devredilemedi: $e'),
-      ),
+  Future<bool> _confirmLogout({
+    required Color color,
+  }) async {
+    return _confirmAction(
+      title: 'Çıkış Yap',
+      message: 'Oturumu kapatmak istediğinize emin misiniz?',
+      confirmText: 'Çıkış Yap',
+      icon: Icons.logout_rounded,
+      color: color,
     );
   }
-}
-Future<bool> _confirmLogout({
-  required Color color,
-}) async {
-  return _confirmAction(
-    title: 'Çıkış Yap',
-    message: 'Oturumu kapatmak istediğinize emin misiniz?',
-    confirmText: 'Çıkış Yap',
-    icon: Icons.logout_rounded,
-    color: color,
-  );
-}
+
   Widget _miniTimeBox({
     required String title,
     required String value,
@@ -2450,152 +2513,149 @@ Future<bool> _confirmLogout({
           extraMinutes: extraMinutes,
         );
 
-       return Container(
-  width: double.infinity,
-  margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-  padding: const EdgeInsets.all(18),
-  decoration: BoxDecoration(
-    color: Colors.white.withOpacity(0.10),
-    borderRadius: BorderRadius.circular(24),
-    border: Border.all(color: Colors.white.withOpacity(0.15)),
-  ),
-  child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: Colors.greenAccent.withOpacity(0.16),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.support_agent,
-              color: Colors.greenAccent,
-              size: 28,
-            ),
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withOpacity(0.15)),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Aktif Soru',
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                Text(
-                  data['studentName'] ?? 'Öğrenci',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 19,
-                    fontWeight: FontWeight.bold,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: Colors.greenAccent.withOpacity(0.16),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.support_agent,
+                      color: Colors.greenAccent,
+                      size: 28,
+                    ),
                   ),
-                ),
-                Text(
-                  data['subject'] ?? 'Ders',
-                  style: const TextStyle(color: Colors.white60, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-
-      const SizedBox(height: 14),
-
-      Row(
-        children: [
-          Expanded(
-            child: _miniTimeBox(
-              title: 'Soru',
-              value: '$questionCount',
-              icon: Icons.menu_book,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _miniTimeBox(
-              title: 'Tahmini',
-              value: '${estimatedMinutes + extraMinutes} dk',
-              icon: Icons.timer,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _miniTimeBox(
-              title: 'Geçen',
-              value: _formatElapsed(_elapsedSeconds),
-              icon: Icons.access_time,
-            ),
-          ),
-        ],
-      ),
-
-      const SizedBox(height: 16),
-
-      Row(
-        children: [
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () async {
-                final confirm = await _confirmAction(
-                  title: 'Soru çözüldü mü?',
-                  message:
-                      'Bu öğrencinin sorusunu çözüldü olarak işaretlemek istiyor musunuz?',
-                  confirmText: 'Çözüldü',
-                );
-
-                if (confirm) {
-                  await _markAsSolved(doc.id);
-                }
-              },
-              icon: const Icon(Icons.check, size: 18),
-              label: const Text('Çözüldü'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Aktif Soru',
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                        Text(
+                          data['studentName'] ?? 'Öğrenci',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 19,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          data['subject'] ?? 'Ders',
+                          style: const TextStyle(
+                              color: Colors.white60, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _compactQueueAction(
-            icon: Icons.swap_horiz_rounded,
-            color: Colors.lightBlueAccent,
-            tooltip: 'Devret',
-            onTap: () async {
-              await _showTransferDialog(
-                queueId: doc.id,
-                subject: data['subject'] ?? 'Ders',
-                studentName: data['studentName'] ?? 'Öğrenci',
-              );
-            },
-          ),
-          _compactQueueAction(
-            icon: Icons.close_rounded,
-            color: Colors.redAccent,
-            tooltip: 'İptal',
-            onTap: () async {
-              final confirm = await _confirmAction(
-                title: 'Soru iptal edilsin mi?',
-                message: 'Bu aktif soruyu iptal etmek istiyor musunuz?',
-                confirmText: 'İptal Et',
-              );
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _miniTimeBox(
+                      title: 'Soru',
+                      value: '$questionCount',
+                      icon: Icons.menu_book,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _miniTimeBox(
+                      title: 'Tahmini',
+                      value: '${estimatedMinutes + extraMinutes} dk',
+                      icon: Icons.timer,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _miniTimeBox(
+                      title: 'Geçen',
+                      value: _formatElapsed(_elapsedSeconds),
+                      icon: Icons.access_time,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final confirm = await _confirmAction(
+                          title: 'Soru çözüldü mü?',
+                          message:
+                              'Bu öğrencinin sorusunu çözüldü olarak işaretlemek istiyor musunuz?',
+                          confirmText: 'Çözüldü',
+                        );
 
-              if (confirm) {
-                await _cancelQueue(doc.id);
-              }
-            },
+                        if (confirm) {
+                          await _markAsSolved(doc.id);
+                        }
+                      },
+                      icon: const Icon(Icons.check, size: 18),
+                      label: const Text('Çözüldü'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _compactQueueAction(
+                    icon: Icons.swap_horiz_rounded,
+                    color: Colors.lightBlueAccent,
+                    tooltip: 'Devret',
+                    onTap: () async {
+                      await _showTransferDialog(
+                        queueId: doc.id,
+                        subject: data['subject'] ?? 'Ders',
+                        studentName: data['studentName'] ?? 'Öğrenci',
+                      );
+                    },
+                  ),
+                  _compactQueueAction(
+                    icon: Icons.close_rounded,
+                    color: Colors.redAccent,
+                    tooltip: 'İptal',
+                    onTap: () async {
+                      final confirm = await _confirmAction(
+                        title: 'Soru iptal edilsin mi?',
+                        message: 'Bu aktif soruyu iptal etmek istiyor musunuz?',
+                        confirmText: 'İptal Et',
+                      );
+
+                      if (confirm) {
+                        await _cancelQueue(doc.id);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
-      ),
-    ],
-  ),
-);
+        );
       },
     );
   }
@@ -2773,13 +2833,13 @@ Future<bool> _confirmLogout({
                     ),
                     Column(
                       children: [
-                      ElevatedButton(
-  onPressed: () async {
-    await _startWaitingQueueSafely(
-      queueDoc: doc,
-      queueIndex: queues.indexOf(doc),
-    );
-  },
+                        ElevatedButton(
+                          onPressed: () async {
+                            await _startWaitingQueueSafely(
+                              queueDoc: doc,
+                              queueIndex: queues.indexOf(doc),
+                            );
+                          },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
@@ -2790,48 +2850,47 @@ Future<bool> _confirmLogout({
                           ),
                           child: const Text('Başlat'),
                         ),
-                      IconButton(
-  icon: const Icon(
-    Icons.delete_outline_rounded,
-    color: Colors.redAccent,
-  ),
-  
-  tooltip: 'Sırayı İptal Et',
-  onPressed: () async {
-    final confirm = await _confirmAction(
-      title: 'Bekleyen öğrenci iptal edilsin mi?',
-      message:
-          '${data['studentName']} isimli öğrencinin sırasını iptal etmek istediğinize emin misiniz?',
-      confirmText: 'İptal Et',
-    );
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline_rounded,
+                            color: Colors.redAccent,
+                          ),
+                          tooltip: 'Sırayı İptal Et',
+                          onPressed: () async {
+                            final confirm = await _confirmAction(
+                              title: 'Bekleyen öğrenci iptal edilsin mi?',
+                              message:
+                                  '${data['studentName']} isimli öğrencinin sırasını iptal etmek istediğinize emin misiniz?',
+                              confirmText: 'İptal Et',
+                            );
 
-    if (confirm) {
-      await _cancelQueue(doc.id);
-    }
-  },
-),
-const SizedBox(height: 6),
-
-OutlinedButton.icon(
-  onPressed: () async {
-    await _showTransferDialog(
-      queueId: doc.id,
-      subject: data['subject'] ?? 'Ders',
-      studentName: data['studentName'] ?? 'Öğrenci',
-    );
-  },
-  icon: const Icon(Icons.swap_horiz_rounded, size: 16),
-  label: const Text('Devret'),
-  style: OutlinedButton.styleFrom(
-    foregroundColor: Colors.lightBlueAccent,
-    side: const BorderSide(color: Colors.lightBlueAccent),
-    minimumSize: const Size(80, 34),
-    padding: const EdgeInsets.symmetric(horizontal: 8),
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(14),
-    ),
-  ),
-),
+                            if (confirm) {
+                              await _cancelQueue(doc.id);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            await _showTransferDialog(
+                              queueId: doc.id,
+                              subject: data['subject'] ?? 'Ders',
+                              studentName: data['studentName'] ?? 'Öğrenci',
+                            );
+                          },
+                          icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                          label: const Text('Devret'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.lightBlueAccent,
+                            side:
+                                const BorderSide(color: Colors.lightBlueAccent),
+                            minimumSize: const Size(80, 34),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -2843,42 +2902,44 @@ OutlinedButton.icon(
       },
     );
   }
-Widget _compactQueueAction({
-  required IconData icon,
-  required Color color,
-  required String tooltip,
-  required VoidCallback onTap,
-}) {
-  return Container(
-    width: 34,
-    height: 34,
-    margin: const EdgeInsets.only(left: 4),
-    decoration: BoxDecoration(
-      color: color.withOpacity(0.12),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: color.withOpacity(0.25)),
-    ),
-    child: IconButton(
-      padding: EdgeInsets.zero,
-      tooltip: tooltip,
-      icon: Icon(icon, color: color, size: 18),
-      onPressed: onTap,
-    ),
-  );
-}
+
+  Widget _compactQueueAction({
+    required IconData icon,
+    required Color color,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      width: 34,
+      height: 34,
+      margin: const EdgeInsets.only(left: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        tooltip: tooltip,
+        icon: Icon(icon, color: color, size: 18),
+        onPressed: onTap,
+      ),
+    );
+  }
 
   Widget _buildWaitingQueues() {
-  return ListView(
-    physics: const AlwaysScrollableScrollPhysics(),
-    padding: const EdgeInsets.only(bottom: 32),
-    children: [
-      _buildTeacherHeader(),
-      _buildStatusCard(),
-      _buildActiveQuestion(),
-      _buildWaitingQueueList(),
-    ],
-  );
-}
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 32),
+      children: [
+        _buildTeacherHeader(),
+        _buildStatusCard(),
+        _buildActiveQuestion(),
+        _buildWaitingQueueList(),
+      ],
+    );
+  }
+
   Widget _statusButton(
     String text,
     IconData icon,
@@ -3002,14 +3063,13 @@ Widget _compactQueueAction({
               ],
             ),
             const SizedBox(height: 22),
-
-_headerActionButton(
-  icon: Icons.event_available_rounded,
-  title: 'Çalışma Programınız',
-  subtitle: 'Kurumda bulunduğunuz gün ve saatleri düzenleyin',
-  color: Colors.lightBlueAccent,
-  onTap: _showAvailabilityDialog,
-),
+            _headerActionButton(
+              icon: Icons.event_available_rounded,
+              title: 'Çalışma Programınız',
+              subtitle: 'Kurumda bulunduğunuz gün ve saatleri düzenleyin',
+              color: Colors.lightBlueAccent,
+              onTap: _showAvailabilityDialog,
+            ),
           ],
         ),
       ),
@@ -3067,300 +3127,299 @@ _headerActionButton(
   }
 
   Widget _buildTeacherHeader() {
-  return Padding(
-    padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-    child: Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withOpacity(0.12),
-            Colors.green.withOpacity(0.20),
-          ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white.withOpacity(0.12),
+              Colors.green.withOpacity(0.20),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: Colors.greenAccent.withOpacity(0.25)),
         ),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: Colors.greenAccent.withOpacity(0.25)),
-      ),
-      child: Column(
-        children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isNarrow = constraints.maxWidth < 380;
+        child: Column(
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 380;
 
-              final info = Row(
-                children: [
-                  Container(
-                    width: isNarrow ? 54 : 62,
-                    height: isNarrow ? 54 : 62,
-                    decoration: BoxDecoration(
-                      color: Colors.greenAccent.withOpacity(0.16),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.greenAccent.withOpacity(0.35),
+                final info = Row(
+                  children: [
+                    Container(
+                      width: isNarrow ? 54 : 62,
+                      height: isNarrow ? 54 : 62,
+                      decoration: BoxDecoration(
+                        color: Colors.greenAccent.withOpacity(0.16),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.greenAccent.withOpacity(0.35),
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.school,
+                        color: Colors.greenAccent,
+                        size: isNarrow ? 28 : 32,
                       ),
                     ),
-                    child: Icon(
-                      Icons.school,
-                      color: Colors.greenAccent,
-                      size: isNarrow ? 28 : 32,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Hoş geldiniz',
-                          style: TextStyle(
-                            color: Colors.white60,
-                            fontSize: 13,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Hoş geldiniz',
+                            style: TextStyle(
+                              color: Colors.white60,
+                              fontSize: 13,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 3),
-                    FittedBox(
-  fit: BoxFit.scaleDown,
-  alignment: Alignment.centerLeft,
-  child: Text(
-    _teacherName ?? 'Öğretmen',
-    maxLines: 1,
-    style: const TextStyle(
-      color: Colors.white,
-      fontSize: 24,
-      fontWeight: FontWeight.bold,
-    ),
-  ),
-),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: Colors.white12),
-                              ),
-                              child: Text(
-                                'Branş: ${_teacherSubject ?? "Ders"}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                          const SizedBox(height: 3),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _teacherName ?? 'Öğretmen',
+                              maxLines: 1,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                            _zumreStatusChip(),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-
-              final solved = Container(
-                constraints: const BoxConstraints(
-                  minWidth: 60,
-                  maxWidth: 82,
-                  minHeight: 60,
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.greenAccent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: Colors.greenAccent.withOpacity(0.28),
-                  ),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.bar_chart_rounded,
-                      color: Colors.greenAccent,
-                      size: 18,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '$_todaySolved',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.white12),
+                                ),
+                                child: Text(
+                                  'Branş: ${_teacherSubject ?? "Ders"}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              _zumreStatusChip(),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    const Text(
-                      'Bugün çözülen',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Flexible(child: info),
-                  const SizedBox(width: 10),
-                  Column(
-                    children: [
-                      solved,
-                    ],
-                  ),
-                ],
-              );
-            },
-          ),
-
-          const SizedBox(height: 16),
-
-          Container(
-            height: 1,
-            color: Colors.white.withOpacity(0.12),
-          ),
-
-          const SizedBox(height: 14),
-
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isNarrow = constraints.maxWidth < 360;
-
-              final addButton = _headerActionButton(
-                icon: Icons.person_add,
-                title: 'Öğrenci Ekle',
-                subtitle: 'Sıraya ekle',
-                    color: Colors.greenAccent,
-                    onTap: _showAddStudentDialog,
-              );
-              final logoutButton = _headerActionButton(
-                icon: Icons.logout,
-                title: 'Çıkış Yap',
-                subtitle: 'Hesaptan çık',
-                color: Colors.redAccent,
-                onTap: () async {
-final logout = await _confirmLogout(
-  color: Colors.green,
-);
-
-if (!logout) return;
-
-await _auth.signOut();                },
-              );
-
-              if (isNarrow) {
-                return Column(
-                  children: [
-                    addButton,
-                    const SizedBox(height: 10),
-                    logoutButton,
                   ],
                 );
-              }
 
-              return Row(
-                children: [
-                  Expanded(child: addButton),
-                  const SizedBox(width: 10),
-                  Expanded(child: logoutButton),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    ),
-  );
-}
-Widget _headerActionButton({
-  required IconData icon,
-  required String title,
-  required String subtitle,
-  required Color color,
-  required VoidCallback? onTap,
-}) {
-  final bool disabled = onTap == null;
+                final solved = Container(
+                  constraints: const BoxConstraints(
+                    minWidth: 60,
+                    maxWidth: 82,
+                    minHeight: 60,
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.greenAccent.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.greenAccent.withOpacity(0.28),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.bar_chart_rounded,
+                        color: Colors.greenAccent,
+                        size: 18,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$_todaySolved',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Bugün çözülen',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white60,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
 
-  return InkWell(
-    borderRadius: BorderRadius.circular(22),
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: disabled
-            ? Colors.white.withOpacity(0.05)
-            : color.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: disabled ? Colors.white12 : color.withOpacity(0.35),
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Flexible(child: info),
+                    const SizedBox(width: 10),
+                    Column(
+                      children: [
+                        solved,
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            Container(
+              height: 1,
+              color: Colors.white.withOpacity(0.12),
+            ),
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 360;
+
+                final addButton = _headerActionButton(
+                  icon: Icons.person_add,
+                  title: 'Öğrenci Ekle',
+                  subtitle: 'Sıraya ekle',
+                  color: Colors.greenAccent,
+                  onTap: _showAddStudentDialog,
+                );
+                final logoutButton = _headerActionButton(
+                  icon: Icons.logout,
+                  title: 'Çıkış Yap',
+                  subtitle: 'Hesaptan çık',
+                  color: Colors.redAccent,
+                  onTap: () async {
+                    final logout = await _confirmLogout(
+                      color: Colors.green,
+                    );
+
+                    if (!logout) return;
+
+                    await _auth.signOut();
+                  },
+                );
+
+                if (isNarrow) {
+                  return Column(
+                    children: [
+                      addButton,
+                      const SizedBox(height: 10),
+                      logoutButton,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: addButton),
+                    const SizedBox(width: 10),
+                    Expanded(child: logoutButton),
+                  ],
+                );
+              },
+            ),
+          ],
         ),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: disabled
-                  ? Colors.white.withOpacity(0.08)
-                  : color.withOpacity(0.18),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              icon,
-              color: disabled ? Colors.white38 : color,
-              size: 24,
-            ),
+    );
+  }
+
+  Widget _headerActionButton({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback? onTap,
+  }) {
+    final bool disabled = onTap == null;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: disabled
+              ? Colors.white.withOpacity(0.05)
+              : color.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: disabled ? Colors.white12 : color.withOpacity(0.35),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: disabled ? Colors.white38 : Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                Text(
-                  disabled ? 'Müsait değil' : subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: disabled ? Colors.white30 : Colors.white60,
-                    fontSize: 11,
-                  ),
-                ),
-              ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: disabled
+                    ? Colors.white.withOpacity(0.08)
+                    : color.withOpacity(0.18),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon,
+                color: disabled ? Colors.white38 : color,
+                size: 24,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: disabled ? Colors.white38 : Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    disabled ? 'Müsait değil' : subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: disabled ? Colors.white30 : Colors.white60,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3378,8 +3437,8 @@ Widget _headerActionButton({
           ),
         ),
         child: SafeArea(
-  child: _buildWaitingQueues(),
-),
+          child: _buildWaitingQueues(),
+        ),
       ),
     );
   }

@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:async';
+
 import 'package:printing/printing.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
@@ -18,13 +20,8 @@ class AdminHomeScreen extends StatefulWidget {
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   int _selectedIndex = 0;
 
-  final List<Widget> _pages = const [
-    StatisticsPage(),
-    UserManagementPage(),
-  ];
-
   final List<String> _titles = const [
-    'Genel Bakış',
+    'Kurum Paneli',
     'Kullanıcılar',
   ];
 
@@ -53,7 +50,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           child: Column(
             children: [
               _buildAdminHeader(),
-              Expanded(child: _pages[_selectedIndex]),
+              Expanded(
+                child: _selectedIndex == 0
+                    ? StatisticsPage(
+                        onOpenUsers: () => setState(() => _selectedIndex = 1),
+                      )
+                    : const UserManagementPage(),
+              ),
             ],
           ),
         ),
@@ -103,7 +106,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'ZümreNet Yönetici Paneli',
+                    'Kurum Paneli',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 22,
@@ -157,7 +160,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             _navItem(
               index: 0,
               icon: Icons.dashboard_rounded,
-              label: 'Genel Bakış',
+              label: 'Kurum Paneli',
             ),
             _navItem(
               index: 1,
@@ -218,7 +221,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 // ==================== 1. İSTATİSTİK SAYFASI ====================
 
 class StatisticsPage extends StatefulWidget {
-  const StatisticsPage({super.key});
+  final VoidCallback? onOpenUsers;
+
+  const StatisticsPage({super.key, this.onOpenUsers});
 
   @override
   State<StatisticsPage> createState() => _StatisticsPageState();
@@ -249,15 +254,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
       'https://zumrenet-reports-542741706921.europe-west1.run.app';
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  Map<String, int> _subjectStats = {};
-  Map<String, Map<String, int>> _dailySubjectStats = {};
-  Map<String, int> _dailyStats = {};
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
   int _totalSolvedToday = 0;
   int _totalSolvedAll = 0;
   bool _isLoading = true;
   bool _isImporting = false;
+  bool _isChangingInstitutionMode = false;
+  Timer? _institutionCountdownTimer;
   final List<Map<String, String>> _weekdaySlots = [];
   final List<Map<String, String>> _weekendSlots = [];
   final List<Map<String, String>> _weekdayStudySlots = [];
@@ -270,10 +275,243 @@ class _StatisticsPageState extends State<StatisticsPage> {
   void initState() {
     super.initState();
     _loadStats();
+    _institutionCountdownTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
-  String _dateKey(DateTime date) {
-    return '${date.day}/${date.month}';
+  @override
+  void dispose() {
+    _institutionCountdownTimer?.cancel();
+    super.dispose();
+  }
+
+  String _formatClock(DateTime date) {
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  String _formatRemaining(Duration duration) {
+    if (duration.isNegative) return '0 dk kaldı';
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    if (hours > 0) return '$hours sa $minutes dk kaldı';
+    return '$minutes dk kaldı';
+  }
+
+  String _institutionModeFromRuntime(Map<String, dynamic>? data) {
+    final mode = '${data?['institutionMode'] ?? 'active'}';
+    if (mode == 'closed' || mode == 'exam') return mode;
+    return 'active';
+  }
+
+  Future<void> _setInstitutionMode(
+    String mode, {
+    String? examType,
+  }) async {
+    if (_isChangingInstitutionMode) return;
+
+    setState(() => _isChangingInstitutionMode = true);
+
+    try {
+      final callable = _functions.httpsCallable('setInstitutionMode');
+      await callable.call({
+        'mode': mode,
+        if (examType != null) 'examType': examType,
+      });
+
+      if (!mounted) return;
+
+      final message = switch (mode) {
+        'closed' => 'Kurum bugün kapalı moda alındı.',
+        'exam' => 'Deneme modu başlatıldı.',
+        _ => 'Kurum normal programa döndü.',
+      };
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Kurum durumu güncellenemedi: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isChangingInstitutionMode = false);
+      }
+    }
+  }
+
+  Future<void> _confirmClosedMode() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF071A3A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text(
+          'Kurumu bugün kapatmak istiyor musunuz?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'Yeni zümre ve etüt işlemleri başlatılmayacaktır. Sistem yarın otomatik olarak normal programa dönecektir.',
+          style: TextStyle(color: Colors.white70, height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orangeAccent,
+              foregroundColor: const Color(0xFF071A3A),
+            ),
+            child: const Text('Bugün Kapat'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _setInstitutionMode('closed');
+    }
+  }
+
+  Future<void> _showExamModeDialog() async {
+    var selectedType = 'tyt';
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final minutes = selectedType == 'tyt' ? 165 : 180;
+            final estimatedEnd = DateTime.now().add(Duration(minutes: minutes));
+
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 430),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF071A3A),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Deneme Modu',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Deneme Türü',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'tyt', label: Text('TYT')),
+                        ButtonSegment(value: 'ayt', label: Text('AYT')),
+                      ],
+                      selected: {selectedType},
+                      onSelectionChanged: (value) {
+                        setDialogState(() => selectedType = value.first);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _adminInfoCard(
+                      icon: Icons.timer_rounded,
+                      title: selectedType == 'tyt'
+                          ? 'TYT • 165 dakika'
+                          : 'AYT • 180 dakika',
+                      subtitle:
+                          'Başlangıç: Şimdi · ${_formatClock(DateTime.now())}\nTahmini bitiş: ${_formatClock(estimatedEnd)}',
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Vazgeç'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              Navigator.pop(ctx);
+                              await _setInstitutionMode(
+                                'exam',
+                                examType: selectedType,
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.lightBlueAccent,
+                              foregroundColor: const Color(0xFF071A3A),
+                            ),
+                            child: const Text('Denemeyi Başlat'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmEndExamEarly() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF071A3A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text(
+          'Deneme erken bitirilsin mi?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'Sistem normal programa döner. O an aktif zümre veya etüt slotu varsa kalan süre kullanılabilir.',
+          style: TextStyle(color: Colors.white70, height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Erken Bitir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _setInstitutionMode('active');
+    }
   }
 
   void _showExcelLoadingDialog() {
@@ -1149,23 +1387,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Future<void> _loadStats() async {
     try {
       final now = DateTime.now();
-      final todayStart = DateTime(now.year, now.month, now.day);
-      final last7DaysStart = todayStart.subtract(const Duration(days: 6));
 
       final snapshot = await _firestore
           .collection('queues')
           .where('status', isEqualTo: 'completed')
           .get();
-
-      final Map<String, int> subjectCount = {};
-      final Map<String, int> dailyCount = {};
-      final Map<String, Map<String, int>> dailySubjectCount = {};
-
-      for (int i = 6; i >= 0; i--) {
-        final day = todayStart.subtract(Duration(days: i));
-        dailyCount[_dateKey(day)] = 0;
-        dailySubjectCount[_dateKey(day)] = {};
-      }
 
       int todayCount = 0;
       int allCount = 0;
@@ -1183,34 +1409,14 @@ class _StatisticsPageState extends State<StatisticsPage> {
             completedDate.month == now.month &&
             completedDate.day == now.day) {
           todayCount++;
-
-          final subject = data['subject'] as String? ?? 'Bilinmeyen';
-          subjectCount[subject] = (subjectCount[subject] ?? 0) + 1;
-        }
-
-        if (completedDate
-            .isAfter(last7DaysStart.subtract(const Duration(seconds: 1)))) {
-          final key = _dateKey(completedDate);
-
-          if (dailyCount.containsKey(key)) {
-            dailyCount[key] = dailyCount[key]! + 1;
-
-            final subject = data['subject'] as String? ?? 'Bilinmeyen';
-            dailySubjectCount[key] ??= {};
-            dailySubjectCount[key]![subject] =
-                (dailySubjectCount[key]![subject] ?? 0) + 1;
-          }
         }
       }
 
       if (!mounted) return;
 
       setState(() {
-        _subjectStats = subjectCount;
-        _dailyStats = dailyCount;
         _totalSolvedToday = todayCount;
         _totalSolvedAll = allCount;
-        _dailySubjectStats = dailySubjectCount;
         _isLoading = false;
       });
     } catch (e) {
@@ -1333,6 +1539,66 @@ class _StatisticsPageState extends State<StatisticsPage> {
         SnackBar(content: Text('Aktarım hatası: $e')),
       );
     }
+  }
+
+  Future<void> _showBulkImportChoiceDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF071A3A),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Toplu Kullanıcı Aktarımı',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 21,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Excel dosyası kullanarak öğrenci ve öğretmen hesaplarını toplu yönetin.',
+                style: TextStyle(color: Colors.white60, height: 1.35),
+              ),
+              const SizedBox(height: 18),
+              _quickActionCard(
+                icon: Icons.school_rounded,
+                title: 'Öğrenci Aktar',
+                subtitle: 'Edesis Öğrenci Excel dosyası seçilir',
+                color: Colors.orangeAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickEdesisFile('student');
+                },
+              ),
+              const SizedBox(height: 10),
+              _quickActionCard(
+                icon: Icons.badge_rounded,
+                title: 'Öğretmen Aktar',
+                subtitle: 'Edesis Öğretmen Excel dosyası seçilir',
+                color: Colors.greenAccent,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickEdesisFile('teacher');
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<bool?> _showImportAnalysisDialog({
@@ -1613,6 +1879,399 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
+  Widget _buildInstitutionModeCard() {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _firestore.collection('settings').doc('runtimeState').snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data();
+        final mode = _institutionModeFromRuntime(data);
+        final examType = '${data?['examType'] ?? ''}'.toUpperCase();
+        final examEndsAt = data?['examEndsAt'];
+        final examEndDate =
+            examEndsAt is Timestamp ? examEndsAt.toDate() : null;
+        final remaining = examEndDate?.difference(DateTime.now());
+
+        final accent = switch (mode) {
+          'closed' => Colors.orangeAccent,
+          'exam' => Colors.lightBlueAccent,
+          _ => Colors.greenAccent,
+        };
+        final title = switch (mode) {
+          'closed' => 'Kurum Kapalı',
+          'exam' => 'Deneme Devam Ediyor',
+          _ => 'Kurum Aktif',
+        };
+        final subtitle = switch (mode) {
+          'closed' =>
+            'Bugün zümre ve etüt işlemleri durduruldu. Yarın sistem normal programa döner.',
+          'exam' =>
+            '$examType • Bitiş: ${examEndDate == null ? '-' : _formatClock(examEndDate)}\n${remaining == null ? '' : _formatRemaining(remaining)}',
+          _ =>
+            'Global override yok. Zümre ve etüt mevcut programa göre çalışır.',
+        };
+
+        return Container(
+          padding: const EdgeInsets.all(18),
+          decoration: _adminGlassDecoration(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.domain_rounded, color: accent, size: 28),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Kurum Durumu',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 19,
+                      ),
+                    ),
+                  ),
+                  if (_isChangingInstitutionMode)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                style: TextStyle(
+                  color: accent,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                subtitle,
+                style: const TextStyle(color: Colors.white70, height: 1.35),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(
+                      value: 'active',
+                      icon: Icon(Icons.play_circle_rounded),
+                      label: Text('Aktif'),
+                    ),
+                    ButtonSegment(
+                      value: 'closed',
+                      icon: Icon(Icons.pause_circle_rounded),
+                      label: Text('Kapalı'),
+                    ),
+                    ButtonSegment(
+                      value: 'exam',
+                      icon: Icon(Icons.assignment_rounded),
+                      label: Text('Deneme'),
+                    ),
+                  ],
+                  selected: {mode},
+                  onSelectionChanged: _isChangingInstitutionMode
+                      ? null
+                      : (selection) async {
+                          final selected = selection.first;
+                          if (selected == mode) return;
+                          if (selected == 'closed') {
+                            await _confirmClosedMode();
+                          } else if (selected == 'exam') {
+                            await _showExamModeDialog();
+                          } else {
+                            await _setInstitutionMode('active');
+                          }
+                        },
+                ),
+              ),
+              if (mode == 'closed' || mode == 'exam') ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isChangingInstitutionMode
+                        ? null
+                        : mode == 'exam'
+                            ? _confirmEndExamEarly
+                            : () => _setInstitutionMode('active'),
+                    icon: const Icon(Icons.restart_alt_rounded),
+                    label: Text(
+                      mode == 'exam'
+                          ? 'Denemeyi Erken Bitir'
+                          : 'Tekrar Aktif Yap',
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTodayStatusSection() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore
+          .collection('queues')
+          .where('status', whereIn: ['waiting', 'in_progress']).snapshots(),
+      builder: (context, queueSnapshot) {
+        final queues = queueSnapshot.data?.docs ?? [];
+        final waiting =
+            queues.where((doc) => doc.data()['status'] == 'waiting').length;
+        final inProgress =
+            queues.where((doc) => doc.data()['status'] == 'in_progress').length;
+
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _firestore
+              .collection('studySessions')
+              .where('status', isEqualTo: 'active')
+              .snapshots(),
+          builder: (context, studySnapshot) {
+            final activeStudyStudents =
+                (studySnapshot.data?.docs ?? []).fold<int>(0, (total, doc) {
+              final value = doc.data()['activeStudentCount'];
+              if (value is int) return total + value;
+              if (value is num) return total + value.toInt();
+              return total;
+            });
+
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _firestore
+                  .collection('users')
+                  .where('role', isEqualTo: 'teacher')
+                  .snapshots(),
+              builder: (context, teacherSnapshot) {
+                final availableTeachers = (teacherSnapshot.data?.docs ?? [])
+                    .where((doc) => doc.data()['teacherStatus'] == 'available')
+                    .length;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _sectionTitle('Bugünkü Durum'),
+                    const SizedBox(height: 10),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final crossAxisCount =
+                            constraints.maxWidth < 680 ? 2 : 4;
+                        return GridView.count(
+                          crossAxisCount: crossAxisCount,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 10,
+                          childAspectRatio:
+                              constraints.maxWidth < 420 ? 1.45 : 1.75,
+                          children: [
+                            _operationMetricCard(
+                              title: 'Bekleyen Öğrenci',
+                              value: '$waiting',
+                              icon: Icons.hourglass_top_rounded,
+                              color: Colors.orangeAccent,
+                            ),
+                            _operationMetricCard(
+                              title: 'Çözümü Devam Eden',
+                              value: '$inProgress',
+                              icon: Icons.psychology_rounded,
+                              color: Colors.lightBlueAccent,
+                            ),
+                            _operationMetricCard(
+                              title: 'Etütteki Öğrenci',
+                              value: '$activeStudyStudents',
+                              icon: Icons.groups_rounded,
+                              color: Colors.greenAccent,
+                            ),
+                            _operationMetricCard(
+                              title: 'Müsait Öğretmen',
+                              value: '$availableTeachers',
+                              icon: Icons.record_voice_over_rounded,
+                              color: Colors.purpleAccent,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _smallStatusPill(
+                          label: 'Zümre',
+                          value: 'Bugün $_totalSolvedToday çözüm',
+                          color: Colors.greenAccent,
+                        ),
+                        _smallStatusPill(
+                          label: 'Toplam',
+                          value: '$_totalSolvedAll çözüm',
+                          color: Colors.lightBlueAccent,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    _runtimeSummaryStrip(),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _runtimeSummaryStrip() {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _firestore.collection('settings').doc('runtimeState').snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data() ?? {};
+        final mode = _institutionModeFromRuntime(data);
+        final zumreOpen = data['isZumreOpen'] == true;
+        final studyOpen = data['isStudyOpen'] == true;
+        final suffix = mode == 'closed'
+            ? 'Kurum kapalı'
+            : mode == 'exam'
+                ? 'Deneme modu'
+                : null;
+
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _smallStatusPill(
+              label: 'Zümre',
+              value: suffix ?? (zumreOpen ? 'Aktif' : 'Kapalı'),
+              color: zumreOpen && suffix == null
+                  ? Colors.greenAccent
+                  : Colors.orangeAccent,
+            ),
+            _smallStatusPill(
+              label: 'Etüt',
+              value: suffix ?? (studyOpen ? 'Aktif' : 'Kapalı'),
+              color: studyOpen && suffix == null
+                  ? Colors.greenAccent
+                  : Colors.orangeAccent,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _smallStatusPill({
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Text(
+        '$label: $value',
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Widget _operationMetricCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _panelSection({
+    required String title,
+    required List<Widget> children,
+  }) {
+    if (children.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle(title),
+        const SizedBox(height: 10),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 680 || children.length == 1) {
+              return Column(
+                children: [
+                  for (var i = 0; i < children.length; i++) ...[
+                    children[i],
+                    if (i != children.length - 1) const SizedBox(height: 10),
+                  ],
+                ],
+              );
+            }
+
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: children
+                  .map(
+                    (child) => SizedBox(
+                      width: (constraints.maxWidth - 12) / 2,
+                      child: child,
+                    ),
+                  )
+                  .toList(),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -1626,137 +2285,63 @@ class _StatisticsPageState extends State<StatisticsPage> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
                   children: [
-                    Row(
+                    _buildInstitutionModeCard(),
+                    const SizedBox(height: 18),
+                    _buildTodayStatusSection(),
+                    const SizedBox(height: 18),
+                    _panelSection(
+                      title: 'Öğrenci & Rehberlik',
                       children: [
-                        Expanded(
-                          child: _adminStatCard(
-                            title: 'Bugün',
-                            value: '$_totalSolvedToday',
-                            subtitle: 'çözülen soru',
-                            icon: Icons.today_rounded,
-                            color: Colors.greenAccent,
-                          ),
+                        _quickActionCard(
+                          icon: Icons.manage_search_rounded,
+                          title: 'Öğrenci Takibi',
+                          subtitle: 'Öğrencileri ve kullanıcı kayıtlarını aç',
+                          color: Colors.greenAccent,
+                          onTap: widget.onOpenUsers ?? () {},
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _adminStatCard(
-                            title: 'Toplam',
-                            value: '$_totalSolvedAll',
-                            subtitle: 'tüm çözümler',
-                            icon: Icons.done_all_rounded,
-                            color: Colors.lightBlueAccent,
-                          ),
+                        _quickActionCard(
+                          icon: Icons.picture_as_pdf_rounded,
+                          title: 'Rapor Merkezi',
+                          subtitle: 'Kurum ve sınıf PDF raporları oluşturulur',
+                          color: Colors.redAccent,
+                          onTap: _showPdfReportDialog,
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    _sectionTitle('Son 7 Günlük Çözüm Grafiği'),
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(18),
-                      decoration: _adminGlassDecoration(),
-                      child: SizedBox(
-                        height: 310,
-                        child: _DailySolvedBarChart(
-                          data: _dailyStats,
-                          subjectData: _dailySubjectStats,
-                        ),
-                      ),
-                    ),
                     const SizedBox(height: 18),
-                    _sectionTitle('Bugünkü Ders Dağılımı'),
-                    const SizedBox(height: 10),
-                    if (_subjectStats.isEmpty)
-                      _adminInfoCard(
-                        icon: Icons.info_outline,
-                        title: 'Bugün henüz çözülen soru yok',
-                        subtitle:
-                            'Sorular çözüldükçe ders bazlı dağılım burada görünecek.',
-                      )
-                    else
-                      ..._subjectStats.entries.map(
-                        (entry) => Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(16),
-                          decoration: _adminGlassDecoration(),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 46,
-                                height: 46,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.12),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.menu_book_rounded,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Text(
-                                  entry.key,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                '${entry.value} soru',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 18),
-                    _sectionTitle('Veri Merkezi'),
-                    const SizedBox(height: 10),
-                    Row(
+                    _panelSection(
+                      title: 'Kurum İşleyişi',
                       children: [
-                        Expanded(
-                          child: _quickActionCard(
-                            icon: Icons.school_rounded,
-                            title: 'Öğrenci Aktar',
-                            subtitle: 'Edesis Öğrenci Excel dosyası seçilir',
-                            color: Colors.orangeAccent,
-                            onTap: () => _pickEdesisFile('student'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _quickActionCard(
-                            icon: Icons.badge_rounded,
-                            title: 'Öğretmen Aktar',
-                            subtitle: 'Edesis Öğretmen Excel dosyası seçilir',
-                            color: Colors.greenAccent,
-                            onTap: () => _pickEdesisFile('teacher'),
-                          ),
+                        _quickActionCard(
+                          icon: Icons.schedule_rounded,
+                          title: 'Zaman Yönetimi',
+                          subtitle:
+                              'Zümre, etüt ve öğle arası vakitleri ayarlanır',
+                          color: Colors.purpleAccent,
+                          onTap: _showZumreScheduleDialog,
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    _quickActionCard(
-                      icon: Icons.picture_as_pdf_rounded,
-                      title: 'Rapor Merkezi',
-                      subtitle: 'Kurum ve sınıf PDF raporları oluşturulur',
-                      color: Colors.redAccent,
-                      onTap: _showPdfReportDialog,
-                    ),
-                    const SizedBox(height: 12),
-                    _quickActionCard(
-                      icon: Icons.schedule_rounded,
-                      title: 'Çalışma Saatleri',
-                      subtitle:
-                          'Hafta içi, hafta sonu ve öğle arası vakitleri ayarlanır',
-                      color: Colors.purpleAccent,
-                      onTap: _showZumreScheduleDialog,
+                    const SizedBox(height: 18),
+                    _panelSection(
+                      title: 'Kullanıcı Yönetimi',
+                      children: [
+                        _quickActionCard(
+                          icon: Icons.people_alt_rounded,
+                          title: 'Kullanıcılar',
+                          subtitle: 'Öğrenci, öğretmen ve görevli kayıtları',
+                          color: Colors.lightBlueAccent,
+                          onTap: widget.onOpenUsers ?? () {},
+                        ),
+                        _quickActionCard(
+                          icon: Icons.upload_file_rounded,
+                          title: 'Toplu Kullanıcı Aktarımı',
+                          subtitle:
+                              'Excel dosyası kullanarak öğrenci ve öğretmen hesaplarını toplu yönetin.',
+                          color: Colors.orangeAccent,
+                          onTap: () => _showBulkImportChoiceDialog(),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1794,46 +2379,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
         color: Colors.white,
         fontSize: 19,
         fontWeight: FontWeight.bold,
-      ),
-    );
-  }
-
-  Widget _adminStatCard({
-    required String title,
-    required String value,
-    required String subtitle,
-    required IconData icon,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: _adminGlassDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 14),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 34,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            subtitle,
-            style: const TextStyle(color: Colors.white60, fontSize: 12),
-          ),
-        ],
       ),
     );
   }

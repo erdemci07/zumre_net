@@ -342,11 +342,6 @@ def build_class_report(
 
     clean_branch = _clean(branch)
     clean_department = _clean(department)
-    report_class_name = "-".join(
-        value
-        for value in [clean_class_name, clean_branch, clean_department]
-        if value
-    )
 
     date_range = parse_date_range(start_date, end_date)
     students = fetch_class_students(
@@ -354,6 +349,21 @@ def build_class_report(
         clean_class_name,
         branch=clean_branch,
         department=clean_department,
+    )
+    if students:
+        student_branches = {student.branch for student in students if student.branch}
+        student_departments = {
+            student.department for student in students if student.department
+        }
+        if not clean_branch and len(student_branches) == 1:
+            clean_branch = next(iter(student_branches))
+        if not clean_department and len(student_departments) == 1:
+            clean_department = next(iter(student_departments))
+
+    report_class_name = "-".join(
+        value
+        for value in [clean_class_name, clean_branch, clean_department]
+        if value
     )
     student_map = {student.student_id: student for student in students}
     queues = fetch_completed_queues(db, date_range)
