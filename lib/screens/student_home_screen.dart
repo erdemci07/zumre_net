@@ -2,30 +2,31 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+
+import '../utils/queue_priority.dart';
 
 class StudentHomeScreen extends StatefulWidget {
   const StudentHomeScreen({super.key});
 
   @override
-  _StudentHomeScreenState createState() => _StudentHomeScreenState();
+  State<StudentHomeScreen> createState() => _StudentHomeScreenState();
 }
 
 class _StudentHomeScreenState extends State<StudentHomeScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
   String? _studentName;
   String? _selectedSubject;
-  String? _selectedTeacherId;
-  String? _selectedTeacherName;
-  List<Map<String, dynamic>> _teachersForSubject = [];
 
   bool _isInStudySession = false;
-  bool _isLoadingTeachers = false;
   bool _isInQueue = false;
   bool _isZumreOpenNow = false;
   bool _isLunchNow = false;
-  bool _useSmartTeacherSelection = true;
+  bool _isRoutingQueue = false;
   String _zumreMessage = 'Zümre saati kontrol ediliyor...';
   String? _currentQueueId;
   String? _currentTeacherName;
@@ -53,7 +54,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   StreamSubscription<DocumentSnapshot>? _queueSubscription;
   StreamSubscription<DocumentSnapshot>? _studentSubscription;
   StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
-  StreamSubscription<QuerySnapshot>? _teacherListSubscription;
   static const Duration _runtimeStateMaxAge = Duration(minutes: 3);
 
   @override
@@ -62,59 +62,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     _listenStudentInfo();
     _findAndListenActiveQueue();
     _listenRuntimeScheduleState();
-  }
-
-  String _normalizeSubject(dynamic value) {
-    return value
-        .toString()
-        .trim()
-        .toLowerCase()
-        .replaceAll('ı', 'i')
-        .replaceAll('ş', 's')
-        .replaceAll('ğ', 'g')
-        .replaceAll('ü', 'u')
-        .replaceAll('ö', 'o')
-        .replaceAll('ç', 'c');
-  }
-
-  bool _teacherHasSubject(
-    Map<String, dynamic> data,
-    String subject,
-  ) {
-    final targetSubject = _normalizeSubject(subject);
-    final teacherSubjects = <String>[];
-
-    final rawSubjects = data['subjects'];
-
-    if (rawSubjects is List) {
-      teacherSubjects.addAll(
-        rawSubjects
-            .map((item) => item.toString().trim())
-            .where((item) => item.isNotEmpty),
-      );
-    } else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
-      teacherSubjects.addAll(
-        rawSubjects
-            .split(RegExp(r'[,;/|]'))
-            .map((item) => item.trim())
-            .where((item) => item.isNotEmpty),
-      );
-    }
-
-    final branch = data['branch']?.toString().trim() ?? '';
-    final legacySubject = data['subject']?.toString().trim() ?? '';
-
-    if (branch.isNotEmpty) {
-      teacherSubjects.add(branch);
-    }
-
-    if (legacySubject.isNotEmpty) {
-      teacherSubjects.add(legacySubject);
-    }
-
-    return teacherSubjects.any(
-      (teacherSubject) => _normalizeSubject(teacherSubject) == targetSubject,
-    );
   }
 
   int _timeToMinutes(String time) {
@@ -232,128 +179,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     });
   }
 
-  Future<Map<String, dynamic>?> _findBestAvailableTeacher(
-    String subject,
-  ) async {
-    final teachersSnapshot = await _firestore
-        .collection('users')
-        .where('role', isEqualTo: 'teacher')
-        .get();
-
-    final availableTeachers = teachersSnapshot.docs.where((doc) {
-      final data = doc.data();
-
-      final status = data['teacherStatus']?.toString().trim() ?? 'absent';
-
-      if (status != 'available') {
-        return false;
-      }
-
-      return _teacherHasSubject(data, subject);
-    }).toList();
-
-    if (availableTeachers.isEmpty) {
-      return null;
-    }
-
-    final now = DateTime.now();
-    final todayStart = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    );
-
-    final queuesSnapshot = await _firestore.collection('queues').where(
-      'status',
-      whereIn: ['waiting', 'in_progress'],
-    ).get();
-
-    final todayCompletedSnapshot = await _firestore
-        .collection('queues')
-        .where('status', isEqualTo: 'completed')
-        .where(
-          'completedAt',
-          isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart),
-        )
-        .get();
-
-    final Map<String, int> teacherScore = {
-      for (final teacher in availableTeachers) teacher.id: 0,
-    };
-
-    for (final queue in queuesSnapshot.docs) {
-      final data = queue.data();
-      final teacherId = data['teacherId']?.toString();
-      final status = data['status']?.toString();
-
-      if (teacherId == null || !teacherScore.containsKey(teacherId)) {
-        continue;
-      }
-
-      if (status == 'in_progress') {
-        teacherScore[teacherId] = (teacherScore[teacherId] ?? 0) + 3;
-      } else if (status == 'waiting') {
-        teacherScore[teacherId] = (teacherScore[teacherId] ?? 0) + 1;
-      }
-    }
-
-    final Map<String, int> todaySolved = {};
-
-    for (final queue in todayCompletedSnapshot.docs) {
-      final teacherId = queue.data()['teacherId']?.toString();
-
-      if (teacherId == null || !teacherScore.containsKey(teacherId)) {
-        continue;
-      }
-
-      todaySolved[teacherId] = (todaySolved[teacherId] ?? 0) + 1;
-    }
-
-    for (final entry in todaySolved.entries) {
-      teacherScore[entry.key] =
-          (teacherScore[entry.key] ?? 0) + (entry.value ~/ 10);
-    }
-
-    final teachers = availableTeachers.toList();
-
-    teachers.shuffle();
-
-    teachers.sort((a, b) {
-      final aScore = teacherScore[a.id] ?? 0;
-      final bScore = teacherScore[b.id] ?? 0;
-
-      return aScore.compareTo(bScore);
-    });
-
-    final bestTeacher = teachers.first;
-    final data = bestTeacher.data();
-
-    return {
-      'id': bestTeacher.id,
-      'name': data['fullName'] ?? data['name'] ?? data['email'] ?? 'Öğretmen',
-      'score': teacherScore[bestTeacher.id] ?? 0,
-    };
-  }
-
-  Future<void> _checkZumreAvailability() async {
-    try {
-      if (await _checkLocalZumreAvailability()) {
-        return;
-      }
-    } catch (_) {}
-
-    try {
-      final runtimeDoc =
-          await _firestore.collection('settings').doc('runtimeState').get();
-
-      if (_applyRuntimeZumreState(runtimeDoc.data())) {
-        return;
-      }
-    } catch (_) {}
-
-    await _checkLocalZumreAvailability();
-  }
-
   Future<bool> _checkLocalZumreAvailability() async {
     final now = DateTime.now();
     final isWeekend =
@@ -436,7 +261,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     _cooldownTimer?.cancel();
     _studentSubscription?.cancel();
     _runtimeStateSubscription?.cancel();
-    _teacherListSubscription?.cancel();
     super.dispose();
   }
 
@@ -722,16 +546,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     final docs = waitingQueues.docs.toList();
 
-    docs.sort((a, b) {
-      final aTime = a.data()['createdAt'] as Timestamp?;
-      final bTime = b.data()['createdAt'] as Timestamp?;
-
-      if (aTime == null && bTime == null) return 0;
-      if (aTime == null) return 1;
-      if (bTime == null) return -1;
-
-      return aTime.compareTo(bTime);
-    });
+    docs.sort((a, b) => compareQueuePriority(a.data(), b.data()));
 
     int position = 1;
 
@@ -747,85 +562,22 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }
   }
 
-  Future<void> _loadTeachersForSubject(String subject) async {
-    if (subject.trim().isEmpty) return;
-    _teacherListSubscription?.cancel();
-
-    if (mounted) {
-      setState(() {
-        _isLoadingTeachers = true;
-        _teachersForSubject = [];
-        _selectedTeacherId = null;
-        _selectedTeacherName = null;
-        _useSmartTeacherSelection = true;
-      });
-    }
-
-    try {
-      _teacherListSubscription = _firestore
-          .collection('users')
-          .where('role', isEqualTo: 'teacher')
-          .snapshots()
-          .listen((snapshot) {
-        final teachers = <Map<String, dynamic>>[];
-
-        for (final doc in snapshot.docs) {
-          final data = doc.data();
-
-          final status = data['teacherStatus']?.toString().trim() ?? '';
-
-          // Yalnızca müsait öğretmen
-          if (status != 'available') {
-            continue;
-          }
-
-          if (!_teacherHasSubject(data, subject)) {
-            continue;
-          }
-
-          teachers.add({
-            'id': doc.id,
-            'name':
-                data['fullName'] ?? data['name'] ?? data['email'] ?? 'Öğretmen',
-          });
-        }
-
-        teachers.sort(
-          (a, b) => a['name'].toString().compareTo(b['name'].toString()),
-        );
-
-        if (!mounted) return;
-
-        final selectedStillAvailable = _selectedTeacherId == null ||
-            teachers.any((teacher) => teacher['id'] == _selectedTeacherId);
-
-        setState(() {
-          _teachersForSubject = teachers;
-          _isLoadingTeachers = false;
-
-          if (!selectedStillAvailable) {
-            _selectedTeacherId = null;
-            _selectedTeacherName = null;
-            _useSmartTeacherSelection = true;
-          }
-        });
-      }, onError: (_) {
-        if (mounted) {
-          setState(() {
-            _isLoadingTeachers = false;
-          });
-        }
-      });
-    } catch (_) {}
-  }
-
   Future<void> _joinQueue() async {
+    if (_isRoutingQueue) return;
+
     if (_remainingCooldownSeconds > 0 ||
         DateTime.now().millisecondsSinceEpoch < _cooldownUntil) {
       return;
     }
 
-    await _checkZumreAvailability();
+    if (_selectedSubject == null || _selectedSubject!.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Lütfen bir ders seçin.'),
+        ),
+      );
+      return;
+    }
 
     if (!_isZumreOpenNow || _isLunchNow) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -834,40 +586,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       return;
     }
 
-    String? finalTeacherId = _selectedTeacherId;
-    String? finalTeacherName = _selectedTeacherName;
-
-    if (_useSmartTeacherSelection) {
-      _showSmartTeacherLoadingDialog();
-
-      try {
-        final bestTeacher = await _findBestAvailableTeacher(_selectedSubject!);
-
-        if (bestTeacher == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Şu an müsait öğretmen bulunamadı.'),
-            ),
-          );
-          return;
-        }
-
-        finalTeacherId = bestTeacher['id'];
-        finalTeacherName = bestTeacher['name'];
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sıra alınamadı: $e')),
-        );
-      } finally {
-        _hideSmartTeacherLoadingDialog();
-      }
-    }
-    final studentDoc =
-        await _firestore.collection('users').doc(_auth.currentUser!.uid).get();
-
-    final studentData = studentDoc.data() ?? {};
-
-    if (studentData['isInStudySession'] == true) {
+    if (_isInStudySession) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -877,125 +596,47 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       );
       return;
     }
-    if (_selectedSubject == null || _selectedSubject!.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Lütfen bir ders seçin.'),
-        ),
-      );
-      return;
-    }
-    if (!_useSmartTeacherSelection &&
-        (_selectedTeacherId == null || _selectedTeacherId!.trim().isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Lütfen bir öğretmen seçin.'),
-        ),
-      );
-      return;
-    }
 
-    final userId = _auth.currentUser!.uid;
-
-    final existing = await _firestore
-        .collection('queues')
-        .where('studentId', isEqualTo: userId)
-        .where('status', whereIn: ['waiting', 'in_progress']).get();
-
-    if (existing.docs.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Zaten aktif bir sıranız var')),
-      );
-      return;
-    }
-    if (finalTeacherId == null || finalTeacherId.trim().isEmpty) {
-      final fallbackTeacher =
-          await _findBestAvailableTeacher(_selectedSubject!);
-
-      if (fallbackTeacher == null) {
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '$_selectedSubject dersi için şu an müsait öğretmen bulunamadı.',
-            ),
-          ),
-        );
-        return;
-      }
-
-      finalTeacherId = fallbackTeacher['id']?.toString();
-      finalTeacherName = fallbackTeacher['name']?.toString() ?? 'Öğretmen';
-    }
-
-    final String? resolvedTeacherId = finalTeacherId;
-    final teacherDoc =
-        await _firestore.collection('users').doc(resolvedTeacherId).get();
-    final teacherData = teacherDoc.data() ?? {};
-
-    if (!teacherDoc.exists ||
-        teacherData['teacherStatus']?.toString().trim() != 'available' ||
-        !_teacherHasSubject(teacherData, _selectedSubject!)) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Seçilen öğretmen şu anda müsait değil. Lütfen tekrar deneyin.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    final latestActiveQueue = await _firestore
-        .collection('queues')
-        .where('studentId', isEqualTo: userId)
-        .where('status', whereIn: ['waiting', 'in_progress'])
-        .limit(1)
-        .get();
-
-    if (latestActiveQueue.docs.isNotEmpty) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Zaten aktif bir sıranız var')),
-      );
-      return;
-    }
+    setState(() {
+      _isRoutingQueue = true;
+    });
 
     try {
-      final newQueue = {
-        'teacherName': finalTeacherName,
-        'studentId': userId,
-        'teacherId': resolvedTeacherId,
+      final callable = _functions.httpsCallable('routeQueueRequest');
+      final response = await callable.call<Map<String, dynamic>>({
         'subject': _selectedSubject,
-        'status': 'waiting',
-        'studentName': _studentName,
         'questionCount': _selectedQuestionCount,
-        'estimatedMinutes':
-            _estimatedMinutesForQuestionCount(_selectedQuestionCount),
-        'extraMinutes': 0,
-        'createdAt': FieldValue.serverTimestamp(),
-      };
+      });
+      final data = response.data;
+      final queueId = data['queueId']?.toString();
 
-      final docRef = await _firestore.collection('queues').add(newQueue);
+      if (queueId == null || queueId.isEmpty) {
+        throw Exception('Sıra kaydı oluşturulamadı.');
+      }
 
       if (mounted) {
         setState(() {
           _isInQueue = true;
-          _currentQueueId = docRef.id;
+          _currentQueueId = queueId;
+          _currentTeacherName = data['teacherName']?.toString();
           _queuePosition = 1;
         });
       }
 
-      _listenToQueue(docRef.id);
-      _getCurrentTeacherName(finalTeacherId);
+      if (!mounted) return;
+      _listenToQueue(queueId);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sıranız alındı! Lütfen bekleyin.')),
       );
+    } on FirebaseFunctionsException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message ?? 'Sıra alınamadı.'),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1006,7 +647,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       }
 
       return;
-    } finally {}
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRoutingQueue = false;
+        });
+      }
+    }
   }
 
   Future<bool> _studentConfirmDialog({
@@ -1040,7 +687,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   border: Border.all(color: Colors.white24),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.28),
+                      color: Colors.black.withValues(alpha: 0.28),
                       blurRadius: 24,
                       offset: const Offset(0, 12),
                     ),
@@ -1053,9 +700,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       width: 58,
                       height: 58,
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.16),
+                        color: color.withValues(alpha: 0.16),
                         shape: BoxShape.circle,
-                        border: Border.all(color: color.withOpacity(0.35)),
+                        border: Border.all(color: color.withValues(alpha: 0.35)),
                       ),
                       child: Icon(icon, color: color, size: 30),
                     ),
@@ -1179,56 +826,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         _queueSubscription?.cancel();
         _queueSubscription = null;
       } catch (e) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('İptal sırasında hata: $e')),
         );
       }
-    }
-  }
-
-  void _showSmartTeacherLoadingDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [
-                Color(0xFF1A1240),
-                Color(0xFF2B1768),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: Colors.white24),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: Color(0xFF7C4DFF)),
-              SizedBox(width: 18),
-              Expanded(
-                child: Text(
-                  'En uygun öğretmen belirleniyor...\nLütfen bekleyin.',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    height: 1.35,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _hideSmartTeacherLoadingDialog() {
-    if (mounted && Navigator.canPop(context)) {
-      Navigator.pop(context);
     }
   }
 
@@ -1250,10 +852,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.greenAccent.withOpacity(0.14),
+          color: Colors.greenAccent.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: Colors.greenAccent.withOpacity(0.35),
+            color: Colors.greenAccent.withValues(alpha: 0.35),
           ),
         ),
         child: const Row(
@@ -1281,10 +883,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.orangeAccent.withOpacity(0.14),
+        color: Colors.orangeAccent.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: Colors.orangeAccent.withOpacity(0.35),
+          color: Colors.orangeAccent.withValues(alpha: 0.35),
         ),
       ),
       child: Row(
@@ -1339,9 +941,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
+        color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.14)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1356,9 +958,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           ),
           const SizedBox(height: 14),
           Row(
-            children: options.map((count) {
-              final selected = _selectedQuestionCount == count;
-              final label = count == 4 ? '4+' : '$count';
+            children: options.map((questionCount) {
+              final selected = _selectedQuestionCount == questionCount;
+              final label = questionCount == 4 ? '4+' : '$questionCount';
 
               return Expanded(
                 child: Padding(
@@ -1367,7 +969,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     borderRadius: BorderRadius.circular(16),
                     onTap: () {
                       setState(() {
-                        _selectedQuestionCount = count;
+                        _selectedQuestionCount = questionCount;
                       });
                     },
                     child: AnimatedContainer(
@@ -1376,11 +978,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       decoration: BoxDecoration(
                         color: selected
                             ? const Color(0xFF6C3DFF)
-                            : Colors.white.withOpacity(0.08),
+                            : Colors.white.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: selected
-                              ? Colors.white.withOpacity(0.55)
+                              ? Colors.white.withValues(alpha: 0.55)
                               : Colors.white24,
                         ),
                       ),
@@ -1421,20 +1023,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       onTap: () {
         setState(() {
           _selectedSubject = title;
-          _selectedTeacherId = null;
-          _selectedTeacherName = null;
-          _teachersForSubject = [];
-          _useSmartTeacherSelection = true;
         });
-
-        _loadTeachersForSubject(title);
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         decoration: BoxDecoration(
           color: selected
-              ? color.withOpacity(0.26)
-              : Colors.white.withOpacity(0.08),
+              ? color.withValues(alpha: 0.26)
+              : Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: selected ? color : Colors.white24,
@@ -1469,14 +1065,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       margin: const EdgeInsets.only(bottom: 18),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.orange.withOpacity(0.16),
+        color: Colors.orange.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: Colors.orangeAccent.withOpacity(0.45),
+          color: Colors.orangeAccent.withValues(alpha: 0.45),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.16),
+            color: Colors.black.withValues(alpha: 0.16),
             blurRadius: 14,
             offset: const Offset(0, 6),
           ),
@@ -1488,7 +1084,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             width: 52,
             height: 52,
             decoration: BoxDecoration(
-              color: Colors.orange.withOpacity(0.20),
+              color: Colors.orange.withValues(alpha: 0.20),
               shape: BoxShape.circle,
             ),
             child: const Icon(
@@ -1543,10 +1139,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.orangeAccent.withOpacity(0.12),
+                color: Colors.orangeAccent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(16),
                 border:
-                    Border.all(color: Colors.orangeAccent.withOpacity(0.25)),
+                    Border.all(color: Colors.orangeAccent.withValues(alpha: 0.25)),
               ),
               child: const Text(
                 'Şu anda etütte görünüyorsunuz. Etüt bitince zümre sırası alabilirsiniz.',
@@ -1567,7 +1163,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           const SizedBox(height: 24),
           const SizedBox(height: 18),
           _buildQuestionCountSelector(),
-          _buildTeacherSelector(),
           const SizedBox(height: 24),
           _buildJoinQueueButton(),
         ],
@@ -1584,15 +1179,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withOpacity(0.12),
-            const Color(0xFF6C3DFF).withOpacity(0.22),
+            Colors.white.withValues(alpha: 0.12),
+            const Color(0xFF6C3DFF).withValues(alpha: 0.22),
           ],
         ),
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.white.withOpacity(0.18)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.22),
+            color: Colors.black.withValues(alpha: 0.22),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -1607,9 +1202,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 width: 66,
                 height: 66,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF6C3DFF).withOpacity(0.22),
+                  color: const Color(0xFF6C3DFF).withValues(alpha: 0.22),
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withOpacity(0.18)),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
                 ),
                 child: const Icon(
                   Icons.school,
@@ -1685,84 +1280,34 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildTeacherSelector() {
-    if (_selectedSubject == null) {
-      return const SizedBox();
-    }
-
-    if (_isLoadingTeachers) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: DropdownButtonFormField<String>(
-        value: _useSmartTeacherSelection ? 'smart' : _selectedTeacherId,
-        dropdownColor: const Color(0xFF1A1F3A),
-        style: const TextStyle(color: Colors.white),
-        decoration: const InputDecoration(
-          labelText: 'Öğretmen Seç',
-          labelStyle: TextStyle(color: Colors.white70),
-        ),
-        items: [
-          const DropdownMenuItem<String>(
-            value: 'smart',
-            child: Text('✨ En Uygun Öğretmene Yönlendir'),
-          ),
-          ..._teachersForSubject.map<DropdownMenuItem<String>>((teacher) {
-            return DropdownMenuItem<String>(
-              value: teacher['id'].toString(),
-              child: Text(
-                (teacher['name'] ?? 'Öğretmen').toString(),
-              ),
-            );
-          }),
-        ],
-        onChanged: (value) {
-          setState(() {
-            if (value == 'smart') {
-              _useSmartTeacherSelection = true;
-              _selectedTeacherId = null;
-              _selectedTeacherName = null;
-              return;
-            }
-
-            _useSmartTeacherSelection = false;
-            _selectedTeacherId = value;
-
-            final teacher = _teachersForSubject.firstWhere(
-              (t) => t['id'] == value,
-            );
-
-            _selectedTeacherName = (teacher['name'] ?? 'Öğretmen').toString();
-          });
-        },
-      ),
-    );
-  }
-
   Widget _buildJoinQueueButton() {
     final canJoinQueue = _selectedSubject != null &&
         _remainingCooldownSeconds <= 0 &&
         _isZumreOpenNow &&
         !_isLunchNow &&
-        !_isInStudySession;
+        !_isInStudySession &&
+        !_isRoutingQueue;
 
     return SizedBox(
       width: double.infinity,
       height: 58,
       child: ElevatedButton.icon(
         onPressed: canJoinQueue ? _joinQueue : null,
-        icon: const Icon(Icons.flash_on),
-        label: const Text(
-          "Sıra Al",
-          style: TextStyle(
+        icon: _isRoutingQueue
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(Icons.auto_awesome_rounded),
+        label: Text(
+          _isRoutingQueue
+              ? 'En uygun sıra belirleniyor...'
+              : '✨ Uygun öğretmene yönlendir',
+          style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
           ),
@@ -1786,13 +1331,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: (_isZumreOpenNow && !_isLunchNow)
-            ? Colors.greenAccent.withOpacity(0.12)
-            : Colors.orangeAccent.withOpacity(0.12),
+            ? Colors.greenAccent.withValues(alpha: 0.12)
+            : Colors.orangeAccent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: (_isZumreOpenNow && !_isLunchNow)
-              ? Colors.greenAccent.withOpacity(0.30)
-              : Colors.orangeAccent.withOpacity(0.30),
+              ? Colors.greenAccent.withValues(alpha: 0.30)
+              : Colors.orangeAccent.withValues(alpha: 0.30),
         ),
       ),
       child: Row(
@@ -1826,10 +1371,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(26),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.10),
+            color: Colors.white.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(30),
             border: Border.all(
-              color: Colors.white.withOpacity(0.18),
+              color: Colors.white.withValues(alpha: 0.18),
             ),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1838,8 +1383,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               height: 86,
               decoration: BoxDecoration(
                 color: isTeacherWorking
-                    ? Colors.green.withOpacity(0.18)
-                    : Colors.blue.withOpacity(0.18),
+                    ? Colors.green.withValues(alpha: 0.18)
+                    : Colors.blue.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -1880,7 +1425,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.10),
+                  color: Colors.white.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Row(
@@ -1908,7 +1453,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.08),
+                color: Colors.white.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Column(
@@ -1946,7 +1491,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.redAccent,
-                  disabledBackgroundColor: Colors.white.withOpacity(0.12),
+                  disabledBackgroundColor: Colors.white.withValues(alpha: 0.12),
                   foregroundColor: Colors.white,
                   disabledForegroundColor: Colors.white54,
                   shape: RoundedRectangleBorder(
@@ -1964,10 +1509,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.06),
+                  color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: Colors.white.withOpacity(0.08),
+                    color: Colors.white.withValues(alpha: 0.08),
                   ),
                 ),
                 child: const Row(

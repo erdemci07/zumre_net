@@ -139,9 +139,7 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       allow create: if isStudent()
-        && request.resource.data.studentId == request.auth.uid
-        && request.resource.data.status == "waiting"
-        && canStartZumreQueue();
+        && false;
 
       allow create: if isTeacher()
         && request.resource.data.teacherId == request.auth.uid

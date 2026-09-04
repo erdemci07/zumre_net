@@ -655,6 +655,171 @@ function cleanSubjects(value) {
     .filter((item, index, list) => item && list.indexOf(item) === index);
 }
 
+function normalizeSubjectText(value) {
+  return cleanText(value)
+    .toLocaleLowerCase("tr-TR")
+    .replace(/ı/g, "i")
+    .replace(/ş/g, "s")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c");
+}
+
+function teacherSubjects(teacherData = {}) {
+  const subjects = [];
+  const rawSubjects = teacherData.subjects;
+
+  if (Array.isArray(rawSubjects)) {
+    subjects.push(...rawSubjects);
+  } else if (typeof rawSubjects === "string") {
+    subjects.push(...rawSubjects.split(/[,;/|]/));
+  }
+
+  if (teacherData.branch) {
+    subjects.push(teacherData.branch);
+  }
+
+  if (teacherData.subject) {
+    subjects.push(teacherData.subject);
+  }
+
+  return subjects
+    .map((item) => cleanText(item))
+    .filter((item) => item);
+}
+
+function teacherHasSubject(teacherData, subject) {
+  const normalizedSubject = normalizeSubjectText(subject);
+  return teacherSubjects(teacherData).some(
+    (teacherSubject) => normalizeSubjectText(teacherSubject) === normalizedSubject
+  );
+}
+
+function normalizeQuestionCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+
+  return Math.min(Math.max(Math.trunc(parsed), 1), 4);
+}
+
+function estimatedMinutesForQuestionCount(questionCount) {
+  if (questionCount === 1) return 4;
+  if (questionCount === 2) return 7;
+  if (questionCount === 3) return 10;
+  return 13;
+}
+
+function selectBestTeacher(candidates, activeQueueDocs, newQuestionCount) {
+  const teacherLoad = new Map();
+
+  for (const candidate of candidates) {
+    teacherLoad.set(candidate.id, {
+      teacher: candidate,
+      estimatedLoad: 0,
+      waitingCount: 0,
+    });
+  }
+
+  for (const queueDoc of activeQueueDocs) {
+    const queueData = queueDoc.data();
+    const teacherId = queueData.teacherId;
+    const load = teacherLoad.get(teacherId);
+    if (!load) continue;
+
+    const status = queueData.status;
+    const weight = normalizeQuestionCount(queueData.questionCount);
+    if (status === "waiting") {
+      load.waitingCount += 1;
+      load.estimatedLoad += weight;
+    } else if (status === "in_progress") {
+      load.estimatedLoad += weight;
+    }
+  }
+
+  let loads = Array.from(teacherLoad.values());
+  const belowSoftCap = loads.filter((item) => item.waitingCount < 3);
+
+  if (belowSoftCap.length > 0) {
+    loads = belowSoftCap;
+  }
+
+  loads.sort((a, b) => {
+    if (a.estimatedLoad !== b.estimatedLoad) {
+      return a.estimatedLoad - b.estimatedLoad;
+    }
+
+    if (a.waitingCount !== b.waitingCount) {
+      return a.waitingCount - b.waitingCount;
+    }
+
+    return Math.random() < 0.5 ? -1 : 1;
+  });
+
+  const selected = loads[0] || null;
+  if (!selected) return null;
+
+  return {
+    ...selected,
+    nextEstimatedLoad: selected.estimatedLoad + newQuestionCount,
+  };
+}
+
+async function assertRoleCaller(request, role) {
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Oturum doğrulanamadı."
+    );
+  }
+
+  const userDoc = await db.collection("users").doc(request.auth.uid).get();
+
+  if (!userDoc.exists || userDoc.data()?.role !== role) {
+    throw new HttpsError(
+      "permission-denied",
+      "Bu işlem için yetkiniz yok."
+    );
+  }
+
+  return {
+    uid: request.auth.uid,
+    data: userDoc.data() || {},
+    ref: userDoc.ref,
+  };
+}
+
+function assertQueueRuntimeOpen(scheduleData, runtimeData, now = new Date()) {
+  const runtimeState = buildEffectiveRuntimeState(
+    scheduleData,
+    runtimeData,
+    now
+  );
+
+  if (runtimeState.institutionMode !== "active") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Kurum şu anda sıra alımına kapalı."
+    );
+  }
+
+  if (runtimeState.isLunchBreak) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Öğle arasında zümre sırası alınamaz."
+    );
+  }
+
+  if (!runtimeState.isZumreOpen) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Zümre saati dışında sıra alınamaz."
+    );
+  }
+}
+
 function validateUserPayload(data, options = {}) {
   const username = normalizeUsername(data?.username);
   const email = emailFromUsername(username);
@@ -1293,6 +1458,305 @@ exports.setInstitutionMode = onCall(
       examType,
       examEndsAt: endTimestamp.toDate().toISOString(),
       closedStudySessions: studyCloseResult.closedCount,
+    };
+  }
+);
+
+exports.routeQueueRequest = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const startedAt = Date.now();
+    const student = await assertRoleCaller(request, "student");
+    const subject = cleanText(request.data?.subject);
+    const questionCount = normalizeQuestionCount(request.data?.questionCount);
+    const estimatedMinutes = estimatedMinutesForQuestionCount(questionCount);
+
+    if (!subject) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Lütfen bir ders seçin."
+      );
+    }
+
+    const scheduleRef = db.collection("settings").doc("zumreSchedule");
+    const runtimeRef = db.collection("settings").doc("runtimeState");
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [
+        scheduleDoc,
+        runtimeDoc,
+        studentDoc,
+        activeQueuesSnapshot,
+        teachersSnapshot,
+      ] = await Promise.all([
+        transaction.get(scheduleRef),
+        transaction.get(runtimeRef),
+        transaction.get(student.ref),
+        transaction.get(
+          db.collection("queues")
+            .where("status", "in", ["waiting", "in_progress"])
+        ),
+        transaction.get(
+          db.collection("users")
+            .where("role", "==", "teacher")
+            .where("teacherStatus", "==", "available")
+        ),
+      ]);
+
+      assertQueueRuntimeOpen(
+        scheduleDoc.data() || {},
+        runtimeDoc.data() || {},
+        new Date()
+      );
+
+      if (!studentDoc.exists || studentDoc.data()?.role !== "student") {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu işlem için yetkiniz yok."
+        );
+      }
+
+      const studentData = studentDoc.data() || {};
+
+      if (studentData.isInStudySession === true) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Etütteyken zümre sırası alınamaz."
+        );
+      }
+
+      const existingQueue = activeQueuesSnapshot.docs.find(
+        (doc) => doc.data().studentId === student.uid
+      );
+
+      if (existingQueue) {
+        throw new HttpsError(
+          "already-exists",
+          "Zaten aktif bir sıranız var."
+        );
+      }
+
+      const candidateTeachers = teachersSnapshot.docs.filter(
+        (doc) => teacherHasSubject(doc.data(), subject)
+      );
+
+      if (candidateTeachers.length === 0) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Bu ders için şu anda müsait öğretmen bulunamadı."
+        );
+      }
+
+      const selected = selectBestTeacher(
+        candidateTeachers,
+        activeQueuesSnapshot.docs,
+        questionCount
+      );
+
+      if (!selected) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Bu ders için şu anda müsait öğretmen bulunamadı."
+        );
+      }
+
+      const teacherData = selected.teacher.data();
+      const teacherName =
+        teacherData.fullName ||
+        teacherData.name ||
+        teacherData.email ||
+        "Öğretmen";
+      const queueRef = db.collection("queues").doc();
+
+      transaction.set(queueRef, {
+        teacherName,
+        studentId: student.uid,
+        teacherId: selected.teacher.id,
+        subject,
+        status: "waiting",
+        studentName:
+          studentData.fullName ||
+          studentData.name ||
+          studentData.username ||
+          "Öğrenci",
+        questionCount,
+        estimatedMinutes,
+        extraMinutes: 0,
+        createdAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+        routedBy: "server",
+      });
+
+      transaction.update(student.ref, {
+        lastQueueRequestAt: fieldValue.serverTimestamp(),
+      });
+      transaction.update(selected.teacher.ref, {
+        lastQueueRoutedAt: fieldValue.serverTimestamp(),
+      });
+
+      return {
+        queueId: queueRef.id,
+        teacherId: selected.teacher.id,
+        teacherName,
+        candidateCount: candidateTeachers.length,
+        activeQueueCount: activeQueuesSnapshot.size,
+      };
+    });
+
+    console.log("routeQueueRequest", {
+      uid: student.uid,
+      subject,
+      questionCount,
+      queueId: result.queueId,
+      teacherId: result.teacherId,
+      candidateCount: result.candidateCount,
+      activeQueueCount: result.activeQueueCount,
+      totalMs: Date.now() - startedAt,
+    });
+
+    return {
+      ok: true,
+      queueId: result.queueId,
+      teacherId: result.teacherId,
+      teacherName: result.teacherName,
+    };
+  }
+);
+
+exports.routeQueueTransfer = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const startedAt = Date.now();
+    const teacher = await assertRoleCaller(request, "teacher");
+    const queueId = cleanText(request.data?.queueId);
+
+    if (!queueId) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Geçersiz sıra bilgisi."
+      );
+    }
+
+    const queueRef = db.collection("queues").doc(queueId);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [queueDoc, activeQueuesSnapshot, teachersSnapshot] =
+        await Promise.all([
+          transaction.get(queueRef),
+          transaction.get(
+            db.collection("queues")
+              .where("status", "in", ["waiting", "in_progress"])
+          ),
+          transaction.get(
+            db.collection("users")
+              .where("role", "==", "teacher")
+              .where("teacherStatus", "==", "available")
+          ),
+        ]);
+
+      if (!queueDoc.exists) {
+        throw new HttpsError(
+          "not-found",
+          "Sıra kaydı bulunamadı."
+        );
+      }
+
+      const queueData = queueDoc.data() || {};
+      const status = queueData.status;
+
+      if (queueData.teacherId !== teacher.uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu sırayı devretme yetkiniz yok."
+        );
+      }
+
+      if (status !== "waiting" && status !== "in_progress") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Yalnızca aktif veya bekleyen sorular devredilebilir."
+        );
+      }
+
+      const subject = cleanText(queueData.subject);
+      const questionCount = normalizeQuestionCount(queueData.questionCount);
+      const candidateTeachers = teachersSnapshot.docs.filter(
+        (doc) =>
+          doc.id !== teacher.uid &&
+          teacherHasSubject(doc.data(), subject)
+      );
+
+      if (candidateTeachers.length === 0) {
+        throw new HttpsError(
+          "failed-precondition",
+          `${subject} branşında devredilebilecek müsait öğretmen bulunamadı.`
+        );
+      }
+
+      const selected = selectBestTeacher(
+        candidateTeachers,
+        activeQueuesSnapshot.docs.filter((doc) => doc.id !== queueDoc.id),
+        questionCount
+      );
+
+      if (!selected) {
+        throw new HttpsError(
+          "failed-precondition",
+          `${subject} branşında devredilebilecek müsait öğretmen bulunamadı.`
+        );
+      }
+
+      const selectedData = selected.teacher.data();
+      const selectedTeacherName =
+        selectedData.fullName ||
+        selectedData.name ||
+        selectedData.email ||
+        "Öğretmen";
+
+      transaction.update(queueRef, {
+        teacherId: selected.teacher.id,
+        teacherName: selectedTeacherName,
+        status: "waiting",
+        transferredAt: fieldValue.serverTimestamp(),
+        transferredFromTeacherId: teacher.uid,
+        transferredFromTeacherName:
+          teacher.data.fullName ||
+          teacher.data.name ||
+          teacher.data.email ||
+          "Öğretmen",
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+      transaction.update(selected.teacher.ref, {
+        lastQueueRoutedAt: fieldValue.serverTimestamp(),
+      });
+
+      return {
+        teacherId: selected.teacher.id,
+        teacherName: selectedTeacherName,
+        subject,
+        candidateCount: candidateTeachers.length,
+        activeQueueCount: activeQueuesSnapshot.size,
+      };
+    });
+
+    console.log("routeQueueTransfer", {
+      uid: teacher.uid,
+      queueId,
+      subject: result.subject,
+      teacherId: result.teacherId,
+      candidateCount: result.candidateCount,
+      activeQueueCount: result.activeQueueCount,
+      totalMs: Date.now() - startedAt,
+    });
+
+    return {
+      ok: true,
+      teacherId: result.teacherId,
+      teacherName: result.teacherName,
     };
   }
 );

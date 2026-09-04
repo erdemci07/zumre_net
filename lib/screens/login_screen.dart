@@ -92,7 +92,7 @@ void _showLoginErrorDialog({
             border: Border.all(color: Colors.white24),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.35),
+                color: Colors.black.withValues(alpha: 0.35),
                 blurRadius: 26,
                 offset: const Offset(0, 12),
               ),
@@ -105,10 +105,10 @@ void _showLoginErrorDialog({
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: Colors.redAccent.withOpacity(0.16),
+                  color: Colors.redAccent.withValues(alpha: 0.16),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: Colors.redAccent.withOpacity(0.45),
+                    color: Colors.redAccent.withValues(alpha: 0.45),
                     width: 1.4,
                   ),
                 ),
@@ -199,12 +199,12 @@ Widget build(BuildContext context) {
             constraints: const BoxConstraints(maxWidth: 420),
             padding: const EdgeInsets.all(26),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.10),
+              color: Colors.white.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(32),
-              border: Border.all(color: Colors.white.withOpacity(0.18)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.25),
+                  color: Colors.black.withValues(alpha: 0.25),
                   blurRadius: 24,
                   offset: const Offset(0, 10),
                 ),
@@ -275,7 +275,7 @@ AutofillGroup(
             color: Colors.white70,
           ),
           filled: true,
-          fillColor: Colors.white.withOpacity(0.10),
+          fillColor: Colors.white.withValues(alpha: 0.10),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(18),
             borderSide: BorderSide.none,
@@ -306,7 +306,7 @@ AutofillGroup(
             color: Colors.white70,
           ),
           filled: true,
-          fillColor: Colors.white.withOpacity(0.10),
+          fillColor: Colors.white.withValues(alpha: 0.10),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(18),
             borderSide: BorderSide.none,

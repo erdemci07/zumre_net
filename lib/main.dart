@@ -39,7 +39,11 @@ class MyApp extends StatelessWidget {
   Future<Widget> _getHomeScreen(BuildContext context, User user) async {
     final auth = Provider.of<AuthService>(context, listen: false);
     final roleData = await auth.getUserRole(user.uid);
-    final role = roleData?['role'] ?? 'student';
+    if (roleData == null) {
+      return const LoginScreen();
+    }
+
+    final role = roleData['role'];
 
     if (role == 'teacher') {
       return const TeacherHomeScreen();
@@ -47,9 +51,12 @@ class MyApp extends StatelessWidget {
       return const AdminHomeScreen();
     } else if (role == 'studyGuard') {
       return const StudyGuardHomeScreen();
-    } else {
+    } else if (role == 'student') {
       return const StudentHomeScreen();
     }
+
+    await FirebaseAuth.instance.signOut();
+    throw StateError('Geçersiz kullanıcı rolü: $role');
   }
 
   @override

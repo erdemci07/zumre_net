@@ -1,4 +1,5 @@
 import base64
+import os
 import tempfile
 from typing import Optional
 
@@ -67,6 +68,8 @@ def analyze_file(request: AnalyzeRequest, _admin_uid: str = Depends(require_admi
     if request.type not in ["student", "teacher"]:
         raise HTTPException(status_code=400, detail="Geçersiz dosya tipi.")
 
+    tmp_path = None
+
     try:
         file_bytes = base64.b64decode(request.fileBase64)
 
@@ -82,6 +85,12 @@ def analyze_file(request: AnalyzeRequest, _admin_uid: str = Depends(require_admi
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 @app.post("/import")

@@ -16,8 +16,8 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
   String? _staffName;
   String? _staffRole;
-  String? _selectedDutyTeacherId = null;
-  String? _selectedDutyTeacherName = null;
+  String? _selectedDutyTeacherId;
+  String? _selectedDutyTeacherName;
   String _activeStudySlotText = 'Etüt saati';
 
   String? _activeSessionId;
@@ -813,7 +813,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                   border: Border.all(color: Colors.white24),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.28),
+                      color: Colors.black.withValues(alpha: 0.28),
                       blurRadius: 24,
                       offset: const Offset(0, 12),
                     ),
@@ -826,10 +826,10 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                       width: 68,
                       height: 68,
                       decoration: BoxDecoration(
-                        color: Colors.orangeAccent.withOpacity(0.16),
+                        color: Colors.orangeAccent.withValues(alpha: 0.16),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: Colors.orangeAccent.withOpacity(0.35),
+                          color: Colors.orangeAccent.withValues(alpha: 0.35),
                         ),
                       ),
                       child: const Icon(
@@ -993,6 +993,120 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     );
   }
 
+  Future<bool> _confirmLogout() async {
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 22),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 400),
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFF063B3B),
+                      Color(0xFF008A8A),
+                      Color(0xFF05272D),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: Colors.white24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.28),
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 62,
+                      height: 62,
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent.withValues(alpha: 0.16),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.redAccent.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.logout_rounded,
+                        color: Colors.redAccent,
+                        size: 32,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Çıkış Yap',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Etüt görevlisi oturumundan çıkmak istiyor musunuz?',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white38),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: const Text('Vazgeç'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            icon: const Icon(Icons.logout_rounded),
+                            label: const Text('Çıkış Yap'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.redAccent,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ) ??
+        false;
+  }
+
   Widget _header() {
     return Container(
       margin: const EdgeInsets.all(16),
@@ -1004,9 +1118,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
             width: 62,
             height: 62,
             decoration: BoxDecoration(
-              color: Colors.cyanAccent.withOpacity(0.16),
+              color: Colors.cyanAccent.withValues(alpha: 0.16),
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.cyanAccent.withOpacity(0.35)),
+              border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.35)),
             ),
             child: const Icon(
               Icons.fact_check_rounded,
@@ -1061,13 +1175,13 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                     height: 42,
                     decoration: BoxDecoration(
                       color: _selectedDutyTeacherId == null
-                          ? Colors.white.withOpacity(0.10)
-                          : Colors.cyanAccent.withOpacity(0.20),
+                          ? Colors.white.withValues(alpha: 0.10)
+                          : Colors.cyanAccent.withValues(alpha: 0.20),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: _selectedDutyTeacherId == null
                             ? Colors.white24
-                            : Colors.cyanAccent.withOpacity(0.50),
+                            : Colors.cyanAccent.withValues(alpha: 0.50),
                       ),
                     ),
                     child: Icon(
@@ -1096,13 +1210,17 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
               Tooltip(
                 message: 'Çıkış Yap',
                 child: InkWell(
-                  onTap: () async => _auth.signOut(),
+                  onTap: () async {
+                    final shouldLogout = await _confirmLogout();
+                    if (!shouldLogout) return;
+                    await _auth.signOut();
+                  },
                   borderRadius: BorderRadius.circular(16),
                   child: Container(
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.10),
+                      color: Colors.white.withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: Colors.white24),
                     ),
@@ -1136,13 +1254,13 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: active
-            ? Colors.greenAccent.withOpacity(0.14)
-            : Colors.orangeAccent.withOpacity(0.14),
+            ? Colors.greenAccent.withValues(alpha: 0.14)
+            : Colors.orangeAccent.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
           color: active
-              ? Colors.greenAccent.withOpacity(0.35)
-              : Colors.orangeAccent.withOpacity(0.35),
+              ? Colors.greenAccent.withValues(alpha: 0.35)
+              : Colors.orangeAccent.withValues(alpha: 0.35),
         ),
       ),
       child: Row(
@@ -1236,10 +1354,10 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Colors.greenAccent.withOpacity(.08),
+                        color: Colors.greenAccent.withValues(alpha: .08),
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
-                          color: Colors.greenAccent.withOpacity(.25),
+                          color: Colors.greenAccent.withValues(alpha: .25),
                         ),
                       ),
                       child: const Row(
@@ -1267,10 +1385,10 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: Colors.cyanAccent.withOpacity(0.10),
+                          color: Colors.cyanAccent.withValues(alpha: 0.10),
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(
-                            color: Colors.cyanAccent.withOpacity(0.25),
+                            color: Colors.cyanAccent.withValues(alpha: 0.25),
                           ),
                         ),
                         child: Row(
@@ -1310,6 +1428,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
     await showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -1343,10 +1462,10 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                           width: 52,
                           height: 52,
                           decoration: BoxDecoration(
-                            color: Colors.cyanAccent.withOpacity(0.16),
+                            color: Colors.cyanAccent.withValues(alpha: 0.16),
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: Colors.cyanAccent.withOpacity(0.35),
+                              color: Colors.cyanAccent.withValues(alpha: 0.35),
                             ),
                           ),
                           child: const Icon(
@@ -1391,10 +1510,10 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(13),
                         decoration: BoxDecoration(
-                          color: Colors.cyanAccent.withOpacity(0.12),
+                          color: Colors.cyanAccent.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(
-                            color: Colors.cyanAccent.withOpacity(0.30),
+                            color: Colors.cyanAccent.withValues(alpha: 0.30),
                           ),
                         ),
                         child: Row(
@@ -1476,7 +1595,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
                           return Container(
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.07),
+                              color: Colors.white.withValues(alpha: 0.07),
                               borderRadius: BorderRadius.circular(18),
                               border: Border.all(color: Colors.white12),
                             ),
@@ -1499,8 +1618,8 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                                 return ListTile(
                                   leading: CircleAvatar(
                                     backgroundColor: isSelected
-                                        ? Colors.cyanAccent.withOpacity(0.24)
-                                        : Colors.white.withOpacity(0.12),
+                                        ? Colors.cyanAccent.withValues(alpha: 0.24)
+                                        : Colors.white.withValues(alpha: 0.12),
                                     child: Icon(
                                       isSelected
                                           ? Icons.check
@@ -1678,9 +1797,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.orangeAccent.withOpacity(0.10),
+        color: Colors.orangeAccent.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.orangeAccent.withOpacity(0.22)),
+        border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.22)),
       ),
       child: const Row(
         children: [
@@ -1709,7 +1828,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
+        color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.white12),
       ),
@@ -1742,9 +1861,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.cyanAccent.withOpacity(0.09),
+        color: Colors.cyanAccent.withValues(alpha: 0.09),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.cyanAccent.withOpacity(0.22)),
+        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.22)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1841,6 +1960,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
     await showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -1873,10 +1993,10 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                           width: 52,
                           height: 52,
                           decoration: BoxDecoration(
-                            color: Colors.cyanAccent.withOpacity(0.16),
+                            color: Colors.cyanAccent.withValues(alpha: 0.16),
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: Colors.cyanAccent.withOpacity(0.35),
+                              color: Colors.cyanAccent.withValues(alpha: 0.35),
                             ),
                           ),
                           child: const Icon(
@@ -1925,7 +2045,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                         prefixIcon:
                             const Icon(Icons.search, color: Colors.white70),
                         filled: true,
-                        fillColor: Colors.white.withOpacity(0.10),
+                        fillColor: Colors.white.withValues(alpha: 0.10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(18),
                           borderSide: BorderSide.none,
@@ -1993,8 +2113,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                                     .contains(doc.id)) {
                                   return false;
                                 }
-                                if (data['isInStudySession'] == true)
+                                if (data['isInStudySession'] == true) {
                                   return false;
+                                }
                                 if (activeQueueStudentIds.contains(doc.id)) {
                                   return false;
                                 }
@@ -2028,7 +2149,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
                               return Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.07),
+                                  color: Colors.white.withValues(alpha: 0.07),
                                   borderRadius: BorderRadius.circular(18),
                                   border: Border.all(color: Colors.white12),
                                 ),
@@ -2116,7 +2237,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       leading: CircleAvatar(
-        backgroundColor: Colors.cyanAccent.withOpacity(0.22),
+        backgroundColor: Colors.cyanAccent.withValues(alpha: 0.22),
         child: const Icon(Icons.person, color: Colors.cyanAccent),
       ),
       title: Text(
@@ -2255,7 +2376,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.08),
+                        color: Colors.white.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(color: Colors.white12),
                       ),
@@ -2304,12 +2425,12 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
   BoxDecoration _cardDecoration() {
     return BoxDecoration(
-      color: Colors.white.withOpacity(0.10),
+      color: Colors.white.withValues(alpha: 0.10),
       borderRadius: BorderRadius.circular(26),
-      border: Border.all(color: Colors.white.withOpacity(0.15)),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.16),
+          color: Colors.black.withValues(alpha: 0.16),
           blurRadius: 14,
           offset: const Offset(0, 6),
         ),

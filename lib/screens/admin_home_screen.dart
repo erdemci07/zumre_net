@@ -21,7 +21,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   int _selectedIndex = 0;
 
   final List<String> _titles = const [
-    'Kurum Paneli',
+    'Yönetici Paneli',
     'Kullanıcılar',
   ];
 
@@ -74,12 +74,12 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         width: double.infinity,
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.10),
+          color: Colors.white.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: Colors.white.withOpacity(0.18)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.20),
+              color: Colors.black.withValues(alpha: 0.20),
               blurRadius: 18,
               offset: const Offset(0, 8),
             ),
@@ -91,7 +91,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.14),
+                color: Colors.white.withValues(alpha: 0.14),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -135,6 +135,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             IconButton(
               tooltip: 'Çıkış Yap',
               onPressed: () async {
+                final shouldLogout = await _confirmLogout();
+                if (!shouldLogout) return;
                 await FirebaseAuth.instance.signOut();
               },
               icon: const Icon(Icons.logout, color: Colors.white),
@@ -145,15 +147,114 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
+  Future<bool> _confirmLogout() async {
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 380),
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: const Color(0xFF071A3A),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: Colors.white24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.28),
+                    blurRadius: 24,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 58,
+                    height: 58,
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withValues(alpha: 0.16),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.redAccent.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.logout_rounded,
+                      color: Colors.redAccent,
+                      size: 30,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Çıkış Yap',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Yönetici oturumundan çıkmak istiyor musunuz?',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70, height: 1.35),
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white38),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: const Text('Vazgeç'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          icon: const Icon(Icons.logout_rounded),
+                          label: const Text('Çıkış Yap'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.redAccent,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ) ??
+        false;
+  }
+
   Widget _buildBottomNav() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: const Color(0xFF071A3A).withOpacity(0.92),
+          color: const Color(0xFF071A3A).withValues(alpha: 0.92),
           borderRadius: BorderRadius.circular(26),
-          border: Border.all(color: Colors.white.withOpacity(0.12)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
         ),
         child: Row(
           children: [
@@ -191,7 +292,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
             color:
-                selected ? Colors.white.withOpacity(0.14) : Colors.transparent,
+                selected ? Colors.white.withValues(alpha: 0.14) : Colors.transparent,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Column(
@@ -260,7 +361,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   int _totalSolvedToday = 0;
   int _totalSolvedAll = 0;
   bool _isLoading = true;
-  bool _isImporting = false;
+  final bool _isImporting = false;
   bool _isChangingInstitutionMode = false;
   Timer? _institutionCountdownTimer;
   final List<Map<String, String>> _weekdaySlots = [];
@@ -348,6 +449,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Future<void> _confirmClosedMode() async {
     final confirmed = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF071A3A),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -386,6 +488,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
     await showDialog<void>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -408,13 +511,26 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Deneme Modu',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Deneme Modu',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     const Text(
@@ -485,6 +601,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Future<void> _confirmEndExamEarly() async {
     final confirmed = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF071A3A),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -671,6 +788,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
     return showDialog<_ReportClassOption>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -687,7 +805,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   border: Border.all(color: Colors.white24),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.30),
+                      color: Colors.black.withValues(alpha: 0.30),
                       blurRadius: 24,
                       offset: const Offset(0, 12),
                     ),
@@ -703,10 +821,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: Colors.greenAccent.withOpacity(0.14),
+                            color: Colors.greenAccent.withValues(alpha: 0.14),
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: Colors.greenAccent.withOpacity(0.28),
+                              color: Colors.greenAccent.withValues(alpha: 0.28),
                             ),
                           ),
                           child: const Icon(
@@ -743,7 +861,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         labelText: 'Rapor sınıfı',
                         labelStyle: const TextStyle(color: Colors.white60),
                         filled: true,
-                        fillColor: Colors.white.withOpacity(0.08),
+                        fillColor: Colors.white.withValues(alpha: 0.08),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(18),
                           borderSide: const BorderSide(color: Colors.white12),
@@ -929,6 +1047,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
     await showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -963,7 +1082,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   border: Border.all(color: Colors.white24),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.30),
+                      color: Colors.black.withValues(alpha: 0.30),
                       blurRadius: 24,
                       offset: const Offset(0, 12),
                     ),
@@ -980,10 +1099,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
                             width: isMobile ? 44 : 52,
                             height: isMobile ? 44 : 52,
                             decoration: BoxDecoration(
-                              color: Colors.redAccent.withOpacity(0.16),
+                              color: Colors.redAccent.withValues(alpha: 0.16),
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: Colors.redAccent.withOpacity(0.35),
+                                color: Colors.redAccent.withValues(alpha: 0.35),
                               ),
                             ),
                             child: Icon(
@@ -1062,7 +1181,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         width: double.infinity,
                         padding: EdgeInsets.all(isMobile ? 12 : 14),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.08),
+                          color: Colors.white.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(color: Colors.white12),
                         ),
@@ -1278,7 +1397,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
       label: Text(label),
       selected: selected,
       onSelected: (_) => onSelected(value),
-      backgroundColor: Colors.white.withOpacity(0.08),
+      backgroundColor: Colors.white.withValues(alpha: 0.08),
       selectedColor: Colors.lightBlueAccent,
       labelStyle: TextStyle(
         color: selected ? const Color(0xFF071A3A) : Colors.white70,
@@ -1307,7 +1426,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
         constraints: BoxConstraints(minHeight: compact ? 82 : 132),
         padding: EdgeInsets.all(compact ? 13 : 15),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(enabled ? 0.08 : 0.04),
+          color: Colors.white.withValues(alpha: enabled ? 0.08 : 0.04),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: enabled ? Colors.white12 : Colors.white10),
         ),
@@ -1387,36 +1506,31 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Future<void> _loadStats() async {
     try {
       final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final tomorrowStart = todayStart.add(const Duration(days: 1));
 
-      final snapshot = await _firestore
+      final todaySnapshot = await _firestore
           .collection('queues')
           .where('status', isEqualTo: 'completed')
+          .where(
+            'completedAt',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart),
+          )
+          .where('completedAt', isLessThan: Timestamp.fromDate(tomorrowStart))
+          .count()
           .get();
 
-      int todayCount = 0;
-      int allCount = 0;
-
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-
-        final completedAt = data['completedAt'] as Timestamp?;
-        if (completedAt == null) continue;
-
-        final completedDate = completedAt.toDate();
-        allCount++;
-
-        if (completedDate.year == now.year &&
-            completedDate.month == now.month &&
-            completedDate.day == now.day) {
-          todayCount++;
-        }
-      }
+      final allSnapshot = await _firestore
+          .collection('queues')
+          .where('status', isEqualTo: 'completed')
+          .count()
+          .get();
 
       if (!mounted) return;
 
       setState(() {
-        _totalSolvedToday = todayCount;
-        _totalSolvedAll = allCount;
+        _totalSolvedToday = todaySnapshot.count ?? 0;
+        _totalSolvedAll = allSnapshot.count ?? 0;
         _isLoading = false;
       });
     } catch (e) {
@@ -1544,6 +1658,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Future<void> _showBulkImportChoiceDialog() async {
     await showDialog<void>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
@@ -1559,13 +1674,26 @@ class _StatisticsPageState extends State<StatisticsPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Toplu Kullanıcı Aktarımı',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 21,
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Toplu Kullanıcı Aktarımı',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 21,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 6),
               const Text(
@@ -1612,6 +1740,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
     return showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) {
         return Dialog(
           backgroundColor: Colors.transparent,
@@ -1649,6 +1778,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
                             fontSize: 21,
                             fontWeight: FontWeight.bold,
                           ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.white70,
                         ),
                       ),
                     ],
@@ -1803,6 +1939,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }) {
     return showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.symmetric(horizontal: 26),
@@ -1815,7 +1952,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
             border: Border.all(color: Colors.white24),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.28),
+                color: Colors.black.withValues(alpha: 0.28),
                 blurRadius: 24,
                 offset: const Offset(0, 12),
               ),
@@ -1828,7 +1965,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                 width: 58,
                 height: 58,
                 decoration: BoxDecoration(
-                  color: Colors.greenAccent.withOpacity(0.16),
+                  color: Colors.greenAccent.withValues(alpha: 0.16),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -1907,7 +2044,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
           'exam' =>
             '$examType • Bitiş: ${examEndDate == null ? '-' : _formatClock(examEndDate)}\n${remaining == null ? '' : _formatRemaining(remaining)}',
           _ =>
-            'Global override yok. Zümre ve etüt mevcut programa göre çalışır.',
+            'Normal çalışma düzeni aktif. Zümre ve etüt mevcut programa göre çalışır.',
         };
 
         return Container(
@@ -2243,7 +2380,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
         const SizedBox(height: 10),
         LayoutBuilder(
           builder: (context, constraints) {
-            if (constraints.maxWidth < 680 || children.length == 1) {
+            if (constraints.maxWidth < 680) {
               return Column(
                 children: [
                   for (var i = 0; i < children.length; i++) ...[
@@ -2254,13 +2391,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
               );
             }
 
+            final cardWidth = (constraints.maxWidth - 12) / 2;
+
             return Wrap(
               spacing: 12,
               runSpacing: 12,
               children: children
                   .map(
                     (child) => SizedBox(
-                      width: (constraints.maxWidth - 12) / 2,
+                      width: cardWidth,
                       child: child,
                     ),
                   )
@@ -2294,7 +2433,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       children: [
                         _quickActionCard(
                           icon: Icons.manage_search_rounded,
-                          title: 'Öğrenci Takibi',
+                          title: 'Kullanıcı Takibi',
                           subtitle: 'Öğrencileri ve kullanıcı kayıtlarını aç',
                           color: Colors.greenAccent,
                           onTap: widget.onOpenUsers ?? () {},
@@ -2320,19 +2459,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           color: Colors.purpleAccent,
                           onTap: _showZumreScheduleDialog,
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    _panelSection(
-                      title: 'Kullanıcı Yönetimi',
-                      children: [
-                        _quickActionCard(
-                          icon: Icons.people_alt_rounded,
-                          title: 'Kullanıcılar',
-                          subtitle: 'Öğrenci, öğretmen ve görevli kayıtları',
-                          color: Colors.lightBlueAccent,
-                          onTap: widget.onOpenUsers ?? () {},
-                        ),
                         _quickActionCard(
                           icon: Icons.upload_file_rounded,
                           title: 'Toplu Kullanıcı Aktarımı',
@@ -2348,7 +2474,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
         ),
         if (_isImporting)
           Container(
-            color: Colors.black.withOpacity(0.45),
+            color: Colors.black.withValues(alpha: 0.45),
             child: const Center(
               child: CircularProgressIndicator(color: Colors.white),
             ),
@@ -2359,12 +2485,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
   BoxDecoration _adminGlassDecoration() {
     return BoxDecoration(
-      color: Colors.white.withOpacity(0.10),
+      color: Colors.white.withValues(alpha: 0.10),
       borderRadius: BorderRadius.circular(24),
-      border: Border.all(color: Colors.white.withOpacity(0.15)),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.16),
+          color: Colors.black.withValues(alpha: 0.16),
           blurRadius: 14,
           offset: const Offset(0, 6),
         ),
@@ -2462,6 +2588,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
     await showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -2479,13 +2606,26 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Zaman Yönetimi',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Zaman Yönetimi',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 6),
                       const Text(
@@ -2584,9 +2724,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                   'updatedAt': FieldValue.serverTimestamp(),
                                 });
 
+                                if (!mounted) return;
                                 if (ctx.mounted) Navigator.pop(ctx);
 
-                                ScaffoldMessenger.of(context).showSnackBar(
+                                ScaffoldMessenger.of(this.context).showSnackBar(
                                   const SnackBar(
                                     content: Text('Saatler güncellendi'),
                                   ),
@@ -2619,7 +2760,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
+        color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: Colors.white12),
       ),
@@ -2707,7 +2848,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
+        color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: Colors.white12),
       ),
@@ -2774,7 +2915,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
       hintText: '09:00',
       hintStyle: const TextStyle(color: Colors.white38),
       filled: true,
-      fillColor: Colors.white.withOpacity(0.08),
+      fillColor: Colors.white.withValues(alpha: 0.08),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide.none,
@@ -2793,6 +2934,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
       borderRadius: BorderRadius.circular(24),
       onTap: onTap,
       child: Container(
+        constraints: const BoxConstraints(minHeight: 126),
         padding: const EdgeInsets.all(18),
         decoration: _adminGlassDecoration(),
         child: Column(
@@ -2802,6 +2944,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
             const SizedBox(height: 14),
             Text(
               title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -2811,6 +2955,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
             const SizedBox(height: 4),
             Text(
               subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Colors.white60, fontSize: 12),
             ),
           ],
@@ -2904,8 +3050,8 @@ class _DailySolvedBarChartState extends State<_DailySolvedBarChart> {
                                     Colors.blueAccent,
                                   ]
                                 : [
-                                    Colors.white.withOpacity(0.42),
-                                    Colors.white.withOpacity(0.18),
+                                    Colors.white.withValues(alpha: 0.42),
+                                    Colors.white.withValues(alpha: 0.18),
                                   ],
                           ),
                           borderRadius: BorderRadius.circular(12),
@@ -2913,7 +3059,7 @@ class _DailySolvedBarChartState extends State<_DailySolvedBarChart> {
                               ? [
                                   BoxShadow(
                                     color: Colors.lightBlueAccent
-                                        .withOpacity(0.35),
+                                        .withValues(alpha: 0.35),
                                     blurRadius: 12,
                                     offset: const Offset(0, 4),
                                   ),
@@ -2944,13 +3090,13 @@ class _DailySolvedBarChartState extends State<_DailySolvedBarChart> {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: _showSubjectDetail
-                ? Colors.orangeAccent.withOpacity(0.14)
-                : Colors.lightBlueAccent.withOpacity(0.14),
+                ? Colors.orangeAccent.withValues(alpha: 0.14)
+                : Colors.lightBlueAccent.withValues(alpha: 0.14),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: _showSubjectDetail
-                  ? Colors.orangeAccent.withOpacity(0.30)
-                  : Colors.lightBlueAccent.withOpacity(0.30),
+                  ? Colors.orangeAccent.withValues(alpha: 0.30)
+                  : Colors.lightBlueAccent.withValues(alpha: 0.30),
             ),
           ),
           child: _showSubjectDetail
@@ -3095,9 +3241,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.10),
+                    color: Colors.white.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white.withOpacity(0.15)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
                   ),
                   child: const Row(
                     children: [
@@ -3128,7 +3274,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   hintStyle: const TextStyle(color: Colors.white54),
                   prefixIcon: const Icon(Icons.search, color: Colors.white70),
                   filled: true,
-                  fillColor: Colors.white.withOpacity(0.10),
+                  fillColor: Colors.white.withValues(alpha: 0.10),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(20),
                     borderSide: BorderSide.none,
@@ -3221,24 +3367,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.10),
+                          color: Colors.white.withValues(alpha: 0.10),
                           borderRadius: BorderRadius.circular(24),
                           border:
-                              Border.all(color: Colors.white.withOpacity(0.15)),
+                              Border.all(color: Colors.white.withValues(alpha: 0.15)),
                         ),
                         child: Row(
                           children: [
-                            CircleAvatar(
-                              backgroundColor: roleColor.withOpacity(0.20),
-                              child: Text(
-                                role.isNotEmpty ? role[0].toUpperCase() : '?',
-                                style: TextStyle(
-                                  color: roleColor,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 14),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3295,7 +3430,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
         ),
         if (_isLoading)
           Container(
-            color: Colors.black.withOpacity(0.45),
+            color: Colors.black.withValues(alpha: 0.45),
             child: const Center(
               child: CircularProgressIndicator(color: Colors.white),
             ),
@@ -3366,6 +3501,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
     }
     await showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setStateDialog) {
           return Dialog(
@@ -3380,7 +3516,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 border: Border.all(color: Colors.white24),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.30),
+                    color: Colors.black.withValues(alpha: 0.30),
                     blurRadius: 24,
                     offset: const Offset(0, 12),
                   ),
@@ -3399,7 +3535,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     hintStyle: const TextStyle(color: Colors.white38),
                     suffixStyle: const TextStyle(color: Colors.white54),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.08),
+                    fillColor: Colors.white.withValues(alpha: 0.08),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(16),
                       borderSide: BorderSide.none,
@@ -3414,13 +3550,28 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      isEditing ? 'Kullanıcı Düzenle' : 'Yeni Kullanıcı Ekle',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            isEditing
+                                ? 'Kullanıcı Düzenle'
+                                : 'Yeni Kullanıcı Ekle',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     Flexible(
@@ -3476,9 +3627,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                   obscureText: true,
                                   onChanged: (val) => newPassword = val,
                                   validator: (val) {
-                                    if (val == null || val.isEmpty) return null;
-                                    if (val.length < 6)
+                                    if (val == null || val.isEmpty) {
+                                      return null;
+                                    }
+                                    if (val.length < 6) {
                                       return 'Şifre en az 6 karakter olmalı';
+                                    }
                                     return null;
                                   },
                                 ),
@@ -3517,7 +3671,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                               ),
                               const SizedBox(height: 8),
                               DropdownButtonFormField<String>(
-                                value: role,
+                                initialValue: role,
                                 decoration: const InputDecoration(
                                   labelText: 'Rol',
                                 ),
@@ -3589,28 +3743,31 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         ),
                                       ),
                                       const SizedBox(height: 8),
-                                      ..._allSubjects.map((final subject) {
-                                        final groupValue =
-                                            selectedSubjects.isNotEmpty
-                                                ? selectedSubjects.first
-                                                : null;
-
-                                        return RadioListTile<String>(
-                                          contentPadding: EdgeInsets.zero,
-                                          dense: true,
-                                          value: subject,
-                                          groupValue: groupValue,
-                                          title: Text(subject),
-                                          onChanged: (value) {
-                                            if (value == null) return;
-                                            setStateDialog(() {
-                                              selectedSubjects
-                                                ..clear()
-                                                ..add(value);
-                                            });
-                                          },
-                                        );
-                                      }),
+                                      RadioGroup<String>(
+                                        groupValue: selectedSubjects.isNotEmpty
+                                            ? selectedSubjects.first
+                                            : null,
+                                        onChanged: (value) {
+                                          if (value == null) return;
+                                          setStateDialog(() {
+                                            selectedSubjects
+                                              ..clear()
+                                              ..add(value);
+                                          });
+                                        },
+                                        child: Column(
+                                          children: _allSubjects.map(
+                                            (final subject) {
+                                              return RadioListTile<String>(
+                                                contentPadding: EdgeInsets.zero,
+                                                dense: true,
+                                                value: subject,
+                                                title: Text(subject),
+                                              );
+                                            },
+                                          ).toList(),
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -3705,7 +3862,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                 }
                                 if (ctx.mounted) Navigator.pop(ctx);
 
-                                ScaffoldMessenger.of(context).showSnackBar(
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(
                                     content: Text(
                                       isEditing
@@ -3715,7 +3873,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                   ),
                                 );
                               } catch (e) {
-                                ScaffoldMessenger.of(context).showSnackBar(
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(
                                     content: Text(
                                       'Hata: ${_adminFunctionErrorMessage(e)}',
@@ -3860,7 +4019,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
             border: Border.all(color: Colors.white24),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.28),
+                color: Colors.black.withValues(alpha: 0.28),
                 blurRadius: 24,
                 offset: const Offset(0, 12),
               ),
@@ -3873,9 +4032,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 width: 58,
                 height: 58,
                 decoration: BoxDecoration(
-                  color: Colors.redAccent.withOpacity(0.16),
+                  color: Colors.redAccent.withValues(alpha: 0.16),
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.redAccent.withOpacity(0.35)),
+                  border: Border.all(color: Colors.redAccent.withValues(alpha: 0.35)),
                 ),
                 child: const Icon(
                   Icons.delete_outline_rounded,
@@ -3948,10 +4107,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
         'uid': uid,
       });
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Kullanıcı hesabı silindi.')),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
             content: Text('Silme hatası: ${_adminFunctionErrorMessage(e)}')),

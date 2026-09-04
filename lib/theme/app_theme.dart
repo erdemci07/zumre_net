@@ -50,14 +50,14 @@ class AppDecorations {
     double radius = 22,
   }) {
     return BoxDecoration(
-      color: color.withOpacity(opacity),
+      color: color.withValues(alpha: opacity),
       borderRadius: BorderRadius.circular(radius),
       border: Border.all(
-        color: Colors.white.withOpacity(0.15),
+        color: Colors.white.withValues(alpha: 0.15),
       ),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.18),
+          color: Colors.black.withValues(alpha: 0.18),
           blurRadius: 18,
           offset: const Offset(0, 8),
         ),
@@ -71,7 +71,7 @@ class AppDecorations {
       borderRadius: BorderRadius.circular(22),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.12),
+          color: Colors.black.withValues(alpha: 0.12),
           blurRadius: 18,
           offset: const Offset(0, 8),
         ),
