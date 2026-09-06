@@ -11,6 +11,7 @@ const REGION = "us-central1";
 const TIME_ZONE = "Europe/Istanbul";
 const BULK_DELETE_LIMIT = 500;
 const BULK_DELETE_CHUNK_SIZE = 25;
+const AUTH_DELETE_RETRY_DELAYS_MS = [750, 1500, 3000];
 
 // ============================================================
 // ORTAK YARDIMCI FONKSİYONLAR
@@ -1264,6 +1265,42 @@ function bulkErrorResult(uid, userData, error) {
   };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isAuthDeleteQuotaError(error) {
+  const code = String(error?.code || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  return code.includes("quota") || message.includes("quota");
+}
+
+async function deleteAuthUserWithRetry(uid) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= AUTH_DELETE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      await admin.auth().deleteUser(uid);
+      return;
+    } catch (error) {
+      if (error?.code === "auth/user-not-found") {
+        throw error;
+      }
+
+      lastError = error;
+
+      if (!isAuthDeleteQuotaError(error) || attempt === AUTH_DELETE_RETRY_DELAYS_MS.length) {
+        break;
+      }
+
+      await sleep(AUTH_DELETE_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
+  throw lastError;
+}
+
 async function deleteUserLifecycle(uid, adminUid, guardContext) {
   const userRef = db.collection("users").doc(uid);
   const userDoc = await userRef.get();
@@ -1298,7 +1335,7 @@ async function deleteUserLifecycle(uid, adminUid, guardContext) {
 
   try {
     try {
-      await admin.auth().deleteUser(uid);
+      await deleteAuthUserWithRetry(uid);
     } catch (authError) {
       if (authError?.code !== "auth/user-not-found") {
         throw authError;

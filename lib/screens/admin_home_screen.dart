@@ -631,43 +631,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
     }
   }
 
-  void _showExcelLoadingDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 26),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 380),
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            color: const Color(0xFF071A3A),
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: Colors.white24),
-          ),
-          child: const Row(
-            children: [
-              SizedBox(
-                width: 26,
-                height: 26,
-                child: CircularProgressIndicator(color: Colors.lightBlueAccent),
-              ),
-              SizedBox(width: 18),
-              Expanded(
-                child: Text(
-                  'Excel dosyası okunuyor...\n'
-                  'Veri yoğunluğuna bağlı olarak bu işlem biraz sürebilir.',
-                  style: TextStyle(color: Colors.white70, height: 1.35),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   void _hideExcelLoadingDialog() {
     if (Navigator.canPop(context)) {
       Navigator.pop(context);
@@ -1549,6 +1512,50 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return Map<String, dynamic>.from(jsonDecode(body));
   }
 
+  void _showExcelLoadingDialog({
+    int? totalUsers,
+    bool isImporting = false,
+  }) {
+    final message = isImporting && totalUsers != null && totalUsers > 0
+        ? '$totalUsers kullanıcı işleniyor, lütfen bekleyin...'
+        : 'Excel dosyası okunuyor...\n'
+            'Veri yoğunluğuna bağlı olarak bu işlem biraz sürebilir.';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 26),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 380),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF071A3A),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(color: Colors.lightBlueAccent),
+              ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(color: Colors.white70, height: 1.35),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickEdesisFile(String type) async {
     const smartImportBaseUrl =
         'https://zumrenet-smart-import-542741706921.europe-west1.run.app';
@@ -1609,7 +1616,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
       }
 
       if (!mounted) return;
-      _showExcelLoadingDialog();
+      _showExcelLoadingDialog(
+        totalUsers: validRows.length,
+        isImporting: true,
+      );
 
       final importResponse = await http.post(
         Uri.parse('$smartImportBaseUrl/import'),
@@ -3196,6 +3206,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseFunctions _functions =
       FirebaseFunctions.instanceFor(region: 'us-central1');
+  static const int _bulkDeleteClientBatchSize = 50;
 
   final List<String> _roles = ['admin', 'teacher', 'student', 'studyGuard'];
   String _roleLabel(String role) {
@@ -3225,6 +3236,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
   ];
   bool _isLoading = false;
   bool _isBulkDeleting = false;
+  int _bulkDeleteProcessed = 0;
+  int _bulkDeleteTotal = 0;
   String _userSearchQuery = '';
   final Set<String> _selectedUserIds = {};
 
@@ -3362,6 +3375,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                       _bulkSelectionBar(
                         selectedCount: selectedVisibleCount,
                         visibleCount: selectableUids.length,
+                        progressCount: _bulkDeleteProcessed,
+                        progressTotal: _bulkDeleteTotal,
                         allVisibleSelected: allVisibleSelected,
                         onSelectAllChanged: _isBulkDeleting
                             ? null
@@ -3506,7 +3521,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
             ),
           ],
         ),
-        if (_isLoading || _isBulkDeleting)
+        if (_isLoading)
           Container(
             color: Colors.black.withValues(alpha: 0.45),
             child: const Center(
@@ -3520,6 +3535,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
   Widget _bulkSelectionBar({
     required int selectedCount,
     required int visibleCount,
+    required int progressCount,
+    required int progressTotal,
     required bool allVisibleSelected,
     required ValueChanged<bool?>? onSelectAllChanged,
     required VoidCallback? onDeleteSelected,
@@ -3557,7 +3574,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
               ],
             );
             final countText = Text(
-              '$selectedCount seçili',
+              _isBulkDeleting
+                  ? '$progressCount / $progressTotal kullanıcı işlendi'
+                  : '$selectedCount seçili',
               style: const TextStyle(color: Colors.white60, fontSize: 12),
             );
             final deleteButton = ElevatedButton.icon(
@@ -3570,9 +3589,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         strokeWidth: 2,
                         color: Colors.white,
                       ),
-                    )
+                  )
                   : const Icon(Icons.delete_sweep_rounded, size: 18),
-              label: const Text('Seçilenleri Sil'),
+              label: Text(
+                _isBulkDeleting ? 'Siliniyor...' : 'Seçilenleri Sil',
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent,
                 foregroundColor: Colors.white,
@@ -4197,19 +4218,67 @@ class _UserManagementPageState extends State<UserManagementPage> {
     if (confirmed != true) return;
     if (!mounted) return;
 
-    setState(() => _isBulkDeleting = true);
+    final selectedUids = visibleSelectedUsers.map((doc) => doc.id).toList();
+    final allResults = <Map<String, dynamic>>[];
+    var deletedCount = 0;
+    var skippedCount = 0;
+    var failedCount = 0;
+    var completedRequestCount = 0;
+    Object? batchError;
+
+    setState(() {
+      _isBulkDeleting = true;
+      _bulkDeleteProcessed = 0;
+      _bulkDeleteTotal = selectedUids.length;
+    });
 
     try {
       final callable = _functions.httpsCallable('adminBulkDeleteUsers');
-      final response = await callable.call({
-        'targetUids': visibleSelectedUsers.map((doc) => doc.id).toList(),
-      });
-      final data = Map<String, dynamic>.from(response.data as Map);
+
+      for (
+        var start = 0;
+        start < selectedUids.length;
+        start += _bulkDeleteClientBatchSize
+      ) {
+        final batchUids = selectedUids
+            .skip(start)
+            .take(_bulkDeleteClientBatchSize)
+            .toList();
+
+        try {
+          final response = await callable.call({
+            'targetUids': batchUids,
+          });
+          final batchData = Map<String, dynamic>.from(response.data as Map);
+          final batchResults = _bulkResultItems(batchData);
+
+          allResults.addAll(batchResults);
+          deletedCount += _bulkResultInt(batchData, 'deletedCount');
+          skippedCount += _bulkResultInt(batchData, 'skippedCount');
+          failedCount += _bulkResultInt(batchData, 'failedCount');
+          completedRequestCount += 1;
+
+          if (!mounted) return;
+
+          final processed = allResults.length;
+          final deletedIds = batchResults
+              .where((item) => item['status'] == 'deleted')
+              .map((item) => '${item['uid']}')
+              .toSet();
+
+          setState(() {
+            _bulkDeleteProcessed = processed;
+            _selectedUserIds.removeAll(deletedIds);
+          });
+        } catch (e) {
+          batchError = e;
+          break;
+        }
+      }
 
       if (!mounted) return;
 
-      final results = _bulkResultItems(data);
-      final deletedIds = results
+      final deletedIds = allResults
           .where((item) => item['status'] == 'deleted')
           .map((item) => '${item['uid']}')
           .toSet();
@@ -4218,9 +4287,34 @@ class _UserManagementPageState extends State<UserManagementPage> {
         _selectedUserIds.removeAll(deletedIds);
       });
 
-      await _showBulkDeleteResultDialog(data);
+      final aggregateData = {
+        'requestedCount': selectedUids.length,
+        'deletedCount': deletedCount,
+        'skippedCount': skippedCount,
+        'failedCount': failedCount,
+        'completedRequestCount': completedRequestCount,
+        'totalRequestCount':
+            (selectedUids.length / _bulkDeleteClientBatchSize).ceil(),
+        'results': allResults,
+      };
+
+      if (batchError != null) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${allResults.length} / ${selectedUids.length} kullanıcı işlendi. '
+              'Kalan seçimleri tekrar deneyin: '
+              '${_adminFunctionErrorMessage(batchError)}',
+            ),
+          ),
+        );
+      }
+
+      await _showBulkDeleteResultDialog(aggregateData);
     } catch (e) {
       if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -4229,7 +4323,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
         ),
       );
     } finally {
-      if (mounted) setState(() => _isBulkDeleting = false);
+      if (mounted) {
+        setState(() {
+          _isBulkDeleting = false;
+          _bulkDeleteProcessed = 0;
+          _bulkDeleteTotal = 0;
+        });
+      }
     }
   }
 
