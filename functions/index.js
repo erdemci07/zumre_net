@@ -9,6 +9,8 @@ const fieldValue = admin.firestore.FieldValue;
 
 const REGION = "us-central1";
 const TIME_ZONE = "Europe/Istanbul";
+const BULK_DELETE_LIMIT = 500;
+const BULK_DELETE_CHUNK_SIZE = 25;
 
 // ============================================================
 // ORTAK YARDIMCI FONKSİYONLAR
@@ -450,6 +452,32 @@ function shouldCloseSession(sessionData, scheduleData, now = new Date()) {
   return currentMinutes >= slot.endMinutes;
 }
 
+function findCurrentStudySlot(scheduleData, now = new Date()) {
+  const nowParts = getIstanbulDateParts(now);
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute;
+  const slots = getStudySlots(scheduleData, nowParts.weekday);
+  const slot = slots.find(
+    (item) =>
+      currentMinutes >= item.startMinutes &&
+      currentMinutes < item.endMinutes
+  );
+
+  if (!slot) {
+    return null;
+  }
+
+  return {
+    ...slot,
+    dateKey: nowParts.dateKey,
+  };
+}
+
+function studySessionIdFor(staffId, slot) {
+  const safeStart = slot.start.replace(/:/g, "");
+  const safeEnd = slot.end.replace(/:/g, "");
+  return `${staffId}_${slot.dateKey}-${safeStart}-${safeEnd}`;
+}
+
 function findZumreSlot(startedAt, scheduleData) {
   if (!startedAt || typeof startedAt.toDate !== "function") {
     return null;
@@ -712,6 +740,40 @@ function estimatedMinutesForQuestionCount(questionCount) {
   return 13;
 }
 
+function queueCreatedAtMillis(queueData) {
+  const createdAt = timestampToDate(queueData.createdAt);
+  return createdAt ? createdAt.getTime() : null;
+}
+
+function compareQueuePriorityDocs(firstDoc, secondDoc, now = new Date()) {
+  const first = firstDoc.data();
+  const second = secondDoc.data();
+  const firstCreatedAt = queueCreatedAtMillis(first);
+  const secondCreatedAt = queueCreatedAtMillis(second);
+  const ageLimitMs = 10 * 60 * 1000;
+  const firstAged =
+    firstCreatedAt !== null && now.getTime() - firstCreatedAt >= ageLimitMs;
+  const secondAged =
+    secondCreatedAt !== null && now.getTime() - secondCreatedAt >= ageLimitMs;
+
+  if (firstAged !== secondAged) {
+    return firstAged ? -1 : 1;
+  }
+
+  if (!firstAged && !secondAged) {
+    const questionCompare =
+      normalizeQuestionCount(first.questionCount) -
+      normalizeQuestionCount(second.questionCount);
+    if (questionCompare !== 0) return questionCompare;
+  }
+
+  if (firstCreatedAt === null && secondCreatedAt === null) return 0;
+  if (firstCreatedAt === null) return 1;
+  if (secondCreatedAt === null) return -1;
+
+  return firstCreatedAt - secondCreatedAt;
+}
+
 function selectBestTeacher(candidates, activeQueueDocs, newQuestionCount) {
   const teacherLoad = new Map();
 
@@ -789,6 +851,49 @@ async function assertRoleCaller(request, role) {
     data: userDoc.data() || {},
     ref: userDoc.ref,
   };
+}
+
+async function startNextWaitingQueueInTransaction(transaction, teacherId, now) {
+  const activeSnapshot = await transaction.get(
+    db.collection("queues")
+      .where("teacherId", "==", teacherId)
+      .where("status", "==", "in_progress")
+      .limit(1)
+  );
+
+  if (!activeSnapshot.empty) {
+    return null;
+  }
+
+  const waitingSnapshot = await transaction.get(
+    db.collection("queues")
+      .where("teacherId", "==", teacherId)
+      .where("status", "==", "waiting")
+  );
+
+  if (waitingSnapshot.empty) {
+    return null;
+  }
+
+  const waitingQueues = waitingSnapshot.docs
+    .sort((a, b) => compareQueuePriorityDocs(a, b, now));
+  const nextQueue = waitingQueues[0];
+
+  transaction.update(nextQueue.ref, {
+    status: "in_progress",
+    startedAt: fieldValue.serverTimestamp(),
+    updatedAt: fieldValue.serverTimestamp(),
+  });
+
+  return nextQueue.id;
+}
+
+function selectNextWaitingQueueDoc(waitingDocs, now, excludeQueueId = null) {
+  const waitingQueues = waitingDocs
+    .filter((doc) => doc.id !== excludeQueueId)
+    .sort((a, b) => compareQueuePriorityDocs(a, b, now));
+
+  return waitingQueues[0] || null;
 }
 
 function assertQueueRuntimeOpen(scheduleData, runtimeData, now = new Date()) {
@@ -966,6 +1071,42 @@ function mapAuthError(error, fallbackMessage) {
   return fallbackMessage || "Kullanıcı işlemi tamamlanamadı.";
 }
 
+function mapUserLifecycleErrorCode(error) {
+  const code = error?.code || "";
+
+  if (
+    code === "auth/email-already-exists" ||
+    code === "already-exists" ||
+    code === 6
+  ) {
+    return "already-exists";
+  }
+
+  if (code === "auth/user-not-found" || code === "not-found" || code === 5) {
+    return "not-found";
+  }
+
+  if (
+    code === "auth/invalid-password" ||
+    code === "auth/weak-password" ||
+    code === "auth/invalid-email" ||
+    code === "invalid-argument" ||
+    code === 3
+  ) {
+    return "invalid-argument";
+  }
+
+  if (
+    code === "auth/insufficient-permission" ||
+    code === "permission-denied" ||
+    code === 7
+  ) {
+    return "permission-denied";
+  }
+
+  return "internal";
+}
+
 async function hasActiveQueueFor(uid, fieldName) {
   const snapshot = await db
     .collection("queues")
@@ -1024,6 +1165,174 @@ async function assertNoActiveUserOperation(uid, userData) {
         "Bu kullanıcının aktif bir etüt oturumu bulunuyor. Önce işlemi sonlandırın."
       );
     }
+  }
+}
+
+async function loadUserDeleteGuardContext() {
+  const [activeQueuesSnapshot, activeSessionsSnapshot, adminsSnapshot] =
+    await Promise.all([
+      db
+        .collection("queues")
+        .where("status", "in", ["waiting", "in_progress"])
+        .get(),
+      db
+        .collection("studySessions")
+        .where("status", "==", "active")
+        .get(),
+      db
+        .collection("users")
+        .where("role", "==", "admin")
+        .limit(2)
+        .get(),
+    ]);
+
+  return {
+    activeQueues: activeQueuesSnapshot.docs,
+    activeStudySessions: activeSessionsSnapshot.docs,
+    hasMultipleAdmins: adminsSnapshot.size > 1,
+  };
+}
+
+function hasContextMatch(docs, fieldName, uid) {
+  return docs.some((doc) => doc.data()?.[fieldName] === uid);
+}
+
+function getDeleteBlockReason(uid, userData, guardContext, adminUid) {
+  const role = userData?.role;
+
+  if (uid === adminUid) {
+    return "Kendi yönetici hesabınız silinemez.";
+  }
+
+  if (role === "admin" && !guardContext.hasMultipleAdmins) {
+    return "Sistemdeki son yönetici hesabı silinemez.";
+  }
+
+  if (role === "student") {
+    if (userData.isInStudySession === true || userData.activeStudySessionId) {
+      return "aktif etüt";
+    }
+
+    if (hasContextMatch(guardContext.activeQueues, "studentId", uid)) {
+      return "aktif zümre sırası";
+    }
+  }
+
+  if (role === "teacher") {
+    if (userData.teacherStatus === "studyGuard") {
+      return "aktif etüt görevi";
+    }
+
+    if (hasContextMatch(guardContext.activeQueues, "teacherId", uid)) {
+      return "aktif zümre sırası";
+    }
+
+    if (hasContextMatch(guardContext.activeStudySessions, "dutyTeacherId", uid)) {
+      return "aktif etüt branş öğretmeni";
+    }
+  }
+
+  if (
+    role === "studyGuard" &&
+    hasContextMatch(guardContext.activeStudySessions, "staffId", uid)
+  ) {
+    return "aktif etüt oturumu";
+  }
+
+  return null;
+}
+
+function displayNameForUser(uid, userData) {
+  const fullName = cleanText(userData?.fullName);
+  const email = cleanText(userData?.email);
+  const username = cleanText(userData?.username);
+
+  return fullName || email || username || uid;
+}
+
+function bulkErrorResult(uid, userData, error) {
+  const reason = error instanceof HttpsError
+    ? error.message
+    : mapAuthError(error, "Kullanıcı silinemedi.");
+
+  return {
+    uid,
+    name: displayNameForUser(uid, userData),
+    email: cleanText(userData?.email),
+    status: "failed",
+    reason,
+  };
+}
+
+async function deleteUserLifecycle(uid, adminUid, guardContext) {
+  const userRef = db.collection("users").doc(uid);
+  const userDoc = await userRef.get();
+
+  if (!userDoc.exists) {
+    return {
+      uid,
+      name: uid,
+      email: "",
+      status: "failed",
+      reason: "Kullanıcı kaydı bulunamadı.",
+    };
+  }
+
+  const userData = userDoc.data() || {};
+  const blockedReason = getDeleteBlockReason(
+    uid,
+    userData,
+    guardContext,
+    adminUid
+  );
+
+  if (blockedReason) {
+    return {
+      uid,
+      name: displayNameForUser(uid, userData),
+      email: cleanText(userData.email),
+      status: "skipped",
+      reason: blockedReason,
+    };
+  }
+
+  try {
+    try {
+      await admin.auth().deleteUser(uid);
+    } catch (authError) {
+      if (authError?.code !== "auth/user-not-found") {
+        throw authError;
+      }
+
+      console.warn("adminDeleteUser auth user not found", {
+        adminUid,
+        targetUid: uid,
+      });
+    }
+
+    await userRef.delete();
+
+    console.log("admin user lifecycle", {
+      operation: "delete",
+      adminUid,
+      targetUid: uid,
+    });
+
+    return {
+      uid,
+      name: displayNameForUser(uid, userData),
+      email: cleanText(userData.email),
+      status: "deleted",
+      reason: "",
+    };
+  } catch (error) {
+    console.error("adminDeleteUser error", {
+      adminUid,
+      targetUid: uid,
+      error: error?.message || error,
+    });
+
+    return bulkErrorResult(uid, userData, error);
   }
 }
 
@@ -1087,7 +1396,7 @@ exports.adminCreateUser = onCall(
       });
 
       throw new HttpsError(
-        "internal",
+        mapUserLifecycleErrorCode(error),
         mapAuthError(error, "Kullanıcı oluşturulamadı.")
       );
     }
@@ -1181,7 +1490,7 @@ exports.adminUpdateUser = onCall(
       });
 
       throw new HttpsError(
-        "internal",
+        mapUserLifecycleErrorCode(error),
         mapAuthError(error, "Kullanıcı güncellenemedi.")
       );
     }
@@ -1210,56 +1519,28 @@ exports.adminDeleteUser = onCall(
       );
     }
 
-    const userRef = db.collection("users").doc(uid);
-    const userDoc = await userRef.get();
-
-    if (!userDoc.exists) {
-      throw new HttpsError(
-        "not-found",
-        "Kullanıcı kaydı bulunamadı."
+    try {
+      const result = await deleteUserLifecycle(
+        uid,
+        adminUid,
+        await loadUserDeleteGuardContext()
       );
-    }
 
-    const userData = userDoc.data() || {};
-
-    if (userData.role === "admin") {
-      const adminsSnapshot = await db
-        .collection("users")
-        .where("role", "==", "admin")
-        .limit(2)
-        .get();
-
-      if (adminsSnapshot.size <= 1) {
+      if (result.status === "skipped") {
         throw new HttpsError(
           "failed-precondition",
-          "Sistemdeki son yönetici hesabı silinemez."
+          result.reason || "Kullanıcı aktif işlem nedeniyle silinemedi."
         );
       }
-    }
 
-    await assertNoActiveUserOperation(uid, userData);
-
-    try {
-      try {
-        await admin.auth().deleteUser(uid);
-      } catch (authError) {
-        if (authError?.code !== "auth/user-not-found") {
-          throw authError;
-        }
-
-        console.warn("adminDeleteUser auth user not found", {
-          adminUid,
-          targetUid: uid,
-        });
+      if (result.status === "failed") {
+        throw new HttpsError(
+          result.reason === "Kullanıcı kaydı bulunamadı."
+            ? "not-found"
+            : "internal",
+          result.reason || "Kullanıcı silinemedi."
+        );
       }
-
-      await userRef.delete();
-
-      console.log("admin user lifecycle", {
-        operation: "delete",
-        adminUid,
-        targetUid: uid,
-      });
 
       return {
         ok: true,
@@ -1276,10 +1557,85 @@ exports.adminDeleteUser = onCall(
       });
 
       throw new HttpsError(
-        "internal",
+        mapUserLifecycleErrorCode(error),
         mapAuthError(error, "Kullanıcı silinemedi.")
       );
     }
+  }
+);
+
+exports.adminBulkDeleteUsers = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 540,
+    memory: "512MiB",
+  },
+  async (request) => {
+    const adminUid = await assertAdminCaller(request);
+    const rawTargetUids = request.data?.targetUids;
+
+    if (!Array.isArray(rawTargetUids)) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Silinecek kullanıcı listesi eksik."
+      );
+    }
+
+    const targetUids = Array.from(
+      new Set(
+        rawTargetUids
+          .map((uid) => cleanText(uid))
+          .filter((uid) => uid.length > 0)
+      )
+    );
+
+    if (targetUids.length === 0) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Silinecek kullanıcı seçilmedi."
+      );
+    }
+
+    if (targetUids.length > BULK_DELETE_LIMIT) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Tek seferde en fazla ${BULK_DELETE_LIMIT} kullanıcı silinebilir.`
+      );
+    }
+
+    const results = [];
+
+    for (let index = 0; index < targetUids.length; index += BULK_DELETE_CHUNK_SIZE) {
+      const chunk = targetUids.slice(index, index + BULK_DELETE_CHUNK_SIZE);
+      const guardContext = await loadUserDeleteGuardContext();
+      const chunkResults = await Promise.all(
+        chunk.map((uid) => deleteUserLifecycle(uid, adminUid, guardContext))
+      );
+
+      results.push(...chunkResults);
+    }
+
+    const deleted = results.filter((item) => item.status === "deleted");
+    const skipped = results.filter((item) => item.status === "skipped");
+    const failed = results.filter((item) => item.status === "failed");
+
+    console.log("admin user lifecycle", {
+      operation: "bulk-delete",
+      adminUid,
+      requestedCount: targetUids.length,
+      deletedCount: deleted.length,
+      skippedCount: skipped.length,
+      failedCount: failed.length,
+    });
+
+    return {
+      ok: failed.length === 0,
+      requestedCount: targetUids.length,
+      deletedCount: deleted.length,
+      skippedCount: skipped.length,
+      failedCount: failed.length,
+      results,
+    };
   }
 );
 
@@ -1333,7 +1689,7 @@ exports.updateUserPassword = onCall(
       }
 
       throw new HttpsError(
-        "internal",
+        mapUserLifecycleErrorCode(error),
         mapAuthError(error, "Şifre güncellenemedi.")
       );
     }
@@ -1462,6 +1818,105 @@ exports.setInstitutionMode = onCall(
   }
 );
 
+exports.ensureStudySession = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const staff = await assertRoleCaller(request, "studyGuard");
+    const now = new Date();
+    const scheduleDoc = await db
+      .collection("settings")
+      .doc("zumreSchedule")
+      .get();
+    const runtimeDoc = await db
+      .collection("settings")
+      .doc("runtimeState")
+      .get();
+
+    if (!scheduleDoc.exists) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Etüt saatleri henüz tanımlanmamış."
+      );
+    }
+
+    const scheduleData = scheduleDoc.data() || {};
+    const runtimeState = buildEffectiveRuntimeState(
+      scheduleData,
+      runtimeDoc.data() || {},
+      now
+    );
+
+    if (
+      runtimeState.institutionMode !== "active" ||
+      runtimeState.isStudyOpen !== true
+    ) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Şu an etüt saati aktif değil."
+      );
+    }
+
+    const slot = findCurrentStudySlot(scheduleData, now);
+    if (!slot) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Aktif etüt saat aralığı bulunamadı."
+      );
+    }
+
+    const sessionId = studySessionIdFor(staff.uid, slot);
+    const sessionRef = db.collection("studySessions").doc(sessionId);
+
+    await db.runTransaction(async (transaction) => {
+      const existingDoc = await transaction.get(sessionRef);
+
+      if (existingDoc.exists) {
+        const existingData = existingDoc.data() || {};
+        if (existingData.status === "active") {
+          return;
+        }
+
+        throw new HttpsError(
+          "failed-precondition",
+          "Bu etüt saat aralığı daha önce kapatılmış."
+        );
+      }
+
+      transaction.set(sessionRef, {
+        staffId: staff.uid,
+        staffName:
+          staff.data.fullName ||
+          staff.data.name ||
+          staff.data.email ||
+          "Etüt Görevlisi",
+        staffRole: staff.data.role || "studyGuard",
+        status: "active",
+        startedAt: fieldValue.serverTimestamp(),
+        endedAt: null,
+        studentCount: 0,
+        activeStudentCount: 0,
+        slotKey: `${slot.dateKey}-${slot.start}-${slot.end}`,
+        slotDate: slot.dateKey,
+        slotStart: slot.start,
+        slotEnd: slot.end,
+        dutyTeacherId: null,
+        dutyTeacherName: null,
+        dutyTeacherPreviousStatus: null,
+        createdAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+    });
+
+    return {
+      ok: true,
+      sessionId,
+      slotText: `${slot.start} - ${slot.end}`,
+    };
+  }
+);
+
 exports.routeQueueRequest = onCall(
   {
     region: REGION,
@@ -1470,6 +1925,7 @@ exports.routeQueueRequest = onCall(
     const startedAt = Date.now();
     const student = await assertRoleCaller(request, "student");
     const subject = cleanText(request.data?.subject);
+    const requestedTeacherId = cleanText(request.data?.teacherId);
     const questionCount = normalizeQuestionCount(request.data?.questionCount);
     const estimatedMinutes = estimatedMinutesForQuestionCount(questionCount);
 
@@ -1549,16 +2005,24 @@ exports.routeQueueRequest = onCall(
         );
       }
 
-      const selected = selectBestTeacher(
-        candidateTeachers,
-        activeQueuesSnapshot.docs,
-        questionCount
-      );
+      const selected = requestedTeacherId
+        ? {
+            teacher: candidateTeachers.find(
+              (doc) => doc.id === requestedTeacherId
+            ),
+          }
+        : selectBestTeacher(
+          candidateTeachers,
+          activeQueuesSnapshot.docs,
+          questionCount
+        );
 
-      if (!selected) {
+      if (!selected || !selected.teacher) {
         throw new HttpsError(
           "failed-precondition",
-          "Bu ders için şu anda müsait öğretmen bulunamadı."
+          requestedTeacherId
+            ? "Seçilen öğretmen şu anda bu ders için müsait değil."
+            : "Bu ders için şu anda müsait öğretmen bulunamadı."
         );
       }
 
@@ -1586,7 +2050,7 @@ exports.routeQueueRequest = onCall(
         extraMinutes: 0,
         createdAt: fieldValue.serverTimestamp(),
         updatedAt: fieldValue.serverTimestamp(),
-        routedBy: "server",
+        routedBy: requestedTeacherId ? "student_selected_teacher" : "server",
       });
 
       transaction.update(student.ref, {
@@ -1609,6 +2073,7 @@ exports.routeQueueRequest = onCall(
       uid: student.uid,
       subject,
       questionCount,
+      requestedTeacherId: requestedTeacherId || null,
       queueId: result.queueId,
       teacherId: result.teacherId,
       candidateCount: result.candidateCount,
@@ -1757,6 +2222,287 @@ exports.routeQueueTransfer = onCall(
       ok: true,
       teacherId: result.teacherId,
       teacherName: result.teacherName,
+    };
+  }
+);
+
+exports.teacherTakeNextQueue = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const now = new Date();
+
+    const nextQueueId = await db.runTransaction((transaction) =>
+      startNextWaitingQueueInTransaction(transaction, teacher.uid, now)
+    );
+
+    return {
+      ok: true,
+      startedQueueId: nextQueueId,
+    };
+  }
+);
+
+exports.teacherStartQueue = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const queueId = cleanText(request.data?.queueId);
+    const confirmedActiveQueueId = cleanText(
+      request.data?.confirmedActiveQueueId
+    );
+
+    if (!queueId) {
+      throw new HttpsError("invalid-argument", "Geçersiz sıra bilgisi.");
+    }
+
+    const queueRef = db.collection("queues").doc(queueId);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [queueDoc, activeSnapshot] = await Promise.all([
+        transaction.get(queueRef),
+        transaction.get(
+          db.collection("queues")
+            .where("teacherId", "==", teacher.uid)
+            .where("status", "==", "in_progress")
+            .limit(1)
+        ),
+      ]);
+
+      if (!queueDoc.exists) {
+        throw new HttpsError("not-found", "Sıra kaydı bulunamadı.");
+      }
+
+      const queueData = queueDoc.data() || {};
+      if (queueData.teacherId !== teacher.uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu sırayı başlatma yetkiniz yok."
+        );
+      }
+
+      if (queueData.status === "in_progress") {
+        return { started: false, completedCurrent: false };
+      }
+
+      if (queueData.status !== "waiting") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Bu sıra artık başlatılabilir durumda değil."
+        );
+      }
+
+      let completedCurrent = false;
+      if (!activeSnapshot.empty) {
+        const activeDoc = activeSnapshot.docs[0];
+        if (activeDoc.id === queueId) {
+          return { started: false, completedCurrent: false };
+        }
+
+        if (activeDoc.id !== confirmedActiveQueueId) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Aktif soru değişti. Lütfen tekrar deneyin."
+          );
+        }
+
+        transaction.update(activeDoc.ref, {
+          status: "completed",
+          completedAt: fieldValue.serverTimestamp(),
+          updatedAt: fieldValue.serverTimestamp(),
+        });
+        completedCurrent = true;
+      }
+
+      transaction.update(queueRef, {
+        status: "in_progress",
+        startedAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      return { started: true, completedCurrent };
+    });
+
+    return {
+      ok: true,
+      ...result,
+    };
+  }
+);
+
+exports.teacherCompleteQueue = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const queueId = cleanText(request.data?.queueId);
+
+    if (!queueId) {
+      throw new HttpsError("invalid-argument", "Geçersiz sıra bilgisi.");
+    }
+
+    const queueRef = db.collection("queues").doc(queueId);
+    const now = new Date();
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [queueDoc, activeSnapshot, waitingSnapshot] = await Promise.all([
+        transaction.get(queueRef),
+        transaction.get(
+          db.collection("queues")
+            .where("teacherId", "==", teacher.uid)
+            .where("status", "==", "in_progress")
+        ),
+        transaction.get(
+          db.collection("queues")
+            .where("teacherId", "==", teacher.uid)
+            .where("status", "==", "waiting")
+        ),
+      ]);
+
+      if (!queueDoc.exists) {
+        throw new HttpsError("not-found", "Sıra kaydı bulunamadı.");
+      }
+
+      const queueData = queueDoc.data() || {};
+      if (queueData.teacherId !== teacher.uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu sırayı tamamlama yetkiniz yok."
+        );
+      }
+
+      if (queueData.status !== "in_progress") {
+        return { completed: false, startedNextQueueId: null };
+      }
+
+      const otherActiveQueues = activeSnapshot.docs
+        .filter((doc) => doc.id !== queueId);
+      const nextQueue = selectNextWaitingQueueDoc(
+        waitingSnapshot.docs,
+        now,
+        queueId
+      );
+
+      transaction.update(queueRef, {
+        status: "completed",
+        completedAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      if (otherActiveQueues.length > 0) {
+        return { completed: true, startedNextQueueId: null };
+      }
+
+      if (!nextQueue) {
+        return { completed: true, startedNextQueueId: null };
+      }
+
+      transaction.update(nextQueue.ref, {
+        status: "in_progress",
+        startedAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      return { completed: true, startedNextQueueId: nextQueue.id };
+    });
+
+    return {
+      ok: true,
+      ...result,
+    };
+  }
+);
+
+exports.teacherCancelQueue = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const queueId = cleanText(request.data?.queueId);
+
+    if (!queueId) {
+      throw new HttpsError("invalid-argument", "Geçersiz sıra bilgisi.");
+    }
+
+    const queueRef = db.collection("queues").doc(queueId);
+    const now = new Date();
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [queueDoc, activeSnapshot, waitingSnapshot] = await Promise.all([
+        transaction.get(queueRef),
+        transaction.get(
+          db.collection("queues")
+            .where("teacherId", "==", teacher.uid)
+            .where("status", "==", "in_progress")
+        ),
+        transaction.get(
+          db.collection("queues")
+            .where("teacherId", "==", teacher.uid)
+            .where("status", "==", "waiting")
+        ),
+      ]);
+
+      if (!queueDoc.exists) {
+        throw new HttpsError("not-found", "Sıra kaydı bulunamadı.");
+      }
+
+      const queueData = queueDoc.data() || {};
+      if (queueData.teacherId !== teacher.uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu sırayı iptal etme yetkiniz yok."
+        );
+      }
+
+      const status = queueData.status;
+      if (status !== "waiting" && status !== "in_progress") {
+        return { cancelled: false, startedNextQueueId: null };
+      }
+
+      transaction.update(queueRef, {
+        status: "cancelled",
+        cancelledAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      if (status !== "in_progress") {
+        return { cancelled: true, startedNextQueueId: null };
+      }
+
+      const otherActiveQueues = activeSnapshot.docs
+        .filter((doc) => doc.id !== queueId);
+      const nextQueue = selectNextWaitingQueueDoc(
+        waitingSnapshot.docs,
+        now,
+        queueId
+      );
+
+      if (otherActiveQueues.length > 0) {
+        return { cancelled: true, startedNextQueueId: null };
+      }
+
+      if (!nextQueue) {
+        return { cancelled: true, startedNextQueueId: null };
+      }
+
+      transaction.update(nextQueue.ref, {
+        status: "in_progress",
+        startedAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      return { cancelled: true, startedNextQueueId: nextQueue.id };
+    });
+
+    return {
+      ok: true,
+      ...result,
     };
   }
 );
@@ -1910,6 +2656,10 @@ async function closeStudySession(sessionDoc) {
       endedAt: fieldValue.serverTimestamp(),
       autoEnded: true,
       closedBy: "scheduledFunction",
+      completedDutyTeacherId: dutyTeacherId || null,
+      completedDutyTeacherName: claimedSessionData.dutyTeacherName || null,
+      completedDutyTeacherPreviousStatus:
+        claimedSessionData.dutyTeacherPreviousStatus || null,
       closingStartedAt: fieldValue.delete(),
       lastCloseError: fieldValue.delete(),
       updatedAt: fieldValue.serverTimestamp(),

@@ -3,9 +3,9 @@
     "short_name": "ZümreNet",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "",
+    "background_color": "#061833",
+    "theme_color": "#061833",
+    "description": "Bilim Kalesi Eğitim Kurumları için zümre ve etüt yönetim sistemi.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

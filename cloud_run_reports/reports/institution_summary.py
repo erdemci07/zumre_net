@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -10,6 +9,7 @@ from models import InstitutionSummaryData
 from pdf.components import (
     empty_state,
     footer,
+    generated_at_label,
     highlight_grid,
     metric_grid,
     range_label,
@@ -141,7 +141,7 @@ def render(data: InstitutionSummaryData) -> bytes:
     story.append(Spacer(1, 12))
     story.append(
         Paragraph(
-            f"Rapor oluşturma: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+            f"Rapor oluşturma: {generated_at_label()}",
             styles["small"],
         )
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
@@ -31,6 +32,7 @@ MONTHS = [
     "Kasım",
     "Aralık",
 ]
+ISTANBUL = ZoneInfo("Europe/Istanbul")
 
 
 def escape(value) -> str:
@@ -62,6 +64,15 @@ def range_label(start: datetime, end_exclusive: datetime) -> str:
         return date_label(start)
 
     return f"{date_label(start)} - {date_label(visible_end)}"
+
+
+def generated_at_label(now: datetime | None = None) -> str:
+    value = now or datetime.now(ISTANBUL)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ISTANBUL)
+    else:
+        value = value.astimezone(ISTANBUL)
+    return value.strftime("%d.%m.%Y %H:%M")
 
 
 def report_header(title: str, date_text: str, styles):

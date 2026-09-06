@@ -53,6 +53,11 @@ service cloud.firestore {
         && runtimeState().updatedAt > request.time - duration.value(5, "m");
     }
 
+    function isFreshStudyRuntimeState() {
+      return runtimeState().updatedAt is timestamp
+        && runtimeState().updatedAt > request.time - duration.value(3, "h");
+    }
+
     function isInstitutionOverrideActive() {
       return runtimeState().institutionMode in ["closed", "exam"];
     }
@@ -65,7 +70,7 @@ service cloud.firestore {
     }
 
     function canStartStudySession() {
-      return isFreshRuntimeState()
+      return isFreshStudyRuntimeState()
         && runtimeState().isStudyOpen == true
         && !isInstitutionOverrideActive();
     }
@@ -144,10 +149,7 @@ service cloud.firestore {
       allow create: if isTeacher()
         && request.resource.data.teacherId == request.auth.uid
         && canStartZumreQueue()
-        && (
-          request.resource.data.status == "waiting"
-          || request.resource.data.status == "in_progress"
-        );
+        && request.resource.data.status == "waiting";
 
       allow create: if isAdmin();
 
@@ -172,9 +174,19 @@ service cloud.firestore {
 
       allow update: if isTeacher()
         && resource.data.teacherId == request.auth.uid
+        && resource.data.status == "in_progress"
         && request.resource.data.studentId == resource.data.studentId
         && request.resource.data.subject == resource.data.subject
-        && request.resource.data.createdAt == resource.data.createdAt;
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.teacherId == resource.data.teacherId
+        && request.resource.data.extraMinutes >= resource.data.extraMinutes
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            "extraMinutes",
+            "updatedAt"
+          ]);
 
       allow update: if isAdmin();
 

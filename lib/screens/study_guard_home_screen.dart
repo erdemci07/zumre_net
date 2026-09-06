@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -13,9 +14,10 @@ class StudyGuardHomeScreen extends StatefulWidget {
 class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
   String? _staffName;
-  String? _staffRole;
   String? _selectedDutyTeacherId;
   String? _selectedDutyTeacherName;
   String _activeStudySlotText = 'Etüt saati';
@@ -28,6 +30,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
   Timer? _elapsedTimer;
   Timer? _scheduleTimer;
   final Set<String> _removingStudentIds = {};
+  final Set<String> _addingStudentIds = {};
   final Map<String, Map<String, dynamic>> _optimisticStudyStudents = {};
   bool _isProcessing = false;
   StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
@@ -50,7 +53,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     _listenRuntimeScheduleState();
 
     _scheduleTimer = Timer.periodic(
-      const Duration(seconds: 5),
+      const Duration(seconds: 1),
       (_) => _applyLocalStudyScheduleFromCache(runSessionSideEffects: true),
     );
   }
@@ -75,7 +78,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     setState(() {
       _staffName =
           data['fullName'] ?? data['name'] ?? data['email'] ?? 'Etüt Görevlisi';
-      _staffRole = data['role'];
       _selectedDutyTeacherId = data['dutyTeacherId'] as String?;
       _selectedDutyTeacherName = data['dutyTeacherName'] as String?;
     });
@@ -519,26 +521,18 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     });
 
     try {
-      final uid = _auth.currentUser!.uid;
+      final callable = _functions.httpsCallable('ensureStudySession');
+      final response = await callable.call<Map<String, dynamic>>();
+      final sessionId = response.data['sessionId']?.toString();
 
-      final docRef = await _firestore.collection('studySessions').add({
-        'staffId': uid,
-        'staffName': _staffName ?? 'Etüt Görevlisi',
-        'staffRole': _staffRole ?? '',
-        'status': 'active',
-        'startedAt': Timestamp.now(),
-        'endedAt': null,
-        'studentCount': 0,
-        'activeStudentCount': 0,
-        'dutyTeacherId': null,
-        'dutyTeacherName': null,
-        'dutyTeacherPreviousStatus': null,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      if (sessionId == null || sessionId.isEmpty) {
+        throw StateError('Etüt oturumu başlatılamadı.');
+      }
+
       if (!mounted) return;
 
       setState(() {
-        _activeSessionId = docRef.id;
+        _activeSessionId = sessionId;
       });
     } catch (e) {
       _showSnack('Etüt oturumu başlatılamadı: $e');
@@ -585,6 +579,17 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
       final sessionDoc = await sessionRef.get();
       final sessionData = sessionDoc.data() ?? {};
+
+      if (!sessionDoc.exists || sessionData['status'] != 'active') {
+        if (mounted && sessionId == _activeSessionId) {
+          setState(() {
+            _activeSessionId = null;
+            _selectedDutyTeacherId = null;
+            _selectedDutyTeacherName = null;
+          });
+        }
+        return;
+      }
 
       final dutyTeacherId = sessionData['dutyTeacherId'];
       final previousStatus =
@@ -636,6 +641,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
         'endedAt': Timestamp.now(),
         'autoEnded': autoEnded,
         'activeStudentCount': 0,
+        'completedDutyTeacherId': dutyTeacherId,
+        'completedDutyTeacherName': sessionData['dutyTeacherName'],
+        'completedDutyTeacherPreviousStatus': previousStatus,
         'dutyTeacherId': null,
         'dutyTeacherName': null,
         'dutyTeacherPreviousStatus': null,
@@ -664,6 +672,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
   Future<bool> _addStudentToStudy(DocumentSnapshot doc) async {
     if (_activeSessionId == null) return false;
+    if (_addingStudentIds.contains(doc.id)) return false;
     if (!_isStudyOpenNow) {
       _showSnack('Şu an etüt saati aktif değil.');
       return false;
@@ -695,6 +704,10 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     final userRef = _firestore.collection('users').doc(doc.id);
 
     try {
+      setState(() {
+        _addingStudentIds.add(doc.id);
+      });
+
       final wasRejoin =
           await _firestore.runTransaction<bool>((transaction) async {
         final userSnapshot = await transaction.get(userRef);
@@ -777,6 +790,12 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
       _showSnack(e.message);
     } catch (e) {
       _showSnack('Öğrenci etüte alınamadı: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _addingStudentIds.remove(doc.id);
+        });
+      }
     }
 
     return false;
@@ -956,7 +975,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF008A8A),
           content: Text(
@@ -970,7 +991,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
         SnackBar(
           backgroundColor: Colors.redAccent,
           content: Text('Öğrenci etütten çıkarılamadı: $e'),
@@ -988,7 +1011,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
   void _showSnack(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
       SnackBar(content: Text(message)),
     );
   }
@@ -1770,6 +1795,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
         'dutyTeacherId': teacherId,
         'dutyTeacherName': teacherName,
         'dutyTeacherPreviousStatus': previousStatus,
+        'completedDutyTeacherId': teacherId,
+        'completedDutyTeacherName': teacherName,
+        'completedDutyTeacherPreviousStatus': previousStatus,
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
@@ -2256,7 +2284,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
         style: const TextStyle(color: Colors.white60, fontSize: 12),
       ),
       trailing: ElevatedButton(
-        onPressed: _isProcessing
+        onPressed: _isProcessing || _addingStudentIds.contains(doc.id)
             ? null
             : () async {
                 onOptimisticHide();

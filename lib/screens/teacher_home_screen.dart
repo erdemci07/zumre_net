@@ -1869,34 +1869,23 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                     return;
                                   }
 
-                                  final activeSnapshot = await _firestore
-                                      .collection('queues')
-                                      .where('teacherId', isEqualTo: teacherId)
-                                      .where('status', isEqualTo: 'in_progress')
-                                      .get();
-                                  if (!mounted) return;
-
-                                  final hasActiveQuestion =
-                                      activeSnapshot.docs.isNotEmpty;
-
                                   await _firestore.collection('queues').add({
                                     'studentId': selectedId,
                                     'studentName': selectedStudentName,
                                     'teacherId': teacherId,
                                     'teacherName': _teacherName ?? 'Öğretmen',
                                     'subject': _teacherSubject ?? 'Ders',
-                                    'status': hasActiveQuestion
-                                        ? 'waiting'
-                                        : 'in_progress',
+                                    'status': 'waiting',
                                     'isManual': true,
                                     'questionCount': 1,
                                     'estimatedMinutes': 4,
                                     'extraMinutes': 0,
-                                    'createdAt': Timestamp.now(),
-                                    'startedAt': hasActiveQuestion
-                                        ? null
-                                        : Timestamp.now(),
+                                    'createdAt': FieldValue.serverTimestamp(),
+                                    'startedAt': null,
+                                    'updatedAt': FieldValue.serverTimestamp(),
                                   });
+
+                                  await _takeNextWaitingQueue();
 
                                   if (!mounted) return;
                                   if (ctx.mounted) Navigator.pop(ctx);
@@ -1940,27 +1929,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
   }
 
-  Future<void> _takeNextWaitingQueue() async {
-    final uid = _auth.currentUser!.uid;
-
-    final snapshot = await _firestore
-        .collection('queues')
-        .where('teacherId', isEqualTo: uid)
-        .where('status', isEqualTo: 'waiting')
-        .get();
-
-    if (snapshot.docs.isEmpty) return;
-
-    final waitingQueues = snapshot.docs.toList();
-
-    waitingQueues.sort((a, b) => compareQueuePriority(a.data(), b.data()));
-
-    final nextQueue = waitingQueues.first;
-
-    await _firestore.collection('queues').doc(nextQueue.id).update({
-      'status': 'in_progress',
-      'startedAt': Timestamp.now(),
-    });
+  Future<bool> _takeNextWaitingQueue() async {
+    final callable = _functions.httpsCallable('teacherTakeNextQueue');
+    final response = await callable.call<Map<String, dynamic>>();
+    return response.data['startedQueueId'] != null;
   }
 
   Future<void> _startWaitingQueueSafely({
@@ -1982,6 +1954,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           .get();
 
       QueryDocumentSnapshot? activeQueue;
+      String? confirmedActiveQueueId;
 
       if (activeSnapshot.docs.isNotEmpty) {
         activeQueue = activeSnapshot.docs.first;
@@ -2007,6 +1980,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         );
 
         if (!finishCurrent) return;
+
+        confirmedActiveQueueId = activeQueue.id;
       }
 
       if (queueIndex > 0) {
@@ -2025,23 +2000,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         if (!continueOutOfOrder) return;
       }
 
-      final batch = _firestore.batch();
-
-      if (activeQueue != null) {
-        batch.update(activeQueue.reference, {
-          'status': 'completed',
-          'completedAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-
-      batch.update(queueDoc.reference, {
-        'status': 'in_progress',
-        'startedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+      final callable = _functions.httpsCallable('teacherStartQueue');
+      final response = await callable.call<Map<String, dynamic>>({
+        'queueId': queueDoc.id,
+        if (confirmedActiveQueueId != null)
+          'confirmedActiveQueueId': confirmedActiveQueueId,
       });
+      final started = response.data['started'] == true;
 
-      await batch.commit();
+      if (!started) return;
 
       _resetActiveQuestionTimer();
 
@@ -2075,19 +2042,19 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     try {
       _resetActiveQuestionTimer();
 
-      await _firestore.collection('queues').doc(queueId).update({
-        'status': 'completed',
-        'completedAt': Timestamp.now(),
+      final callable = _functions.httpsCallable('teacherCompleteQueue');
+      final response = await callable.call<Map<String, dynamic>>({
+        'queueId': queueId,
       });
+      final completed = response.data['completed'] == true;
 
       if (mounted) {
         setState(() {
-          _todaySolved++;
+          if (completed) {
+            _todaySolved++;
+          }
         });
       }
-
-      await Future.delayed(const Duration(milliseconds: 400));
-      await _takeNextWaitingQueue();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2105,12 +2072,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     try {
       _resetActiveQuestionTimer();
 
-      await _firestore.collection('queues').doc(queueId).update({
-        'status': 'cancelled',
-        'cancelledAt': Timestamp.now(),
+      final callable = _functions.httpsCallable('teacherCancelQueue');
+      await callable.call<Map<String, dynamic>>({
+        'queueId': queueId,
       });
-
-      await _takeNextWaitingQueue();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

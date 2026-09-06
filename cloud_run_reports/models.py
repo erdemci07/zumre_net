@@ -28,6 +28,7 @@ class StudySession:
     ended_at: datetime | None
     student_count: int
     duty_teacher_name: str | None
+    duty_teacher_id: str | None = None
 
 
 @dataclass
@@ -37,6 +38,7 @@ class StudyAttendance:
     session_id: str
     started_at: datetime
     ended_at: datetime | None
+    status: str = "present"
 
 
 @dataclass

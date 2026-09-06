@@ -4,12 +4,14 @@ from io import BytesIO
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from models import ClassReportData
 from pdf.components import (
     empty_state,
+    escape,
     footer,
+    generated_at_label,
     range_label,
     report_header,
     short_date,
@@ -19,7 +21,7 @@ from pdf.components import (
 from pdf.styles import report_styles
 
 
-def _student_activity_rows(data: ClassReportData):
+def _student_activity_rows(data: ClassReportData, styles):
     for student in sorted(data.students, key=lambda item: item.student_name.casefold()):
         activities = []
         for queue in student.question_timeline:
@@ -32,27 +34,31 @@ def _student_activity_rows(data: ClassReportData):
                 )
             )
         for attendance in student.study_attendances:
+            detail = "Etüt"
+            if attendance.status == "left":
+                detail = "Etüt - Çıkarıldı"
             activities.append(
                 (
                     attendance.started_at,
                     short_date(attendance.started_at),
                     f"{time_label(attendance.started_at)}-{time_label(attendance.ended_at)}",
-                    "Etüt",
+                    detail,
                 )
             )
 
         activities.sort(key=lambda item: item[0])
         if not activities:
-            yield [student.student_name, "-", "-", "Faaliyet yok"]
+            yield [student.student_name, "Faaliyet yok"]
             continue
 
-        for index, (_, date_text, time_text, detail) in enumerate(activities):
-            yield [
-                student.student_name if index == 0 else "",
-                date_text,
-                time_text,
-                detail,
-            ]
+        lines = [
+            f"<b>{escape(date_text)} {escape(time_text)}</b> - {escape(detail)}"
+            for _, date_text, time_text, detail in activities
+        ]
+        yield [
+            student.student_name,
+            Paragraph("<br/>".join(lines), styles["body"]),
+        ]
 
 
 def render(data: ClassReportData) -> bytes:
@@ -80,12 +86,20 @@ def render(data: ClassReportData) -> bytes:
     else:
         story.append(
             simple_table(
-                ["Öğrenci", "Tarih", "Saat", "Faaliyet"],
-                list(_student_activity_rows(data)),
-                [45 * mm, 24 * mm, 30 * mm, 73 * mm],
+                ["Öğrenci", "Faaliyetler"],
+                list(_student_activity_rows(data, styles)),
+                [45 * mm, 127 * mm],
                 font_size=7.4,
             )
         )
+
+    story.append(Spacer(1, 12))
+    story.append(
+        Paragraph(
+            f"Rapor oluşturma: {generated_at_label()}",
+            styles["small"],
+        )
+    )
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buffer.getvalue()

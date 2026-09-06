@@ -3195,7 +3195,7 @@ class _TimeTextInputFormatter extends TextInputFormatter {
 class _UserManagementPageState extends State<UserManagementPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseFunctions _functions =
-      FirebaseFunctions.instanceFor(region: 'europe-central1');
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
   final List<String> _roles = ['admin', 'teacher', 'student', 'studyGuard'];
   String _roleLabel(String role) {
@@ -3224,7 +3224,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
     'GEOMETRİ',
   ];
   bool _isLoading = false;
+  bool _isBulkDeleting = false;
   String _userSearchQuery = '';
+  final Set<String> _selectedUserIds = {};
 
   @override
   Widget build(BuildContext context) {
@@ -3283,6 +3285,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 onChanged: (value) {
                   setState(() {
                     _userSearchQuery = value.trim().toLowerCase();
+                    _selectedUserIds.clear();
                   });
                 },
               ),
@@ -3343,92 +3346,167 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         searchable.contains(query);
                   }).toList();
 
-                  return ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
-                    itemCount: users.length,
-                    itemBuilder: (context, index) {
-                      final doc = users[index];
-                      final data = doc.data() as Map<String, dynamic>;
+                  final currentUid = FirebaseAuth.instance.currentUser?.uid;
+                  final selectableUids = users
+                      .map((doc) => doc.id)
+                      .where((uid) => uid != currentUid)
+                      .toList();
+                  final selectedVisibleCount = selectableUids
+                      .where(_selectedUserIds.contains)
+                      .length;
+                  final allVisibleSelected = selectableUids.isNotEmpty &&
+                      selectedVisibleCount == selectableUids.length;
 
-                      final uid = doc.id;
-                      final role = data['role'] ?? '?';
-                      final name = data['fullName'] ??
-                          data['name'] ??
-                          data['email'] ??
-                          'İsimsiz';
-                      final email = data['email'] ?? 'Email yok';
-                      final roleColor = role == 'admin'
-                          ? Colors.redAccent
-                          : role == 'teacher'
-                              ? Colors.lightBlueAccent
-                              : Colors.greenAccent;
+                  return Column(
+                    children: [
+                      _bulkSelectionBar(
+                        selectedCount: selectedVisibleCount,
+                        visibleCount: selectableUids.length,
+                        allVisibleSelected: allVisibleSelected,
+                        onSelectAllChanged: _isBulkDeleting
+                            ? null
+                            : (checked) {
+                                setState(() {
+                                  if (checked == true) {
+                                    _selectedUserIds
+                                      ..clear()
+                                      ..addAll(selectableUids);
+                                  } else {
+                                    _selectedUserIds.clear();
+                                  }
+                                });
+                              },
+                        onDeleteSelected: selectedVisibleCount == 0 ||
+                                _isBulkDeleting ||
+                                _isLoading
+                            ? null
+                            : () => _bulkDeleteUsers(users),
+                      ),
+                      Expanded(
+                        child: ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
+                          itemCount: users.length,
+                          itemBuilder: (context, index) {
+                            final doc = users[index];
+                            final data = doc.data() as Map<String, dynamic>;
 
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(24),
-                          border:
-                              Border.all(color: Colors.white.withValues(alpha: 0.15)),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                            final uid = doc.id;
+                            final role = data['role'] ?? '?';
+                            final name = data['fullName'] ??
+                                data['name'] ??
+                                data['email'] ??
+                                'İsimsiz';
+                            final email = data['email'] ?? 'Email yok';
+                            final roleColor = role == 'admin'
+                                ? Colors.redAccent
+                                : role == 'teacher'
+                                    ? Colors.lightBlueAccent
+                                    : Colors.greenAccent;
+                            final canSelect = uid != currentUid &&
+                                !_isBulkDeleting &&
+                                !_isLoading;
+                            final isSelected = _selectedUserIds.contains(uid);
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? Colors.redAccent.withValues(alpha: 0.45)
+                                      : Colors.white.withValues(alpha: 0.15),
+                                ),
+                              ),
+                              child: Row(
                                 children: [
-                                  Text(
-                                    '$name',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
+                                  Checkbox(
+                                    value: isSelected,
+                                    onChanged: canSelect
+                                        ? (checked) {
+                                            setState(() {
+                                              if (checked == true) {
+                                                _selectedUserIds.add(uid);
+                                              } else {
+                                                _selectedUserIds.remove(uid);
+                                              }
+                                            });
+                                          }
+                                        : null,
+                                    activeColor: Colors.redAccent,
+                                    checkColor: Colors.white,
+                                    side: const BorderSide(
+                                      color: Colors.white54,
+                                      width: 1.5,
                                     ),
                                   ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    '$email',
-                                    style: const TextStyle(
-                                      color: Colors.white60,
-                                      fontSize: 12,
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '$name',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          '$email',
+                                          style: const TextStyle(
+                                            color: Colors.white60,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          _roleLabel(role),
+                                          style: TextStyle(
+                                            color: roleColor,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    _roleLabel(role),
-                                    style: TextStyle(
-                                      color: roleColor,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 12,
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.edit,
+                                      color: Colors.white70,
                                     ),
+                                    onPressed: _isBulkDeleting
+                                        ? null
+                                        : () => _editUser(uid, data),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.redAccent,
+                                    ),
+                                    onPressed: _isBulkDeleting
+                                        ? null
+                                        : () => _deleteUser(uid, email),
                                   ),
                                 ],
                               ),
-                            ),
-                            IconButton(
-                              icon:
-                                  const Icon(Icons.edit, color: Colors.white70),
-                              onPressed: () => _editUser(uid, data),
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.delete_outline,
-                                color: Colors.redAccent,
-                              ),
-                              onPressed: () => _deleteUser(uid, email),
-                            ),
-                          ],
+                            );
+                          },
                         ),
-                      );
-                    },
+                      ),
+                    ],
                   );
                 },
               ),
             ),
           ],
         ),
-        if (_isLoading)
+        if (_isLoading || _isBulkDeleting)
           Container(
             color: Colors.black.withValues(alpha: 0.45),
             child: const Center(
@@ -3436,6 +3514,108 @@ class _UserManagementPageState extends State<UserManagementPage> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _bulkSelectionBar({
+    required int selectedCount,
+    required int visibleCount,
+    required bool allVisibleSelected,
+    required ValueChanged<bool?>? onSelectAllChanged,
+    required VoidCallback? onDeleteSelected,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 420;
+            final selectAll = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Checkbox(
+                  value: allVisibleSelected,
+                  onChanged: visibleCount == 0 ? null : onSelectAllChanged,
+                  activeColor: Colors.lightBlueAccent,
+                  checkColor: const Color(0xFF071A3A),
+                  side: const BorderSide(color: Colors.white54, width: 1.5),
+                ),
+                const Text(
+                  'Tümünü Seç',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            );
+            final countText = Text(
+              '$selectedCount seçili',
+              style: const TextStyle(color: Colors.white60, fontSize: 12),
+            );
+            final deleteButton = ElevatedButton.icon(
+              onPressed: onDeleteSelected,
+              icon: _isBulkDeleting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.delete_sweep_rounded, size: 18),
+              label: const Text('Seçilenleri Sil'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.white.withValues(alpha: 0.12),
+                disabledForegroundColor: Colors.white38,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+            );
+
+            if (isNarrow) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: selectAll),
+                      countText,
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  deleteButton,
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                selectAll,
+                const SizedBox(width: 10),
+                countText,
+                const Spacer(),
+                deleteButton,
+              ],
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -4001,6 +4181,392 @@ class _UserManagementPageState extends State<UserManagementPage> {
       'department': department,
       'studentNo': studentNo,
     });
+  }
+
+  Future<void> _bulkDeleteUsers(
+    List<QueryDocumentSnapshot<Object?>> visibleUsers,
+  ) async {
+    final visibleSelectedUsers = visibleUsers
+        .where((doc) => _selectedUserIds.contains(doc.id))
+        .toList();
+
+    if (visibleSelectedUsers.isEmpty) return;
+
+    final confirmed = await _showBulkDeleteConfirmDialog(visibleSelectedUsers);
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    setState(() => _isBulkDeleting = true);
+
+    try {
+      final callable = _functions.httpsCallable('adminBulkDeleteUsers');
+      final response = await callable.call({
+        'targetUids': visibleSelectedUsers.map((doc) => doc.id).toList(),
+      });
+      final data = Map<String, dynamic>.from(response.data as Map);
+
+      if (!mounted) return;
+
+      final results = _bulkResultItems(data);
+      final deletedIds = results
+          .where((item) => item['status'] == 'deleted')
+          .map((item) => '${item['uid']}')
+          .toSet();
+
+      setState(() {
+        _selectedUserIds.removeAll(deletedIds);
+      });
+
+      await _showBulkDeleteResultDialog(data);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Toplu silme tamamlanamadı: ${_adminFunctionErrorMessage(e)}',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isBulkDeleting = false);
+    }
+  }
+
+  Future<bool?> _showBulkDeleteConfirmDialog(
+    List<QueryDocumentSnapshot<Object?>> selectedUsers,
+  ) {
+    final preview = selectedUsers.take(6).map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return _userDisplayName(doc.id, data);
+    }).toList();
+    final extraCount = selectedUsers.length - preview.length;
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 440),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF071A3A),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.28),
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withValues(alpha: 0.16),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.redAccent.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.delete_sweep_rounded,
+                      color: Colors.redAccent,
+                      size: 30,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Text(
+                      'Seçilen Kullanıcıları Sil',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 21,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                '${selectedUsers.length} kullanıcı için Firebase Auth hesabı ve users kaydı silinecek. Tamamlanan geçmiş kayıtlar korunur.',
+                style: const TextStyle(color: Colors.white70, height: 1.35),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final name in preview)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(
+                          name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    if (extraCount > 0)
+                      Text(
+                        '+$extraCount kullanıcı daha',
+                        style: const TextStyle(color: Colors.white60),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Colors.white38),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      child: const Text('Vazgeç'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      child: const Text('Sil'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showBulkDeleteResultDialog(Map<String, dynamic> data) {
+    final results = _bulkResultItems(data);
+    final detailItems = results
+        .where((item) => item['status'] != 'deleted')
+        .take(12)
+        .toList();
+
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 460, maxHeight: 620),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF071A3A),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.28),
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Toplu Silme Sonucu',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 21,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _bulkResultChip(
+                    '${_bulkResultInt(data, 'deletedCount')} silindi',
+                    Colors.greenAccent,
+                  ),
+                  _bulkResultChip(
+                    '${_bulkResultInt(data, 'skippedCount')} atlandı',
+                    Colors.orangeAccent,
+                  ),
+                  _bulkResultChip(
+                    '${_bulkResultInt(data, 'failedCount')} hata',
+                    Colors.redAccent,
+                  ),
+                ],
+              ),
+              if (detailItems.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: detailItems.length,
+                    separatorBuilder: (_, __) => const Divider(
+                      color: Colors.white12,
+                      height: 14,
+                    ),
+                    itemBuilder: (context, index) {
+                      final item = detailItems[index];
+                      final status = '${item['status']}';
+                      final color = status == 'skipped'
+                          ? Colors.orangeAccent
+                          : Colors.redAccent;
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            status == 'skipped'
+                                ? Icons.info_outline_rounded
+                                : Icons.error_outline_rounded,
+                            color: color,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${item['name']} - ${item['reason']}',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.lightBlueAccent,
+                  foregroundColor: const Color(0xFF071A3A),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+                child: const Text('Tamam'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _bulkResultChip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+
+  List<Map<String, dynamic>> _bulkResultItems(Map<String, dynamic> data) {
+    final rawResults = data['results'];
+
+    if (rawResults is! List) return [];
+
+    return rawResults
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  int _bulkResultInt(Map<String, dynamic> data, String key) {
+    final value = data[key];
+
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+
+    return 0;
+  }
+
+  String _userDisplayName(String uid, Map<String, dynamic> data) {
+    final fullName = '${data['fullName'] ?? ''}'.trim();
+    final email = '${data['email'] ?? ''}'.trim();
+    final username = '${data['username'] ?? ''}'.trim();
+
+    return fullName.isNotEmpty
+        ? fullName
+        : email.isNotEmpty
+            ? email
+            : username.isNotEmpty
+                ? username
+                : uid;
   }
 
   Future<void> _deleteUser(String uid, String email) async {

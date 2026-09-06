@@ -4,10 +4,17 @@ from io import BytesIO
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from models import ClassReportData
-from pdf.components import empty_state, footer, range_label, report_header, simple_table
+from pdf.components import (
+    empty_state,
+    footer,
+    generated_at_label,
+    range_label,
+    report_header,
+    simple_table,
+)
 from pdf.styles import report_styles
 
 
@@ -16,7 +23,7 @@ def _subject_summary(subjects: dict[str, int]) -> str:
         return "-"
 
     parts = [
-        f"{subject} {count}"
+        f"{subject} {count} soru"
         for subject, count in sorted(
             subjects.items(),
             key=lambda item: (-item[1], item[0]),
@@ -68,6 +75,14 @@ def render(data: ClassReportData) -> bytes:
                 font_size=7.6,
             )
         )
+
+    story.append(Spacer(1, 12))
+    story.append(
+        Paragraph(
+            f"Rapor oluşturma: {generated_at_label()}",
+            styles["small"],
+        )
+    )
 
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     return buffer.getvalue()

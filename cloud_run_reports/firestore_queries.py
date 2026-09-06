@@ -62,6 +62,25 @@ def _to_datetime(value):
     return None
 
 
+def _scheduled_datetime(slot_date, slot_time):
+    date_text = _clean(slot_date)
+    time_text = _clean(slot_time)
+
+    if not date_text or not time_text:
+        return None
+
+    try:
+        day = datetime.strptime(date_text, "%Y-%m-%d").date()
+        hour, minute = [int(part) for part in time_text.split(":", 1)]
+    except (TypeError, ValueError):
+        return None
+
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=ISTANBUL)
+
+
 def _clean(value, fallback=""):
     text = str(value or "").strip()
     return text or fallback
@@ -80,6 +99,10 @@ def _safe_int(value, fallback=0):
         except ValueError:
             return fallback
     return fallback
+
+
+def _teacher_name_from_data(data: dict) -> str:
+    return _clean(data.get("fullName") or data.get("name") or data.get("email"))
 
 
 def _log_skip(collection: str, doc_id: str, reason: str):
@@ -154,7 +177,10 @@ def normalize_study_session(doc) -> StudySession | None:
         )
         return None
 
-    started_at = _to_datetime(data.get("startedAt") or data.get("createdAt"))
+    started_at = (
+        _scheduled_datetime(data.get("slotDate"), data.get("slotStart"))
+        or _to_datetime(data.get("startedAt") or data.get("createdAt"))
+    )
     if started_at is None:
         _log_skip("studySessions", doc.id, "missing_startedAt")
         return None
@@ -162,10 +188,57 @@ def normalize_study_session(doc) -> StudySession | None:
     return StudySession(
         session_id=doc.id,
         started_at=started_at,
-        ended_at=_to_datetime(data.get("endedAt") or data.get("updatedAt")),
+        ended_at=(
+            _scheduled_datetime(data.get("slotDate"), data.get("slotEnd"))
+            or _to_datetime(data.get("endedAt") or data.get("updatedAt"))
+        ),
         student_count=max(_safe_int(data.get("studentCount"), 0), 0),
-        duty_teacher_name=_clean(data.get("dutyTeacherName")) or None,
+        duty_teacher_name=_clean(
+            data.get("completedDutyTeacherName")
+            or data.get("dutyTeacherName")
+            or data.get("branchTeacherName")
+            or data.get("teacherName")
+        )
+        or None,
+        duty_teacher_id=_clean(
+            data.get("completedDutyTeacherId")
+            or data.get("dutyTeacherId")
+            or data.get("branchTeacherId")
+            or data.get("teacherId")
+        )
+        or None,
     )
+
+
+def _hydrate_study_session_teacher_names(db, sessions: list[StudySession]) -> None:
+    teacher_ids = sorted(
+        {
+            session.duty_teacher_id
+            for session in sessions
+            if session.duty_teacher_id and not session.duty_teacher_name
+        }
+    )
+    if not teacher_ids:
+        return
+
+    teacher_names = {}
+    for teacher_id in teacher_ids:
+        try:
+            teacher_doc = db.collection("users").document(teacher_id).get()
+            if teacher_doc.exists:
+                teacher_names[teacher_id] = _teacher_name_from_data(
+                    teacher_doc.to_dict() or {}
+                )
+        except Exception as exc:
+            LOGGER.warning(
+                "Failed to resolve study session duty teacher: teacherId=%s exceptionType=%s",
+                teacher_id,
+                type(exc).__name__,
+            )
+
+    for session in sessions:
+        if not session.duty_teacher_name and session.duty_teacher_id:
+            session.duty_teacher_name = teacher_names.get(session.duty_teacher_id) or None
 
 
 def fetch_completed_study_sessions(db, date_range: DateRange) -> list[StudySession]:
@@ -190,6 +263,7 @@ def fetch_completed_study_sessions(db, date_range: DateRange) -> list[StudySessi
         raise
 
     sessions.sort(key=lambda item: item.started_at)
+    _hydrate_study_session_teacher_names(db, sessions)
     return sessions
 
 
@@ -251,12 +325,17 @@ def normalize_study_attendance(doc, session_map: dict[str, StudySession]) -> Stu
             return None
 
         session = session_map[session_ref.id]
+        checked_out_at = _to_datetime(data.get("checkedOutAt"))
         return StudyAttendance(
             student_id=_clean(data.get("studentId"), doc.id),
-            student_name=_clean(data.get("studentName"), "Öğrenci"),
+            student_name=_clean(
+                data.get("studentName"),
+                "Çıkarıldı" if status == "left" else "Öğrenci",
+            ),
             session_id=session.session_id,
             started_at=session.started_at,
-            ended_at=session.ended_at,
+            ended_at=checked_out_at or session.ended_at,
+            status=status,
         )
     except Exception as exc:
         LOGGER.exception(

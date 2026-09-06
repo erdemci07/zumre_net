@@ -6,6 +6,18 @@ import 'package:cloud_functions/cloud_functions.dart';
 
 import '../utils/queue_priority.dart';
 
+class _TeacherChoice {
+  const _TeacherChoice({
+    required this.id,
+    required this.name,
+    required this.subjects,
+  });
+
+  final String id;
+  final String name;
+  final List<String> subjects;
+}
+
 class StudentHomeScreen extends StatefulWidget {
   const StudentHomeScreen({super.key});
 
@@ -30,6 +42,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String _zumreMessage = 'Zümre saati kontrol ediliyor...';
   String? _currentQueueId;
   String? _currentTeacherName;
+  String? _selectedTeacherId;
+  String? _selectedTeacherName;
   int _queuePosition = 0;
   int _selectedQuestionCount = 1;
   String _nextZumreText = '';
@@ -45,6 +59,90 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       default:
         return 13;
     }
+  }
+
+  String _normalizeSubjectText(Object? value) {
+    return value
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll('ı', 'i')
+        .replaceAll('ş', 's')
+        .replaceAll('ğ', 'g')
+        .replaceAll('ü', 'u')
+        .replaceAll('ö', 'o')
+        .replaceAll('ç', 'c');
+  }
+
+  List<String> _teacherSubjects(Map<String, dynamic> data) {
+    final subjects = <String>[];
+    final rawSubjects = data['subjects'];
+
+    if (rawSubjects is List) {
+      subjects.addAll(rawSubjects.map((item) => item.toString()));
+    } else if (rawSubjects is String) {
+      subjects.addAll(rawSubjects.split(RegExp(r'[,;/|]')));
+    }
+
+    final branch = data['branch']?.toString();
+    final subject = data['subject']?.toString();
+
+    if (branch != null && branch.trim().isNotEmpty) {
+      subjects.add(branch);
+    }
+
+    if (subject != null && subject.trim().isNotEmpty) {
+      subjects.add(subject);
+    }
+
+    final seen = <String>{};
+    return subjects
+        .map((item) => item.trim())
+        .where((item) {
+          if (item.isEmpty) return false;
+          return seen.add(_normalizeSubjectText(item));
+        })
+        .toList();
+  }
+
+  bool _teacherMatchesSelectedSubject(Map<String, dynamic> data) {
+    final selectedSubject = _selectedSubject;
+    if (selectedSubject == null || selectedSubject.trim().isEmpty) {
+      return false;
+    }
+
+    final normalizedSelected = _normalizeSubjectText(selectedSubject);
+    return _teacherSubjects(data).any(
+      (subject) => _normalizeSubjectText(subject) == normalizedSelected,
+    );
+  }
+
+  String _teacherDisplayName(Map<String, dynamic> data) {
+    final name = data['fullName'] ?? data['name'] ?? data['email'];
+    final value = name?.toString().trim() ?? '';
+    return value.isEmpty ? 'Öğretmen' : value;
+  }
+
+  Future<List<_TeacherChoice>> _loadAvailableTeacherChoices() async {
+    final snapshot = await _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'teacher')
+        .where('teacherStatus', isEqualTo: 'available')
+        .get();
+
+    final teachers = snapshot.docs
+        .where((doc) => _teacherMatchesSelectedSubject(doc.data()))
+        .map((doc) {
+      final data = doc.data();
+      return _TeacherChoice(
+        id: doc.id,
+        name: _teacherDisplayName(data),
+        subjects: _teacherSubjects(data),
+      );
+    }).toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+
+    return teachers;
   }
 
   int _cooldownUntil = 0;
@@ -606,6 +704,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       final response = await callable.call<Map<String, dynamic>>({
         'subject': _selectedSubject,
         'questionCount': _selectedQuestionCount,
+        if (_selectedTeacherId != null) 'teacherId': _selectedTeacherId,
       });
       final data = response.data;
       final queueId = data['queueId']?.toString();
@@ -618,7 +717,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         setState(() {
           _isInQueue = true;
           _currentQueueId = queueId;
-          _currentTeacherName = data['teacherName']?.toString();
+          _currentTeacherName =
+              data['teacherName']?.toString() ?? _selectedTeacherName;
           _queuePosition = 1;
         });
       }
@@ -1015,6 +1115,386 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  Widget _buildTeacherSelector() {
+    final hasManualTeacher = _selectedTeacherId != null;
+    final subtitle = hasManualTeacher
+        ? '${_selectedTeacherName ?? 'Seçili öğretmen'} ile sıraya gir'
+        : 'En uygun öğretmene yönlendir (önerilen)';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(24),
+      onTap: _showTeacherPickerDialog,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: (hasManualTeacher ? Colors.greenAccent : Colors.amber)
+                    .withValues(alpha: 0.16),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                hasManualTeacher
+                    ? Icons.person_pin_rounded
+                    : Icons.auto_awesome_rounded,
+                color: hasManualTeacher ? Colors.greenAccent : Colors.amber,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Öğretmen Seç',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showTeacherPickerDialog() async {
+    if (_selectedSubject == null || _selectedSubject!.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Önce bir ders seçin.')),
+      );
+      return;
+    }
+
+    String? dialogTeacherId = _selectedTeacherId;
+    String? dialogTeacherName = _selectedTeacherName;
+    final teachersFuture = _loadAvailableTeacherChoices();
+
+    final shouldJoin = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+              child: Container(
+                constraints:
+                    const BoxConstraints(maxWidth: 520, maxHeight: 680),
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFF12103F),
+                      Color(0xFF261369),
+                      Color(0xFF071A3A),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: Colors.white24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.30),
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 58,
+                          height: 58,
+                          decoration: BoxDecoration(
+                            color: Colors.greenAccent.withValues(alpha: 0.16),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.support_agent_rounded,
+                            color: Colors.greenAccent,
+                            size: 32,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Öğretmen Seç',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 23,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'İstersen en uygun öğretmene yönlendirebiliriz.',
+                                style: TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Flexible(
+                      child: FutureBuilder<List<_TeacherChoice>>(
+                        future: teachersFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(28),
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                ),
+                              ),
+                            );
+                          }
+
+                          final teachers = snapshot.data ?? [];
+
+                          return SingleChildScrollView(
+                            child: Column(
+                              children: [
+                                _teacherOptionTile(
+                                  selected: dialogTeacherId == null,
+                                  icon: Icons.auto_awesome_rounded,
+                                  title: 'En Uygun Öğretmene Yönlendir',
+                                  subtitle: 'Önerilen',
+                                  color: Colors.amber,
+                                  onTap: () {
+                                    setDialogState(() {
+                                      dialogTeacherId = null;
+                                      dialogTeacherName = null;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 10),
+                                if (teachers.isEmpty)
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white
+                                          .withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.10),
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'Bu ders için şu anda listelenebilecek müsait öğretmen yok.',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  ...teachers.map(
+                                    (teacher) => Padding(
+                                      padding:
+                                          const EdgeInsets.only(bottom: 10),
+                                      child: _teacherOptionTile(
+                                        selected:
+                                            dialogTeacherId == teacher.id,
+                                        icon: Icons.person_rounded,
+                                        title: teacher.name,
+                                        subtitle: teacher.subjects.isEmpty
+                                            ? 'Branş bilgisi yok'
+                                            : teacher.subjects.join(' • '),
+                                        color: Colors.greenAccent,
+                                        onTap: () {
+                                          setDialogState(() {
+                                            dialogTeacherId = teacher.id;
+                                            dialogTeacherName = teacher.name;
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: ElevatedButton.icon(
+                        onPressed: _isRoutingQueue
+                            ? null
+                            : () {
+                                setState(() {
+                                  _selectedTeacherId = dialogTeacherId;
+                                  _selectedTeacherName = dialogTeacherName;
+                                });
+                                Navigator.pop(ctx, true);
+                              },
+                        icon: const Icon(Icons.add_rounded),
+                        label: Text(
+                          dialogTeacherId == null
+                              ? 'En Uygun Öğretmenle Sıra Al'
+                              : 'Sıra Al',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor:
+                              Colors.white.withValues(alpha: 0.14),
+                          disabledForegroundColor: Colors.white54,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (shouldJoin == true) {
+      if (!mounted) return;
+      await _joinQueue();
+    }
+  }
+
+  Widget _teacherOptionTile({
+    required bool selected,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? color.withValues(alpha: 0.75) : Colors.white12,
+            width: selected ? 1.6 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.18),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white60,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            AnimatedOpacity(
+              duration: const Duration(milliseconds: 180),
+              opacity: selected ? 1 : 0,
+              child: const Icon(
+                Icons.check_circle_rounded,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _subjectCard(String title, IconData icon, Color color) {
     final selected = _selectedSubject == title;
 
@@ -1023,6 +1503,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       onTap: () {
         setState(() {
           _selectedSubject = title;
+          _selectedTeacherId = null;
+          _selectedTeacherName = null;
         });
       },
       child: AnimatedContainer(
@@ -1163,6 +1645,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           const SizedBox(height: 24),
           const SizedBox(height: 18),
           _buildQuestionCountSelector(),
+          const SizedBox(height: 18),
+          _buildTeacherSelector(),
           const SizedBox(height: 24),
           _buildJoinQueueButton(),
         ],
@@ -1303,13 +1787,19 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ),
               )
             : const Icon(Icons.auto_awesome_rounded),
-        label: Text(
-          _isRoutingQueue
-              ? 'En uygun sıra belirleniyor...'
-              : '✨ Uygun öğretmene yönlendir',
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
+        label: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            _isRoutingQueue
+                ? 'Sıranız hazırlanıyor...'
+                : _selectedTeacherId == null
+                    ? '✨ En uygun öğretmene yönlendir (önerilen)'
+                    : '${_selectedTeacherName ?? 'Seçili öğretmen'} ile sıra al',
+            maxLines: 1,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
         style: ElevatedButton.styleFrom(
