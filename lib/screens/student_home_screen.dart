@@ -1014,23 +1014,28 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   Widget _buildSubjectGrid() {
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      crossAxisSpacing: 9,
-      mainAxisSpacing: 9,
-      childAspectRatio: 1.8,
-      children: [
-        _subjectCard('MATEMATİK', Icons.calculate, const Color(0xFF6C3DFF)),
-        _subjectCard('FİZİK', Icons.biotech, const Color(0xFF0099FF)),
-        _subjectCard('KİMYA', Icons.science, const Color(0xFFFF8A00)),
-        _subjectCard('BİYOLOJİ', Icons.eco, const Color(0xFF00C878)),
-        _subjectCard('TÜRKÇE', Icons.menu_book, const Color(0xFFE91E63)),
-        _subjectCard('TARİH', Icons.history_edu, const Color(0xFFFFC107)),
-        _subjectCard('COĞRAFYA', Icons.public, const Color(0xFF00BCD4)),
-        _subjectCard('GEOMETRİ', Icons.square_foot, const Color(0xFF9C27B0)),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: 2,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+          childAspectRatio: constraints.maxWidth < 390 ? 2.5 : 2.35,
+          children: [
+            _subjectCard(
+                'MATEMATİK', Icons.calculate, const Color(0xFF6C3DFF)),
+            _subjectCard('FİZİK', Icons.biotech, const Color(0xFF0099FF)),
+            _subjectCard('KİMYA', Icons.science, const Color(0xFFFF8A00)),
+            _subjectCard('BİYOLOJİ', Icons.eco, const Color(0xFF00C878)),
+            _subjectCard('TÜRKÇE', Icons.menu_book, const Color(0xFFE91E63)),
+            _subjectCard('TARİH', Icons.history_edu, const Color(0xFFFFC107)),
+            _subjectCard('COĞRAFYA', Icons.public, const Color(0xFF00BCD4)),
+            _subjectCard('GEOMETRİ', Icons.square_foot, const Color(0xFF9C27B0)),
+          ],
+        );
+      },
     );
   }
 
@@ -1039,7 +1044,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(24),
@@ -1052,11 +1057,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             'Kaç soru çözdüreceksin?',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 17,
+              fontSize: 16,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           Row(
             children: options.map((questionCount) {
               final selected = _selectedQuestionCount == questionCount;
@@ -1074,7 +1079,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 220),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      padding: const EdgeInsets.symmetric(vertical: 9),
                       decoration: BoxDecoration(
                         color: selected
                             ? const Color(0xFF6C3DFF)
@@ -1102,12 +1107,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               );
             }).toList(),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           Text(
             'Tahmini çözüm süresi: ~${_estimatedMinutesForQuestionCount(_selectedQuestionCount)} dk',
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 13,
+              fontSize: 12.5,
             ),
           ),
         ],
@@ -1126,7 +1131,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       onTap: _showTeacherPickerDialog,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(24),
@@ -1135,8 +1140,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         child: Row(
           children: [
             Container(
-              width: 48,
-              height: 48,
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
                 color: (hasManualTeacher ? Colors.greenAccent : Colors.amber)
                     .withValues(alpha: 0.16),
@@ -1149,7 +1154,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 color: hasManualTeacher ? Colors.greenAccent : Colors.amber,
               ),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1158,7 +1163,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     'Öğretmen Seç',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -1169,7 +1174,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white70,
-                      fontSize: 12.5,
+                      fontSize: 12,
                     ),
                   ),
                 ],
@@ -1194,7 +1199,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     String? dialogTeacherName = _selectedTeacherName;
     final teachersFuture = _loadAvailableTeacherChoices();
 
-    final shouldJoin = await showDialog<bool>(
+    await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
@@ -1206,8 +1211,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
               child: Container(
                 constraints:
-                    const BoxConstraints(maxWidth: 520, maxHeight: 680),
-                padding: const EdgeInsets.all(22),
+                    const BoxConstraints(maxWidth: 520, maxHeight: 620),
+                padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft,
@@ -1235,8 +1240,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     Row(
                       children: [
                         Container(
-                          width: 58,
-                          height: 58,
+                          width: 50,
+                          height: 50,
                           decoration: BoxDecoration(
                             color: Colors.greenAccent.withValues(alpha: 0.16),
                             shape: BoxShape.circle,
@@ -1244,10 +1249,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                           child: const Icon(
                             Icons.support_agent_rounded,
                             color: Colors.greenAccent,
-                            size: 32,
+                            size: 28,
                           ),
                         ),
-                        const SizedBox(width: 14),
+                        const SizedBox(width: 12),
                         const Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1256,7 +1261,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 'Öğretmen Seç',
                                 style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 23,
+                                  fontSize: 21,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -1280,7 +1285,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 14),
                     Flexible(
                       child: FutureBuilder<List<_TeacherChoice>>(
                         future: teachersFuture,
@@ -1298,28 +1303,35 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                           }
 
                           final teachers = snapshot.data ?? [];
+                          final hasAvailableTeachers = teachers.isNotEmpty;
 
                           return SingleChildScrollView(
                             child: Column(
                               children: [
                                 _teacherOptionTile(
-                                  selected: dialogTeacherId == null,
+                                  selected: hasAvailableTeachers &&
+                                      dialogTeacherId == null,
                                   icon: Icons.auto_awesome_rounded,
                                   title: 'En Uygun Öğretmene Yönlendir',
-                                  subtitle: 'Önerilen',
+                                  subtitle: hasAvailableTeachers
+                                      ? 'Önerilen'
+                                      : 'Müsait öğretmen yok',
                                   color: Colors.amber,
-                                  onTap: () {
-                                    setDialogState(() {
-                                      dialogTeacherId = null;
-                                      dialogTeacherName = null;
-                                    });
-                                  },
+                                  enabled: hasAvailableTeachers,
+                                  onTap: hasAvailableTeachers
+                                      ? () {
+                                          setDialogState(() {
+                                            dialogTeacherId = null;
+                                            dialogTeacherName = null;
+                                          });
+                                        }
+                                      : null,
                                 ),
-                                const SizedBox(height: 10),
+                                const SizedBox(height: 8),
                                 if (teachers.isEmpty)
                                   Container(
                                     width: double.infinity,
-                                    padding: const EdgeInsets.all(16),
+                                    padding: const EdgeInsets.all(14),
                                     decoration: BoxDecoration(
                                       color: Colors.white
                                           .withValues(alpha: 0.08),
@@ -1340,8 +1352,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 else
                                   ...teachers.map(
                                     (teacher) => Padding(
-                                      padding:
-                                          const EdgeInsets.only(bottom: 10),
+                                      padding: const EdgeInsets.only(bottom: 8),
                                       child: _teacherOptionTile(
                                         selected:
                                             dialogTeacherId == teacher.id,
@@ -1366,41 +1377,53 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                         },
                       ),
                     ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 56,
-                      child: ElevatedButton.icon(
-                        onPressed: _isRoutingQueue
-                            ? null
-                            : () {
-                                setState(() {
-                                  _selectedTeacherId = dialogTeacherId;
-                                  _selectedTeacherName = dialogTeacherName;
-                                });
-                                Navigator.pop(ctx, true);
-                              },
-                        icon: const Icon(Icons.add_rounded),
-                        label: Text(
-                          dialogTeacherId == null
-                              ? 'En Uygun Öğretmenle Sıra Al'
-                              : 'Sıra Al',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                    const SizedBox(height: 14),
+                    FutureBuilder<List<_TeacherChoice>>(
+                      future: teachersFuture,
+                      builder: (context, snapshot) {
+                        final hasAvailableTeachers =
+                            (snapshot.data ?? []).isNotEmpty;
+                        final canApplySelection =
+                            !_isRoutingQueue && hasAvailableTeachers;
+
+                        return SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton.icon(
+                            onPressed: canApplySelection
+                                ? () {
+                                    setState(() {
+                                      _selectedTeacherId = dialogTeacherId;
+                                      _selectedTeacherName = dialogTeacherName;
+                                    });
+                                    Navigator.pop(ctx);
+                                  }
+                                : null,
+                            icon: const Icon(Icons.add_rounded),
+                            label: Text(
+                              hasAvailableTeachers
+                                  ? dialogTeacherId == null
+                                      ? 'En Uygun Öğretmen'
+                                      : 'Seçimi Uygula'
+                                  : 'Müsait Öğretmen Yok',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor:
+                                  Colors.white.withValues(alpha: 0.14),
+                              disabledForegroundColor: Colors.white54,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                            ),
                           ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor:
-                              Colors.white.withValues(alpha: 0.14),
-                          disabledForegroundColor: Colors.white54,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -1410,11 +1433,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         );
       },
     );
-
-    if (shouldJoin == true) {
-      if (!mounted) return;
-      await _joinQueue();
-    }
   }
 
   Widget _teacherOptionTile({
@@ -1423,37 +1441,42 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     required String title,
     required String subtitle,
     required Color color,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
+    bool enabled = true,
   }) {
+    final effectiveColor = enabled ? color : Colors.white54;
+
     return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      onTap: enabled ? onTap : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         width: double.infinity,
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
-          color: selected
+          color: selected && enabled
               ? color.withValues(alpha: 0.18)
               : Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: selected ? color.withValues(alpha: 0.75) : Colors.white12,
-            width: selected ? 1.6 : 1,
+            color: selected && enabled
+                ? color.withValues(alpha: 0.75)
+                : Colors.white12,
+            width: selected && enabled ? 1.6 : 1,
           ),
         ),
         child: Row(
           children: [
             Container(
-              width: 46,
-              height: 46,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.18),
+                color: effectiveColor.withValues(alpha: 0.16),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, color: color),
+              child: Icon(icon, color: effectiveColor),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 11),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1462,9 +1485,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15.5,
+                    style: TextStyle(
+                      color: enabled ? Colors.white : Colors.white54,
+                      fontSize: 14.5,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -1473,9 +1496,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     subtitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white60,
-                      fontSize: 12,
+                    style: TextStyle(
+                      color: enabled ? Colors.white60 : Colors.white38,
+                      fontSize: 11.5,
                     ),
                   ),
                 ],
@@ -1483,7 +1506,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             ),
             AnimatedOpacity(
               duration: const Duration(milliseconds: 180),
-              opacity: selected ? 1 : 0,
+              opacity: selected && enabled ? 1 : 0,
               child: const Icon(
                 Icons.check_circle_rounded,
                 color: Colors.white,
@@ -1522,13 +1545,16 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: selected ? Colors.white : color, size: 30),
-            const SizedBox(height: 8),
+            Icon(icon, color: selected ? Colors.white : color, size: 26),
+            const SizedBox(height: 5),
             Text(
               title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
+                fontSize: 13,
               ),
             ),
           ],
@@ -1606,20 +1632,20 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   Widget _buildHomeView() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildWelcomeCard(),
-          const SizedBox(height: 24),
+          const SizedBox(height: 10),
           _buildCooldownCard(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
           if (_isInStudySession) ...[
             Container(
               width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(14),
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.orangeAccent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(16),
@@ -1636,18 +1662,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             "Ders Seç",
             style: TextStyle(
               color: Colors.white,
-              fontSize: 22,
+              fontSize: 19,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           _buildSubjectGrid(),
-          const SizedBox(height: 24),
-          const SizedBox(height: 18),
+          const SizedBox(height: 10),
           _buildQuestionCountSelector(),
-          const SizedBox(height: 18),
+          const SizedBox(height: 9),
           _buildTeacherSelector(),
-          const SizedBox(height: 24),
+          const SizedBox(height: 10),
           _buildJoinQueueButton(),
         ],
       ),
@@ -1657,7 +1682,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Widget _buildWelcomeCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -1683,8 +1708,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           Row(
             children: [
               Container(
-                width: 66,
-                height: 66,
+                width: 58,
+                height: 58,
                 decoration: BoxDecoration(
                   color: const Color(0xFF6C3DFF).withValues(alpha: 0.22),
                   shape: BoxShape.circle,
@@ -1693,10 +1718,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 child: const Icon(
                   Icons.school,
                   color: Colors.white,
-                  size: 34,
+                  size: 30,
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 13),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1722,7 +1747,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                             maxLines: 1,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 25,
+                              fontSize: 23,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -1774,34 +1799,43 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     return SizedBox(
       width: double.infinity,
-      height: 58,
-      child: ElevatedButton.icon(
+      height: 54,
+      child: ElevatedButton(
         onPressed: canJoinQueue ? _joinQueue : null,
-        icon: _isRoutingQueue
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.2,
-                  color: Colors.white,
-                ),
-              )
-            : const Icon(Icons.auto_awesome_rounded),
-        label: FittedBox(
+        child: FittedBox(
           fit: BoxFit.scaleDown,
-          child: Text(
-            _isRoutingQueue
-                ? 'Sıranız hazırlanıyor...'
-                : _selectedTeacherId == null
-                    ? '✨ En uygun öğretmene yönlendir (önerilen)'
-                    : '${_selectedTeacherName ?? 'Seçili öğretmen'} ile sıra al',
-            maxLines: 1,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+          child: _isRoutingQueue
+              ? const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        color: Colors.white,
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Text(
+                      'Sıranız hazırlanıyor...',
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                )
+              : const Text(
+                  'Sıra Al',
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
           ),
-        ),
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF6C3DFF),
           foregroundColor: Colors.white,

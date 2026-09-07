@@ -20,11 +20,6 @@ class AdminHomeScreen extends StatefulWidget {
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   int _selectedIndex = 0;
 
-  final List<String> _titles = const [
-    'Yönetici Paneli',
-    'Kullanıcılar',
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -69,13 +64,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     final email = FirebaseAuth.instance.currentUser?.email ?? 'admin';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(22),
+        padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(30),
+          borderRadius: BorderRadius.circular(24),
           border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
           boxShadow: [
             BoxShadow(
@@ -87,20 +82,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         ),
         child: Row(
           children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.14),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.admin_panel_settings,
-                color: Colors.white,
-                size: 34,
-              ),
-            ),
-            const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -109,24 +90,18 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     'Kurum Paneli',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 22,
+                      fontSize: 20,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
                   Text(
                     email,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white60,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _titles[_selectedIndex],
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
                     ),
                   ),
                 ],
@@ -261,7 +236,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             _navItem(
               index: 0,
               icon: Icons.dashboard_rounded,
-              label: 'Kurum Paneli',
+              label: 'Bilim Kalesi Eğitim Kurumları',
             ),
             _navItem(
               index: 1,
@@ -359,7 +334,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
       FirebaseFunctions.instanceFor(region: 'us-central1');
 
   int _totalSolvedToday = 0;
-  int _totalSolvedAll = 0;
   bool _isLoading = true;
   final bool _isImporting = false;
   bool _isChangingInstitutionMode = false;
@@ -884,16 +858,50 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }) async {
     final selectedClass = await _showReportClassPicker();
     if (selectedClass == null || selectedClass.className.isEmpty) return;
+    final classPrefix = _classBranchFilePrefix(
+      selectedClass.className,
+      selectedClass.branch,
+    );
 
     await _requestReportPdf(
       endpoint: endpoint,
-      fallbackFileName: fallbackFileName,
+      fallbackFileName: '${classPrefix}_$fallbackFileName',
+      preferredFileName:
+          '${classPrefix}_${fallbackFileName.replaceFirst('.pdf', '')}_'
+          '${_formatIsoDate(startDate)}_${_formatIsoDate(endDate)}.pdf',
       startDate: startDate,
       endDate: endDate,
       className: selectedClass.className,
       branch: selectedClass.branch,
       department: selectedClass.department,
     );
+  }
+
+  String _classBranchFilePrefix(String className, String branch) {
+    final cleanClass = className.trim();
+    final cleanBranch = branch.trim();
+
+    if (cleanBranch.isNotEmpty) {
+      return _safeFileNamePart('$cleanClass-$cleanBranch');
+    }
+
+    final parts = cleanClass
+        .split(RegExp(r'[-_/\\\s]+'))
+        .where((part) => part.trim().isNotEmpty)
+        .toList();
+
+    if (parts.length >= 2) {
+      return _safeFileNamePart('${parts[0]}-${parts[1]}');
+    }
+
+    return _safeFileNamePart(cleanClass);
+  }
+
+  String _safeFileNamePart(String value) {
+    return value
+        .trim()
+        .replaceAll(RegExp(r'\s+'), '_')
+        .replaceAll(RegExp(r'[^\w\-.]+'), '');
   }
 
   String? _filenameFromContentDisposition(String? value) {
@@ -907,6 +915,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     required String fallbackFileName,
     required DateTime startDate,
     required DateTime endDate,
+    String? preferredFileName,
     String? className,
     String? branch,
     String? department,
@@ -956,7 +965,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
         throw Exception('Rapor oluşturulamadı.');
       }
 
-      final filename = _filenameFromContentDisposition(
+      final filename = preferredFileName ??
+          _filenameFromContentDisposition(
             response.headers['content-disposition'],
           ) ??
           fallbackFileName;
@@ -1483,17 +1493,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
           .count()
           .get();
 
-      final allSnapshot = await _firestore
-          .collection('queues')
-          .where('status', isEqualTo: 'completed')
-          .count()
-          .get();
-
       if (!mounted) return;
 
       setState(() {
         _totalSolvedToday = todaySnapshot.count ?? 0;
-        _totalSolvedAll = allSnapshot.count ?? 0;
         _isLoading = false;
       });
     } catch (e) {
@@ -1707,7 +1710,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               ),
               const SizedBox(height: 6),
               const Text(
-                'Excel dosyası kullanarak öğrenci ve öğretmen hesaplarını toplu yönetin.',
+                'Excel dosyası kullanarak öğrenci ve öğretmen hesaplarını yükleyin.',
                 style: TextStyle(color: Colors.white60, height: 1.35),
               ),
               const SizedBox(height: 18),
@@ -2214,7 +2217,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           crossAxisSpacing: 10,
                           mainAxisSpacing: 10,
                           childAspectRatio:
-                              constraints.maxWidth < 420 ? 1.45 : 1.75,
+                              constraints.maxWidth < 420 ? 1.42 : 1.75,
                           children: [
                             _operationMetricCard(
                               title: 'Bekleyen Öğrenci',
@@ -2253,11 +2256,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           label: 'Zümre',
                           value: 'Bugün $_totalSolvedToday çözüm',
                           color: Colors.greenAccent,
-                        ),
-                        _smallStatusPill(
-                          label: 'Toplam',
-                          value: '$_totalSolvedAll çözüm',
-                          color: Colors.lightBlueAccent,
                         ),
                       ],
                     ),
@@ -2317,7 +2315,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
@@ -2327,7 +2325,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
         '$label: $value',
         style: TextStyle(
           color: color,
-          fontSize: 12,
+          fontSize: 12.5,
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -2341,7 +2339,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(11),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(20),
@@ -2351,13 +2349,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(height: 10),
+          Icon(icon, color: color, size: 21),
+          const SizedBox(height: 6),
           Text(
             value,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 26,
+              fontSize: 23,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -2368,7 +2366,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -2427,11 +2425,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
       children: [
         RefreshIndicator(
           onRefresh: _loadStats,
+          triggerMode: RefreshIndicatorTriggerMode.onEdge,
+          displacement: 56,
+          edgeOffset: 8,
           child: _isLoading
               ? const Center(
                   child: CircularProgressIndicator(color: Colors.white),
                 )
               : ListView(
+                  physics: const ClampingScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
                   children: [
                     _buildInstitutionModeCard(),
@@ -2944,14 +2946,14 @@ class _StatisticsPageState extends State<StatisticsPage> {
       borderRadius: BorderRadius.circular(24),
       onTap: onTap,
       child: Container(
-        constraints: const BoxConstraints(minHeight: 126),
-        padding: const EdgeInsets.all(18),
+        constraints: const BoxConstraints(minHeight: 112),
+        padding: const EdgeInsets.all(16),
         decoration: _adminGlassDecoration(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: color, size: 32),
-            const SizedBox(height: 14),
+            Icon(icon, color: color, size: 29),
+            const SizedBox(height: 11),
             Text(
               title,
               maxLines: 2,
@@ -2959,7 +2961,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: 16,
+                fontSize: 15.5,
               ),
             ),
             const SizedBox(height: 4),
@@ -3245,281 +3247,292 @@ class _UserManagementPageState extends State<UserManagementPage> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(24),
-                onTap: () => _showUserDialog(),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.person_add_alt_1, color: Colors.greenAccent),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Yeni Kullanıcı Ekle',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 17,
+        StreamBuilder<QuerySnapshot>(
+          stream: _firestore.collection('users').snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Center(
+                child: Text(
+                  'Hata: ${snapshot.error}',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              );
+            }
+
+            if (!snapshot.hasData) {
+              return const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              );
+            }
+
+            final allUsers = snapshot.data!.docs;
+            String normalizeForSearch(String str) {
+              return str
+                  .toLowerCase()
+                  .replaceAll('ı', 'i')
+                  .replaceAll('ğ', 'g')
+                  .replaceAll('ü', 'u')
+                  .replaceAll('ş', 's')
+                  .replaceAll('ö', 'o')
+                  .replaceAll('ç', 'c')
+                  .replaceAll('İ', 'i');
+            }
+
+            final users = allUsers.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+
+              final searchableRaw = [
+                data['fullName'],
+                data['name'],
+                data['surname'],
+                data['email'],
+                data['role'],
+                data['username'],
+                data['className'],
+                data['branch'],
+                data['department'],
+                if (data['subjects'] is List)
+                  (data['subjects'] as List).join(' '),
+              ].where((e) => e != null).join(' ');
+
+              final searchable = normalizeForSearch(searchableRaw);
+              final query = normalizeForSearch(_userSearchQuery);
+
+              return _userSearchQuery.isEmpty || searchable.contains(query);
+            }).toList();
+
+            final currentUid = FirebaseAuth.instance.currentUser?.uid;
+            final selectableUids = users
+                .map((doc) => doc.id)
+                .where((uid) => uid != currentUid)
+                .toList();
+            final selectedVisibleCount =
+                selectableUids.where(_selectedUserIds.contains).length;
+            final allVisibleSelected = selectableUids.isNotEmpty &&
+                selectedVisibleCount == selectableUids.length;
+            final selectedCount = _selectedUserIds.length;
+
+            return CustomScrollView(
+              physics: const ClampingScrollPhysics(),
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                  sliver: SliverToBoxAdapter(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(22),
+                      onTap: _isBulkDeleting ? null : () => _showUserDialog(),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.15),
                           ),
                         ),
-                      ),
-                      Icon(Icons.chevron_right, color: Colors.white54),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: TextField(
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'Kullanıcı ara...',
-                  hintStyle: const TextStyle(color: Colors.white54),
-                  prefixIcon: const Icon(Icons.search, color: Colors.white70),
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-                onChanged: (value) {
-                  setState(() {
-                    _userSearchQuery = value.trim().toLowerCase();
-                    _selectedUserIds.clear();
-                  });
-                },
-              ),
-            ),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: _firestore.collection('users').snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Text(
-                        'Hata: ${snapshot.error}',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    );
-                  }
-
-                  if (!snapshot.hasData) {
-                    return const Center(
-                      child: CircularProgressIndicator(color: Colors.white),
-                    );
-                  }
-
-                  final allUsers = snapshot.data!.docs;
-                  String normalizeForSearch(String str) {
-                    return str
-                        .toLowerCase()
-                        .replaceAll('ı', 'i')
-                        .replaceAll('ğ', 'g')
-                        .replaceAll('ü', 'u')
-                        .replaceAll('ş', 's')
-                        .replaceAll('ö', 'o')
-                        .replaceAll('ç', 'c')
-                        .replaceAll('İ', 'i');
-                  }
-
-                  final users = allUsers.where((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-
-                    final searchableRaw = [
-                      data['fullName'],
-                      data['name'],
-                      data['surname'],
-                      data['email'],
-                      data['role'],
-                      data['username'],
-                      data['className'],
-                      data['branch'],
-                      data['department'],
-                      if (data['subjects'] is List)
-                        (data['subjects'] as List).join(' '),
-                    ].where((e) => e != null).join(' ');
-
-                    final searchable = normalizeForSearch(searchableRaw);
-                    final query = normalizeForSearch(_userSearchQuery);
-
-                    return _userSearchQuery.isEmpty ||
-                        searchable.contains(query);
-                  }).toList();
-
-                  final currentUid = FirebaseAuth.instance.currentUser?.uid;
-                  final selectableUids = users
-                      .map((doc) => doc.id)
-                      .where((uid) => uid != currentUid)
-                      .toList();
-                  final selectedVisibleCount = selectableUids
-                      .where(_selectedUserIds.contains)
-                      .length;
-                  final allVisibleSelected = selectableUids.isNotEmpty &&
-                      selectedVisibleCount == selectableUids.length;
-
-                  return Column(
-                    children: [
-                      _bulkSelectionBar(
-                        selectedCount: selectedVisibleCount,
-                        visibleCount: selectableUids.length,
-                        progressCount: _bulkDeleteProcessed,
-                        progressTotal: _bulkDeleteTotal,
-                        allVisibleSelected: allVisibleSelected,
-                        onSelectAllChanged: _isBulkDeleting
-                            ? null
-                            : (checked) {
-                                setState(() {
-                                  if (checked == true) {
-                                    _selectedUserIds
-                                      ..clear()
-                                      ..addAll(selectableUids);
-                                  } else {
-                                    _selectedUserIds.clear();
-                                  }
-                                });
-                              },
-                        onDeleteSelected: selectedVisibleCount == 0 ||
-                                _isBulkDeleting ||
-                                _isLoading
-                            ? null
-                            : () => _bulkDeleteUsers(users),
-                      ),
-                      Expanded(
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
-                          itemCount: users.length,
-                          itemBuilder: (context, index) {
-                            final doc = users[index];
-                            final data = doc.data() as Map<String, dynamic>;
-
-                            final uid = doc.id;
-                            final role = data['role'] ?? '?';
-                            final name = data['fullName'] ??
-                                data['name'] ??
-                                data['email'] ??
-                                'İsimsiz';
-                            final email = data['email'] ?? 'Email yok';
-                            final roleColor = role == 'admin'
-                                ? Colors.redAccent
-                                : role == 'teacher'
-                                    ? Colors.lightBlueAccent
-                                    : Colors.greenAccent;
-                            final canSelect = uid != currentUid &&
-                                !_isBulkDeleting &&
-                                !_isLoading;
-                            final isSelected = _selectedUserIds.contains(uid);
-
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.10),
-                                borderRadius: BorderRadius.circular(24),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? Colors.redAccent.withValues(alpha: 0.45)
-                                      : Colors.white.withValues(alpha: 0.15),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.person_add_alt_1,
+                              color: Colors.greenAccent,
+                            ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Yeni Kullanıcı Ekle',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
                                 ),
                               ),
-                              child: Row(
-                                children: [
-                                  Checkbox(
-                                    value: isSelected,
-                                    onChanged: canSelect
-                                        ? (checked) {
-                                            setState(() {
-                                              if (checked == true) {
-                                                _selectedUserIds.add(uid);
-                                              } else {
-                                                _selectedUserIds.remove(uid);
-                                              }
-                                            });
-                                          }
-                                        : null,
-                                    activeColor: Colors.redAccent,
-                                    checkColor: Colors.white,
-                                    side: const BorderSide(
-                                      color: Colors.white54,
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          '$name',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          '$email',
-                                          style: const TextStyle(
-                                            color: Colors.white60,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          _roleLabel(role),
-                                          style: TextStyle(
-                                            color: roleColor,
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.edit,
-                                      color: Colors.white70,
-                                    ),
-                                    onPressed: _isBulkDeleting
-                                        ? null
-                                        : () => _editUser(uid, data),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.delete_outline,
-                                      color: Colors.redAccent,
-                                    ),
-                                    onPressed: _isBulkDeleting
-                                        ? null
-                                        : () => _deleteUser(uid, email),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
+                            ),
+                            Icon(Icons.chevron_right, color: Colors.white54),
+                          ],
                         ),
                       ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ],
+                    ),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  sliver: SliverToBoxAdapter(
+                    child: TextField(
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Kullanıcı ara...',
+                        hintStyle: const TextStyle(color: Colors.white54),
+                        prefixIcon:
+                            const Icon(Icons.search, color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.white.withValues(alpha: 0.10),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          _userSearchQuery = value.trim().toLowerCase();
+                        });
+                      },
+                    ),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: _bulkSelectionBar(
+                    selectedCount: selectedCount,
+                    visibleCount: selectableUids.length,
+                    progressCount: _bulkDeleteProcessed,
+                    progressTotal: _bulkDeleteTotal,
+                    allVisibleSelected: allVisibleSelected,
+                    onSelectAllChanged: _isBulkDeleting
+                        ? null
+                        : (checked) {
+                            setState(() {
+                              if (checked == true) {
+                                _selectedUserIds.addAll(selectableUids);
+                              } else {
+                                _selectedUserIds.removeAll(selectableUids);
+                              }
+                            });
+                          },
+                    onDeleteSelected:
+                        selectedCount == 0 || _isBulkDeleting || _isLoading
+                            ? null
+                            : () => _bulkDeleteUsers(allUsers),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 110),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final doc = users[index];
+                        final data = doc.data() as Map<String, dynamic>;
+
+                        final uid = doc.id;
+                        final role = data['role'] ?? '?';
+                        final name = data['fullName'] ??
+                            data['name'] ??
+                            data['email'] ??
+                            'İsimsiz';
+                        final email = data['email'] ?? 'Email yok';
+                        final roleColor = role == 'admin'
+                            ? Colors.redAccent
+                            : role == 'teacher'
+                                ? Colors.lightBlueAccent
+                                : Colors.greenAccent;
+                        final canSelect = uid != currentUid &&
+                            !_isBulkDeleting &&
+                            !_isLoading;
+                        final isSelected = _selectedUserIds.contains(uid);
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                              color: isSelected
+                                  ? Colors.redAccent.withValues(alpha: 0.45)
+                                  : Colors.white.withValues(alpha: 0.15),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Checkbox(
+                                value: isSelected,
+                                onChanged: canSelect
+                                    ? (checked) {
+                                        setState(() {
+                                          if (checked == true) {
+                                            _selectedUserIds.add(uid);
+                                          } else {
+                                            _selectedUserIds.remove(uid);
+                                          }
+                                        });
+                                      }
+                                    : null,
+                                activeColor: Colors.redAccent,
+                                checkColor: Colors.white,
+                                side: const BorderSide(
+                                  color: Colors.white54,
+                                  width: 1.5,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '$name',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15.5,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '$email',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white60,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      _roleLabel(role),
+                                      style: TextStyle(
+                                        color: roleColor,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.edit,
+                                  color: Colors.white70,
+                                ),
+                                onPressed: _isBulkDeleting
+                                    ? null
+                                    : () => _editUser(uid, data),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  color: Colors.redAccent,
+                                ),
+                                onPressed: _isBulkDeleting
+                                    ? null
+                                    : () => _deleteUser(uid, email),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                      childCount: users.length,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         if (_isLoading)
           Container(

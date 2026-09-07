@@ -2164,7 +2164,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     required IconData icon,
   }) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
@@ -2172,8 +2172,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       ),
       child: Column(
         children: [
-          Icon(icon, color: Colors.greenAccent, size: 20),
-          const SizedBox(height: 6),
+          Icon(icon, color: Colors.greenAccent, size: 18),
+          const SizedBox(height: 5),
           Text(
             value,
             style: const TextStyle(
@@ -2251,8 +2251,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
         return Container(
           width: double.infinity,
-          margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-          padding: const EdgeInsets.all(18),
+          margin: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(24),
@@ -2264,8 +2264,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               Row(
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                       color: Colors.greenAccent.withValues(alpha: 0.16),
                       shape: BoxShape.circle,
@@ -2273,7 +2273,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     child: const Icon(
                       Icons.support_agent,
                       color: Colors.greenAccent,
-                      size: 28,
+                      size: 25,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -2305,7 +2305,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
@@ -2333,7 +2333,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
@@ -2355,6 +2355,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 40),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                     ),
                   ),
@@ -2404,8 +2408,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+      padding: const EdgeInsets.all(17),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(24),
@@ -2414,13 +2418,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       child: Row(
         children: [
           Container(
-            width: 52,
-            height: 52,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
               color: iconColor.withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: iconColor, size: 30),
+            child: Icon(icon, color: iconColor, size: 26),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -2435,10 +2439,14 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   subtitle,
-                  style: const TextStyle(color: Colors.white60, fontSize: 13),
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 12.5,
+                    height: 1.25,
+                  ),
                 ),
               ],
             ),
@@ -2495,14 +2503,14 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         return Column(
           children: [
             const Padding(
-              padding: EdgeInsets.fromLTRB(18, 8, 18, 6),
+              padding: EdgeInsets.fromLTRB(18, 6, 18, 4),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Bekleyen Öğrenciler',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 19,
+                  fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -2517,8 +2525,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               final extraMinutes = _toInt(data['extraMinutes']);
 
               return Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-                padding: const EdgeInsets.all(16),
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(22),
@@ -2527,13 +2535,14 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 child: Row(
                   children: [
                     CircleAvatar(
+                      radius: 19,
                       backgroundColor: isManual ? Colors.orange : Colors.green,
                       child: Icon(
                         isManual ? Icons.person_add : Icons.person,
                         color: Colors.white,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2543,12 +2552,17 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                              fontSize: 15.5,
                             ),
                           ),
                           Text(
                             '${data['subject'] ?? 'Ders'} • $questionCount soru • ${estimatedMinutes + extraMinutes} dk',
-                            style: const TextStyle(color: Colors.white60),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 12.5,
+                            ),
                           ),
                           if (isManual)
                             const Text(
@@ -2561,67 +2575,93 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         ],
                       ),
                     ),
-                    Column(
-                      children: [
-                        ElevatedButton(
-                          onPressed: () async {
-                            await _startWaitingQueueSafely(
-                              queueDoc: doc,
-                              queueIndex: queues.indexOf(doc),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size(80, 38),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                    SizedBox(
+                      width: 82,
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                await _startWaitingQueueSafely(
+                                  queueDoc: doc,
+                                  queueIndex: queues.indexOf(doc),
+                                );
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                foregroundColor: Colors.white,
+                                minimumSize: const Size(0, 36),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 8),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(13),
+                                ),
+                              ),
+                              child: const Text('Başlat'),
                             ),
                           ),
-                          child: const Text('Başlat'),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline_rounded,
-                            color: Colors.redAccent,
-                          ),
-                          tooltip: 'Sırayı İptal Et',
-                          onPressed: () async {
-                            final confirm = await _confirmAction(
-                              title: 'Bekleyen öğrenci iptal edilsin mi?',
-                              message:
-                                  '${data['studentName']} isimli öğrencinin sırasını iptal etmek istediğinize emin misiniz?',
-                              confirmText: 'İptal Et',
-                            );
+                          SizedBox(
+                            height: 34,
+                            child: IconButton(
+                              visualDensity: VisualDensity.compact,
+                              constraints: const BoxConstraints(
+                                minWidth: 34,
+                                minHeight: 34,
+                              ),
+                              padding: EdgeInsets.zero,
+                              icon: const Icon(
+                                Icons.delete_outline_rounded,
+                                color: Colors.redAccent,
+                              ),
+                              tooltip: 'Sırayı İptal Et',
+                              onPressed: () async {
+                                final confirm = await _confirmAction(
+                                  title: 'Bekleyen öğrenci iptal edilsin mi?',
+                                  message:
+                                      '${data['studentName']} isimli öğrencinin sırasını iptal etmek istediğinize emin misiniz?',
+                                  confirmText: 'İptal Et',
+                                );
 
-                            if (confirm) {
-                              await _cancelQueue(doc.id);
-                            }
-                          },
-                        ),
-                        const SizedBox(height: 6),
-                        OutlinedButton.icon(
-                          onPressed: () async {
-                            await _showTransferDialog(
-                              queueId: doc.id,
-                              subject: data['subject'] ?? 'Ders',
-                              studentName: data['studentName'] ?? 'Öğrenci',
-                            );
-                          },
-                          icon: const Icon(Icons.swap_horiz_rounded, size: 16),
-                          label: const Text('Devret'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.lightBlueAccent,
-                            side:
-                                const BorderSide(color: Colors.lightBlueAccent),
-                            minimumSize: const Size(80, 34),
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                                if (confirm) {
+                                  await _cancelQueue(doc.id);
+                                }
+                              },
                             ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 4),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                await _showTransferDialog(
+                                  queueId: doc.id,
+                                  subject: data['subject'] ?? 'Ders',
+                                  studentName:
+                                      data['studentName'] ?? 'Öğrenci',
+                                );
+                              },
+                              icon: const Icon(
+                                Icons.swap_horiz_rounded,
+                                size: 16,
+                              ),
+                              label: const Text('Devret'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.lightBlueAccent,
+                                side: const BorderSide(
+                                  color: Colors.lightBlueAccent,
+                                ),
+                                minimumSize: const Size(0, 34),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 6),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(13),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -2720,9 +2760,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
   Widget _buildStatusCard() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(24),
@@ -2741,7 +2781,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 13),
             Row(
               children: [
                 Container(
@@ -2761,16 +2801,16 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   _statusText(_teacherStatus),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                  fontSize: 17,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Wrap(
-              spacing: 10,
-              runSpacing: 10,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 _statusButton(
                   'Müsait',
@@ -2792,7 +2832,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 22),
+            const SizedBox(height: 18),
             _headerActionButton(
               icon: Icons.event_available_rounded,
               title: 'Çalışma Programınız',
@@ -2858,10 +2898,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
   Widget _buildTeacherHeader() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -2883,8 +2923,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 final info = Row(
                   children: [
                     Container(
-                      width: isNarrow ? 54 : 62,
-                      height: isNarrow ? 54 : 62,
+                      width: isNarrow ? 50 : 58,
+                      height: isNarrow ? 50 : 58,
                       decoration: BoxDecoration(
                         color: Colors.greenAccent.withValues(alpha: 0.16),
                         shape: BoxShape.circle,
@@ -2895,7 +2935,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       child: Icon(
                         Icons.school,
                         color: Colors.greenAccent,
-                        size: isNarrow ? 28 : 32,
+                        size: isNarrow ? 26 : 30,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -2919,7 +2959,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                               maxLines: 1,
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 24,
+                              fontSize: 23,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -2963,10 +3003,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   constraints: const BoxConstraints(
                     minWidth: 60,
                     maxWidth: 82,
-                    minHeight: 60,
+                    minHeight: 56,
                   ),
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
                   decoration: BoxDecoration(
                     color: Colors.greenAccent.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(20),
@@ -3020,12 +3060,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 );
               },
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 13),
             Container(
               height: 1,
               color: Colors.white.withValues(alpha: 0.12),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 11),
             LayoutBuilder(
               builder: (context, constraints) {
                 final isNarrow = constraints.maxWidth < 360;
@@ -3091,7 +3131,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       borderRadius: BorderRadius.circular(22),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: disabled
               ? Colors.white.withValues(alpha: 0.05)
@@ -3104,8 +3144,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         child: Row(
           children: [
             Container(
-              width: 42,
-              height: 42,
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
                 color: disabled
                     ? Colors.white.withValues(alpha: 0.08)
@@ -3115,7 +3155,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               child: Icon(
                 icon,
                 color: disabled ? Colors.white38 : color,
-                size: 24,
+                size: 22,
               ),
             ),
             const SizedBox(width: 10),
