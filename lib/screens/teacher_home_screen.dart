@@ -2918,27 +2918,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           children: [
             LayoutBuilder(
               builder: (context, constraints) {
-                final isNarrow = constraints.maxWidth < 380;
-
                 final info = Row(
                   children: [
-                    Container(
-                      width: isNarrow ? 50 : 58,
-                      height: isNarrow ? 50 : 58,
-                      decoration: BoxDecoration(
-                        color: Colors.greenAccent.withValues(alpha: 0.16),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.greenAccent.withValues(alpha: 0.35),
-                        ),
-                      ),
-                      child: Icon(
-                        Icons.school,
-                        color: Colors.greenAccent,
-                        size: isNarrow ? 26 : 30,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

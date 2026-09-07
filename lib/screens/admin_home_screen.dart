@@ -87,7 +87,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Kurum Paneli',
+                    'Bilim Kalesi Eğitim Kurumları',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 20,
@@ -236,7 +236,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             _navItem(
               index: 0,
               icon: Icons.dashboard_rounded,
-              label: 'Bilim Kalesi Eğitim Kurumları',
+              label: 'Genel Bakış',
             ),
             _navItem(
               index: 1,
@@ -3664,6 +3664,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String email = existingData?['email'] ?? '';
     String password = '';
     String newPassword = '';
+    bool showPassword = false;
+    bool showNewPassword = false;
 
     String firstName = existingData?['name']?.toString() ?? '';
     String surname = existingData?['surname']?.toString() ?? '';
@@ -3820,9 +3822,25 @@ class _UserManagementPageState extends State<UserManagementPage> {
                               if (!isEditing) ...[
                                 const SizedBox(height: 8),
                                 TextFormField(
-                                  decoration:
-                                      const InputDecoration(labelText: 'Şifre'),
-                                  obscureText: true,
+                                  decoration: InputDecoration(
+                                    labelText: 'Şifre',
+                                    suffixIcon: IconButton(
+                                      tooltip: showPassword
+                                          ? 'Şifreyi gizle'
+                                          : 'Şifreyi göster',
+                                      onPressed: () {
+                                        setStateDialog(() {
+                                          showPassword = !showPassword;
+                                        });
+                                      },
+                                      icon: Icon(
+                                        showPassword
+                                            ? Icons.visibility_off_rounded
+                                            : Icons.visibility_rounded,
+                                      ),
+                                    ),
+                                  ),
+                                  obscureText: !showPassword,
                                   onChanged: (val) => password = val,
                                   validator: (val) =>
                                       val == null || val.length < 6
@@ -3833,12 +3851,27 @@ class _UserManagementPageState extends State<UserManagementPage> {
                               if (isEditing) ...[
                                 const SizedBox(height: 8),
                                 TextFormField(
-                                  decoration: const InputDecoration(
+                                  decoration: InputDecoration(
                                     labelText: 'Yeni Şifre',
                                     helperText:
                                         'Boş bırakırsanız şifre değişmez',
+                                    suffixIcon: IconButton(
+                                      tooltip: showNewPassword
+                                          ? 'Şifreyi gizle'
+                                          : 'Şifreyi göster',
+                                      onPressed: () {
+                                        setStateDialog(() {
+                                          showNewPassword = !showNewPassword;
+                                        });
+                                      },
+                                      icon: Icon(
+                                        showNewPassword
+                                            ? Icons.visibility_off_rounded
+                                            : Icons.visibility_rounded,
+                                      ),
+                                    ),
                                   ),
-                                  obscureText: true,
+                                  obscureText: !showNewPassword,
                                   onChanged: (val) => newPassword = val,
                                   validator: (val) {
                                     if (val == null || val.isEmpty) {

@@ -46,7 +46,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String? _selectedTeacherName;
   int _queuePosition = 0;
   int _selectedQuestionCount = 1;
+  String _zumreSlotText = '';
   String _nextZumreText = '';
+  int? _zumreRemainingMinutes;
 
   int _estimatedMinutesForQuestionCount(int count) {
     switch (count) {
@@ -149,9 +151,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   int _remainingCooldownSeconds = 0;
 
   Timer? _cooldownTimer;
+  Timer? _zumrePillTimer;
   StreamSubscription<DocumentSnapshot>? _queueSubscription;
   StreamSubscription<DocumentSnapshot>? _studentSubscription;
   StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
+  List<Map<String, dynamic>> _cachedZumreSlots = [];
+  bool _cachedZumreIsWeekend = false;
+  bool _isInstitutionBlockingZumre = false;
   static const Duration _runtimeStateMaxAge = Duration(minutes: 3);
 
   @override
@@ -160,6 +166,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     _listenStudentInfo();
     _findAndListenActiveQueue();
     _listenRuntimeScheduleState();
+    _zumrePillTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshZumrePillFromCache(),
+    );
   }
 
   int _timeToMinutes(String time) {
@@ -178,6 +188,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     for (final slot in slots) {
       final start = _timeToMinutes('${slot['start']}');
       final end = _timeToMinutes('${slot['end']}');
+
+      if (end <= start) continue;
 
       if (nowMinutes >= start && nowMinutes < end) {
         return true;
@@ -226,40 +238,23 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return null;
   }
 
-  bool _applyRuntimeZumreState(Map<String, dynamic>? data) {
+  Map<String, dynamic>? _runtimeZumreState(Map<String, dynamic>? data) {
     final institutionMessage = _institutionBlockMessage(data);
     if (institutionMessage != null) {
-      if (mounted) {
-        setState(() {
-          _isZumreOpenNow = false;
-          _isLunchNow = false;
-          _zumreMessage = institutionMessage;
-          _nextZumreText = '';
-        });
-      }
-      return true;
+      return {
+        'isZumreOpen': false,
+        'isLunchBreak': false,
+        'message': institutionMessage,
+      };
     }
 
-    if (!_isFreshRuntimeState(data)) return false;
+    if (!_isFreshRuntimeState(data)) return null;
 
-    final isZumreOpen = data!['isZumreOpen'] == true;
-    final isLunch = data['isLunchBreak'] == true;
-    final message = isLunch
-        ? 'Şu an öğle arası. Zümre sırası geçici olarak kapalı.'
-        : isZumreOpen
-            ? 'Zümre saati aktif. Sıra alabilirsiniz.'
-            : 'Şu an zümre saati aktif değil.';
-
-    if (mounted) {
-      setState(() {
-        _isZumreOpenNow = isZumreOpen;
-        _isLunchNow = isLunch;
-        _zumreMessage = message;
-        _nextZumreText = '';
-      });
-    }
-
-    return true;
+    return {
+      'isZumreOpen': data!['isZumreOpen'] == true,
+      'isLunchBreak': data['isLunchBreak'] == true,
+      'message': null,
+    };
   }
 
   void _listenRuntimeScheduleState() {
@@ -269,15 +264,91 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         .doc('runtimeState')
         .snapshots()
         .listen((snapshot) async {
-      if (!_applyRuntimeZumreState(snapshot.data())) {
-        await _checkLocalZumreAvailability();
-      }
+      await _checkLocalZumreAvailability(runtimeData: snapshot.data());
     }, onError: (_) async {
       await _checkLocalZumreAvailability();
     });
   }
 
-  Future<bool> _checkLocalZumreAvailability() async {
+  Map<String, dynamic> _zumreUiStateFromSlots(
+    DateTime now,
+    List<Map<String, dynamic>> slots,
+    bool isWeekend,
+  ) {
+    final nowMinutes = now.hour * 60 + now.minute;
+    var slotText = '';
+    var nextZumreText = '';
+    int? remainingMinutes;
+    var isZumreOpen = false;
+
+    for (final slot in slots) {
+      final start = '${slot['start']}';
+      final end = '${slot['end']}';
+      final startMin = _timeToMinutes(start);
+      final endMin = _timeToMinutes(end);
+
+      if (endMin <= startMin) continue;
+
+      if (nowMinutes >= startMin && nowMinutes < endMin) {
+        isZumreOpen = true;
+        slotText = '$start - $end';
+        remainingMinutes = endMin - nowMinutes;
+        break;
+      }
+    }
+
+    if (!isZumreOpen && slots.isNotEmpty) {
+      final futureSlots = slots.where((slot) {
+        final start = _timeToMinutes('${slot['start']}');
+        return start > nowMinutes;
+      }).toList();
+
+      if (futureSlots.isNotEmpty) {
+        futureSlots.sort((a, b) {
+          final aStart = _timeToMinutes('${a['start']}');
+          final bStart = _timeToMinutes('${b['start']}');
+          return aStart.compareTo(bStart);
+        });
+        nextZumreText = 'Sonraki zümre: ${futureSlots.first['start']}';
+      } else {
+        nextZumreText = isWeekend
+            ? 'Bugünkü zümre tamamlandı'
+            : 'Yarın zümre ${slots.first['start']}';
+      }
+    }
+
+    return {
+      'isZumreOpen': isZumreOpen,
+      'slotText': slotText,
+      'nextZumreText': nextZumreText,
+      'remainingMinutes': remainingMinutes,
+    };
+  }
+
+  void _refreshZumrePillFromCache() {
+    if (_isInstitutionBlockingZumre) return;
+    if (_cachedZumreSlots.isEmpty || !mounted) return;
+
+    final uiState = _zumreUiStateFromSlots(
+      DateTime.now(),
+      _cachedZumreSlots,
+      _cachedZumreIsWeekend,
+    );
+    final isOpen = uiState['isZumreOpen'] == true;
+    final remainingMinutes = uiState['remainingMinutes'];
+
+    setState(() {
+      _isZumreOpenNow = isOpen;
+      _zumreSlotText = isOpen ? uiState['slotText']?.toString() ?? '' : '';
+      _nextZumreText = isOpen ? '' : uiState['nextZumreText']?.toString() ?? '';
+      _zumreRemainingMinutes =
+          isOpen && remainingMinutes is int ? remainingMinutes : null;
+    });
+  }
+
+  Future<bool> _checkLocalZumreAvailability({
+    Map<String, dynamic>? runtimeData,
+  }) async {
     final now = DateTime.now();
     final isWeekend =
         now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
@@ -292,10 +363,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         : List.from(data['weekdaySlots'] ?? []);
 
     final slots = rawSlots.map((e) => Map<String, dynamic>.from(e)).toList();
+    _cachedZumreSlots = slots;
+    _cachedZumreIsWeekend = isWeekend;
 
     final lunch = Map<String, dynamic>.from(data['lunchBreak'] ?? {});
 
-    final isZumreOpen = _isNowInSlots(now, slots);
+    final zumreUiState = _zumreUiStateFromSlots(now, slots, isWeekend);
+    final isZumreOpen = zumreUiState['isZumreOpen'] == true;
 
     bool isLunch = false;
     if (lunch.isNotEmpty) {
@@ -307,35 +381,32 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       ]);
     }
 
-    String message;
-    String nextZumreText = '';
+    var effectiveZumreOpen = isZumreOpen;
+    var effectiveLunch = isLunch;
+    String? runtimeMessage;
 
-    if (!isZumreOpen && slots.isNotEmpty) {
-      final nowMinutes = now.hour * 60 + now.minute;
+    try {
+      final runtimeState = runtimeData != null
+          ? _runtimeZumreState(runtimeData)
+          : _runtimeZumreState(
+              (await _firestore.collection('settings').doc('runtimeState').get())
+                  .data(),
+            );
 
-      final futureSlots = slots.where((slot) {
-        final start = _timeToMinutes('${slot['start']}');
-        return start > nowMinutes;
-      }).toList();
-
-      if (futureSlots.isNotEmpty) {
-        futureSlots.sort((a, b) {
-          final aStart = _timeToMinutes('${a['start']}');
-          final bStart = _timeToMinutes('${b['start']}');
-          return aStart.compareTo(bStart);
-        });
-
-        nextZumreText = '${futureSlots.first['start']}';
-      } else {
-        nextZumreText = isWeekend
-            ? 'Bugünkü zümre tamamlandı'
-            : 'Yarın zümre ${slots.first['start']}\'te başlıyor';
+      if (runtimeState != null) {
+        effectiveZumreOpen = runtimeState['isZumreOpen'] ?? isZumreOpen;
+        effectiveLunch = runtimeState['isLunchBreak'] ?? isLunch;
+        runtimeMessage = runtimeState['message']?.toString();
       }
-    }
+    } catch (_) {}
 
-    if (isLunch) {
+    String message;
+
+    if (runtimeMessage != null) {
+      message = runtimeMessage;
+    } else if (effectiveLunch) {
       message = 'Şu an öğle arası. Zümre sırası geçici olarak kapalı.';
-    } else if (!isZumreOpen) {
+    } else if (!effectiveZumreOpen) {
       message = 'Şu an zümre saati aktif değil.';
     } else {
       message = 'Zümre saati aktif. Sıra alabilirsiniz.';
@@ -344,10 +415,20 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     if (!mounted) return false;
 
     setState(() {
-      _isZumreOpenNow = isZumreOpen;
-      _isLunchNow = isLunch;
+      final remainingMinutes = zumreUiState['remainingMinutes'];
+
+      _isInstitutionBlockingZumre = runtimeMessage != null;
+      _isZumreOpenNow = effectiveZumreOpen;
+      _isLunchNow = effectiveLunch;
       _zumreMessage = message;
-      _nextZumreText = nextZumreText;
+      _zumreSlotText =
+          effectiveZumreOpen ? zumreUiState['slotText']?.toString() ?? '' : '';
+      _nextZumreText = effectiveZumreOpen
+          ? ''
+          : zumreUiState['nextZumreText']?.toString() ?? '';
+      _zumreRemainingMinutes = effectiveZumreOpen && remainingMinutes is int
+          ? remainingMinutes
+          : null;
     });
 
     return true;
@@ -357,6 +438,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   void dispose() {
     _queueSubscription?.cancel();
     _cooldownTimer?.cancel();
+    _zumrePillTimer?.cancel();
     _studentSubscription?.cancel();
     _runtimeStateSubscription?.cancel();
     super.dispose();
@@ -947,65 +1029,45 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   Widget _compactZumreInfoBadge() {
     final active = _isZumreOpenNow && !_isLunchNow;
-
-    if (active) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.greenAccent.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: Colors.greenAccent.withValues(alpha: 0.35),
-          ),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.circle,
-              size: 8,
-              color: Colors.greenAccent,
-            ),
-            SizedBox(width: 5),
-            Text(
-              'Zümre Aktif',
-              style: TextStyle(
-                color: Colors.greenAccent,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+    final remaining = _zumreRemainingMinutes;
+    final text = active
+        ? remaining != null && remaining <= 5 && remaining > 0
+            ? 'Bitime $remaining dk'
+            : _zumreSlotText.isEmpty
+                ? 'Zümre Aktif'
+                : 'Zümre Aktif • $_zumreSlotText'
+        : _nextZumreText.isEmpty
+            ? 'Zümre Kapalı'
+            : _nextZumreText;
+    final color = active ? Colors.greenAccent : Colors.orangeAccent;
 
     return Container(
+      constraints: const BoxConstraints(maxWidth: 190),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.orangeAccent.withValues(alpha: 0.14),
+        color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: Colors.orangeAccent.withValues(alpha: 0.35),
-        ),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.schedule_rounded,
-            size: 14,
-            color: Colors.orangeAccent,
+          Icon(
+            active ? Icons.circle : Icons.schedule_rounded,
+            color: color,
+            size: active ? 8 : 14,
           ),
           const SizedBox(width: 5),
-          Text(
-            _nextZumreText.isEmpty
-                ? 'Zümre Kapalı'
-                : 'Sonraki: $_nextZumreText',
-            style: const TextStyle(
-              color: Colors.orangeAccent,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
@@ -1013,26 +1075,41 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildSubjectGrid() {
+  Widget _buildSubjectGrid({bool fillHeight = false}) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        const crossAxisSpacing = 8.0;
+        const mainAxisSpacing = 8.0;
+        final availableWidth = constraints.maxWidth;
+        final availableHeight = constraints.maxHeight;
+        final itemWidth = (availableWidth - crossAxisSpacing) / 2;
+        final itemHeight = fillHeight && availableHeight.isFinite
+            ? (availableHeight - (mainAxisSpacing * 3)) / 4
+            : itemWidth / (availableWidth < 390 ? 2.5 : 2.35);
+        final aspectRatio = itemHeight > 0
+            ? itemWidth / itemHeight
+            : availableWidth < 390
+                ? 2.5
+                : 2.35;
+
         return GridView.count(
-          shrinkWrap: true,
+          shrinkWrap: !fillHeight,
+          padding: EdgeInsets.zero,
           physics: const NeverScrollableScrollPhysics(),
           crossAxisCount: 2,
-          crossAxisSpacing: 8,
-          mainAxisSpacing: 8,
-          childAspectRatio: constraints.maxWidth < 390 ? 2.5 : 2.35,
+          crossAxisSpacing: crossAxisSpacing,
+          mainAxisSpacing: mainAxisSpacing,
+          childAspectRatio: aspectRatio,
           children: [
             _subjectCard(
-                'MATEMATİK', Icons.calculate, const Color(0xFF6C3DFF)),
+                'MATEMATİK', Icons.calculate, const Color.fromARGB(162, 235, 39, 147)),
             _subjectCard('FİZİK', Icons.biotech, const Color(0xFF0099FF)),
             _subjectCard('KİMYA', Icons.science, const Color(0xFFFF8A00)),
             _subjectCard('BİYOLOJİ', Icons.eco, const Color(0xFF00C878)),
             _subjectCard('TÜRKÇE', Icons.menu_book, const Color(0xFFE91E63)),
             _subjectCard('TARİH', Icons.history_edu, const Color(0xFFFFC107)),
             _subjectCard('COĞRAFYA', Icons.public, const Color(0xFF00BCD4)),
-            _subjectCard('GEOMETRİ', Icons.square_foot, const Color(0xFF9C27B0)),
+            _subjectCard('GEOMETRİ', Icons.square_foot, const Color.fromARGB(255, 139, 176, 39)),
           ],
         );
       },
@@ -1122,13 +1199,16 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   Widget _buildTeacherSelector() {
     final hasManualTeacher = _selectedTeacherId != null;
-    final subtitle = hasManualTeacher
-        ? '${_selectedTeacherName ?? 'Seçili öğretmen'} ile sıraya gir'
-        : 'En uygun öğretmene yönlendir (önerilen)';
+    final canSelectTeacher = _isZumreOpenNow && !_isLunchNow;
+    final subtitle = !canSelectTeacher
+        ? 'Zümre kapalıyken öğretmen seçilemez'
+        : hasManualTeacher
+            ? '${_selectedTeacherName ?? 'Seçili öğretmen'} seçildi'
+            : 'En uygun öğretmene yönlendir (önerilen)';
 
     return InkWell(
       borderRadius: BorderRadius.circular(24),
-      onTap: _showTeacherPickerDialog,
+      onTap: canSelectTeacher ? _showTeacherPickerDialog : null,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(12),
@@ -1151,7 +1231,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 hasManualTeacher
                     ? Icons.person_pin_rounded
                     : Icons.auto_awesome_rounded,
-                color: hasManualTeacher ? Colors.greenAccent : Colors.amber,
+                color: canSelectTeacher
+                    ? hasManualTeacher
+                        ? Colors.greenAccent
+                        : Colors.amber
+                    : Colors.white54,
               ),
             ),
             const SizedBox(width: 10),
@@ -1180,7 +1264,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ],
               ),
             ),
-            const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70),
+            Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: canSelectTeacher ? Colors.white70 : Colors.white38,
+            ),
           ],
         ),
       ),
@@ -1632,50 +1719,56 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   Widget _buildHomeView() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildWelcomeCard(),
-          const SizedBox(height: 10),
-          _buildCooldownCard(),
-          const SizedBox(height: 6),
-          if (_isInStudySession) ...[
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orangeAccent.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(16),
-                border:
-                    Border.all(color: Colors.orangeAccent.withValues(alpha: 0.25)),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxHeight < 820;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(18, compact ? 8 : 12, 18, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildWelcomeCard(),
+              SizedBox(height: compact ? 8 : 10),
+              _buildCooldownCard(),
+              SizedBox(height: compact ? 4 : 6),
+              if (_isInStudySession) ...[
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orangeAccent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: Colors.orangeAccent.withValues(alpha: 0.25),
+                    ),
+                  ),
+                  child: const Text(
+                    'Şu anda etütte görünüyorsunuz. Etüt bitince zümre sırası alabilirsiniz.',
+                    style: TextStyle(color: Colors.white70, fontSize: 12.5),
+                  ),
+                ),
+              ],
+              const Text(
+                "Ders Seç",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-              child: const Text(
-                'Şu anda etütte görünüyorsunuz. Etüt bitince zümre sırası alabilirsiniz.',
-                style: TextStyle(color: Colors.white70, fontSize: 12.5),
-              ),
-            ),
-          ],
-          const Text(
-            "Ders Seç",
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 19,
-              fontWeight: FontWeight.bold,
-            ),
+              SizedBox(height: compact ? 6 : 8),
+              Expanded(child: _buildSubjectGrid(fillHeight: true)),
+              SizedBox(height: compact ? 8 : 10),
+              _buildQuestionCountSelector(),
+              SizedBox(height: compact ? 8 : 9),
+              _buildTeacherSelector(),
+              SizedBox(height: compact ? 8 : 10),
+              _buildJoinQueueButton(),
+            ],
           ),
-          const SizedBox(height: 8),
-          _buildSubjectGrid(),
-          const SizedBox(height: 10),
-          _buildQuestionCountSelector(),
-          const SizedBox(height: 9),
-          _buildTeacherSelector(),
-          const SizedBox(height: 10),
-          _buildJoinQueueButton(),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1707,21 +1800,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         children: [
           Row(
             children: [
-              Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6C3DFF).withValues(alpha: 0.22),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-                ),
-                child: const Icon(
-                  Icons.school,
-                  color: Colors.white,
-                  size: 30,
-                ),
-              ),
-              const SizedBox(width: 13),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1802,6 +1880,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       height: 54,
       child: ElevatedButton(
         onPressed: canJoinQueue ? _joinQueue : null,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF6C3DFF),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
         child: FittedBox(
           fit: BoxFit.scaleDown,
           child: _isRoutingQueue
@@ -1836,13 +1921,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   ),
                 ),
           ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF6C3DFF),
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-        ),
       ),
     );
   }
