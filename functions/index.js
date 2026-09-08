@@ -746,27 +746,11 @@ function queueCreatedAtMillis(queueData) {
   return createdAt ? createdAt.getTime() : null;
 }
 
-function compareQueuePriorityDocs(firstDoc, secondDoc, now = new Date()) {
+function compareQueuePriorityDocs(firstDoc, secondDoc) {
   const first = firstDoc.data();
   const second = secondDoc.data();
   const firstCreatedAt = queueCreatedAtMillis(first);
   const secondCreatedAt = queueCreatedAtMillis(second);
-  const ageLimitMs = 10 * 60 * 1000;
-  const firstAged =
-    firstCreatedAt !== null && now.getTime() - firstCreatedAt >= ageLimitMs;
-  const secondAged =
-    secondCreatedAt !== null && now.getTime() - secondCreatedAt >= ageLimitMs;
-
-  if (firstAged !== secondAged) {
-    return firstAged ? -1 : 1;
-  }
-
-  if (!firstAged && !secondAged) {
-    const questionCompare =
-      normalizeQuestionCount(first.questionCount) -
-      normalizeQuestionCount(second.questionCount);
-    if (questionCompare !== 0) return questionCompare;
-  }
 
   if (firstCreatedAt === null && secondCreatedAt === null) return 0;
   if (firstCreatedAt === null) return 1;
@@ -854,7 +838,7 @@ async function assertRoleCaller(request, role) {
   };
 }
 
-async function startNextWaitingQueueInTransaction(transaction, teacherId, now) {
+async function startNextWaitingQueueInTransaction(transaction, teacherId) {
   const activeSnapshot = await transaction.get(
     db.collection("queues")
       .where("teacherId", "==", teacherId)
@@ -877,7 +861,7 @@ async function startNextWaitingQueueInTransaction(transaction, teacherId, now) {
   }
 
   const waitingQueues = waitingSnapshot.docs
-    .sort((a, b) => compareQueuePriorityDocs(a, b, now));
+    .sort((a, b) => compareQueuePriorityDocs(a, b));
   const nextQueue = waitingQueues[0];
 
   transaction.update(nextQueue.ref, {
@@ -889,10 +873,10 @@ async function startNextWaitingQueueInTransaction(transaction, teacherId, now) {
   return nextQueue.id;
 }
 
-function selectNextWaitingQueueDoc(waitingDocs, now, excludeQueueId = null) {
+function selectNextWaitingQueueDoc(waitingDocs, excludeQueueId = null) {
   const waitingQueues = waitingDocs
     .filter((doc) => doc.id !== excludeQueueId)
-    .sort((a, b) => compareQueuePriorityDocs(a, b, now));
+    .sort((a, b) => compareQueuePriorityDocs(a, b));
 
   return waitingQueues[0] || null;
 }
@@ -2269,10 +2253,9 @@ exports.teacherTakeNextQueue = onCall(
   },
   async (request) => {
     const teacher = await assertRoleCaller(request, "teacher");
-    const now = new Date();
 
     const nextQueueId = await db.runTransaction((transaction) =>
-      startNextWaitingQueueInTransaction(transaction, teacher.uid, now)
+      startNextWaitingQueueInTransaction(transaction, teacher.uid)
     );
 
     return {
@@ -2384,7 +2367,6 @@ exports.teacherCompleteQueue = onCall(
     }
 
     const queueRef = db.collection("queues").doc(queueId);
-    const now = new Date();
 
     const result = await db.runTransaction(async (transaction) => {
       const [queueDoc, activeSnapshot, waitingSnapshot] = await Promise.all([
@@ -2421,7 +2403,6 @@ exports.teacherCompleteQueue = onCall(
         .filter((doc) => doc.id !== queueId);
       const nextQueue = selectNextWaitingQueueDoc(
         waitingSnapshot.docs,
-        now,
         queueId
       );
 
@@ -2468,7 +2449,6 @@ exports.teacherCancelQueue = onCall(
     }
 
     const queueRef = db.collection("queues").doc(queueId);
-    const now = new Date();
 
     const result = await db.runTransaction(async (transaction) => {
       const [queueDoc, activeSnapshot, waitingSnapshot] = await Promise.all([
@@ -2516,7 +2496,6 @@ exports.teacherCancelQueue = onCall(
         .filter((doc) => doc.id !== queueId);
       const nextQueue = selectNextWaitingQueueDoc(
         waitingSnapshot.docs,
-        now,
         queueId
       );
 

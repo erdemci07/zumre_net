@@ -3666,6 +3666,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String newPassword = '';
     bool showPassword = false;
     bool showNewPassword = false;
+    bool isUserDialogSaving = false;
 
     String firstName = existingData?['name']?.toString() ?? '';
     String surname = existingData?['surname']?.toString() ?? '';
@@ -3738,34 +3739,36 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   ),
                 ],
               ),
-              child: Theme(
-                data: Theme.of(context).copyWith(
-                  colorScheme: const ColorScheme.dark(
-                    primary: Colors.lightBlueAccent,
-                    secondary: Colors.greenAccent,
-                    surface: Color(0xFF071A3A),
-                  ),
-                  inputDecorationTheme: InputDecorationTheme(
-                    labelStyle: const TextStyle(color: Colors.white70),
-                    helperStyle: const TextStyle(color: Colors.white54),
-                    hintStyle: const TextStyle(color: Colors.white38),
-                    suffixStyle: const TextStyle(color: Colors.white54),
-                    filled: true,
-                    fillColor: Colors.white.withValues(alpha: 0.08),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  textTheme: Theme.of(context).textTheme.apply(
-                        bodyColor: Colors.white,
-                        displayColor: Colors.white,
+              child: Stack(
+                children: [
+                  Theme(
+                    data: Theme.of(context).copyWith(
+                      colorScheme: const ColorScheme.dark(
+                        primary: Colors.lightBlueAccent,
+                        secondary: Colors.greenAccent,
+                        surface: Color(0xFF071A3A),
                       ),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                      inputDecorationTheme: InputDecorationTheme(
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        helperStyle: const TextStyle(color: Colors.white54),
+                        hintStyle: const TextStyle(color: Colors.white38),
+                        suffixStyle: const TextStyle(color: Colors.white54),
+                        filled: true,
+                        fillColor: Colors.white.withValues(alpha: 0.08),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      textTheme: Theme.of(context).textTheme.apply(
+                            bodyColor: Colors.white,
+                            displayColor: Colors.white,
+                          ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                     Row(
                       children: [
                         Expanded(
@@ -4055,7 +4058,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                             onPressed: () async {
                               if (!formKey.currentState!.validate()) return;
 
-                              setState(() => _isLoading = true);
+                              setStateDialog(() {
+                                isUserDialogSaving = true;
+                              });
                               try {
                                 final cleanFirstName = firstName
                                     .replaceAll(RegExp(r'\s+'), ' ')
@@ -4120,6 +4125,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                   ),
                                 );
                               } catch (e) {
+                                if (ctx.mounted) {
+                                  setStateDialog(() {
+                                    isUserDialogSaving = false;
+                                  });
+                                }
                                 if (!mounted) return;
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(
@@ -4128,8 +4138,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     ),
                                   ),
                                 );
-                              } finally {
-                                if (mounted) setState(() => _isLoading = false);
                               }
                             },
                             child: Text(isEditing ? 'Güncelle' : 'Oluştur'),
@@ -4137,8 +4145,25 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         ),
                       ],
                     ),
-                  ],
-                ),
+                      ],
+                    ),
+                  ),
+                  if (isUserDialogSaving)
+                    Positioned.fill(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF071A3A)
+                              .withValues(alpha: 0.72),
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: const Center(
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           );

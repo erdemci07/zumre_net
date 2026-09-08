@@ -45,6 +45,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String? _selectedTeacherId;
   String? _selectedTeacherName;
   int _queuePosition = 0;
+  int? _estimatedWaitMinutes;
   int _selectedQuestionCount = 1;
   String _zumreSlotText = '';
   String _nextZumreText = '';
@@ -61,6 +62,38 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       default:
         return 13;
     }
+  }
+
+  int _toInt(dynamic value, {int fallback = 0}) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse('$value') ?? fallback;
+  }
+
+  int _queueEstimatedMinutes(Map<String, dynamic> data) {
+    final estimated = _toInt(data['estimatedMinutes']);
+    if (estimated > 0) return estimated;
+
+    return _estimatedMinutesForQuestionCount(
+      _toInt(data['questionCount'], fallback: 1),
+    );
+  }
+
+  int _activeQueueRemainingMinutes(Map<String, dynamic> data) {
+    final totalMinutes =
+        _queueEstimatedMinutes(data) + _toInt(data['extraMinutes']);
+    final startedAt = data['startedAt'];
+
+    if (startedAt is! Timestamp) {
+      return totalMinutes;
+    }
+
+    final elapsedSeconds =
+        DateTime.now().difference(startedAt.toDate()).inSeconds;
+    final remainingSeconds = (totalMinutes * 60) - elapsedSeconds;
+
+    if (remainingSeconds <= 0) return 0;
+    return (remainingSeconds / 60).ceil();
   }
 
   String _normalizeSubjectText(Object? value) {
@@ -152,7 +185,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   Timer? _cooldownTimer;
   Timer? _zumrePillTimer;
-  StreamSubscription<DocumentSnapshot>? _queueSubscription;
+  StreamSubscription? _queueSubscription;
   StreamSubscription<DocumentSnapshot>? _studentSubscription;
   StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
   List<Map<String, dynamic>> _cachedZumreSlots = [];
@@ -466,6 +499,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           _currentQueueId = null;
           _currentTeacherName = null;
           _queuePosition = 0;
+          _estimatedWaitMinutes = null;
         });
 
         return;
@@ -493,7 +527,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         );
       }
 
-      _listenToQueue(queueDoc.id);
+      await _listenToQueue(queueDoc.id);
     } catch (e) {
       if (!mounted) return;
 
@@ -599,147 +633,120 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }
   }
 
-  void _listenToQueue(String queueId) {
+  Future<void> _listenToQueue(String queueId) async {
     _queueSubscription?.cancel();
 
-    _queueSubscription =
-        _firestore.collection('queues').doc(queueId).snapshots().listen(
-      (snapshot) async {
-        if (!snapshot.exists) {
-          await _queueSubscription?.cancel();
-          _queueSubscription = null;
+    final initialQueueDoc =
+        await _firestore.collection('queues').doc(queueId).get();
 
-          if (!mounted) return;
+    if (!initialQueueDoc.exists) {
+      if (!mounted) return;
 
-          setState(() {
-            _isInQueue = false;
-            _currentQueueId = null;
-            _currentTeacherName = null;
-            _queuePosition = 0;
-          });
-          return;
-        }
+      setState(() {
+        _isInQueue = false;
+        _currentQueueId = null;
+        _currentTeacherName = null;
+        _queuePosition = 0;
+        _estimatedWaitMinutes = null;
+      });
+      return;
+    }
 
-        final data = snapshot.data()!;
-        final status = data['status'];
+    final teacherId = initialQueueDoc.data()?['teacherId']?.toString();
+    if (teacherId == null || teacherId.isEmpty) return;
 
-        if (status == 'waiting') {
-          final teacherNameFromQueue = data['teacherName']?.toString();
-
-          final teacherIdFromQueue = data['teacherId']?.toString();
-
-          if (mounted) {
-            setState(() {
-              _isInQueue = true;
-              _currentQueueId = queueId;
-
-              if (teacherNameFromQueue != null &&
-                  teacherNameFromQueue.isNotEmpty) {
-                _currentTeacherName = teacherNameFromQueue;
-              }
-            });
-          }
-
-          if ((teacherNameFromQueue == null || teacherNameFromQueue.isEmpty) &&
-              teacherIdFromQueue != null &&
-              teacherIdFromQueue.isNotEmpty) {
-            await _getCurrentTeacherName(teacherIdFromQueue);
-          }
-
-          await _updatePosition(queueId);
-          return;
-        }
-
-        if (status == 'in_progress') {
-          final teacherNameFromQueue = data['teacherName']?.toString();
-
-          final teacherIdFromQueue = data['teacherId']?.toString();
-
-          if (mounted) {
-            setState(() {
-              _isInQueue = true;
-              _currentQueueId = queueId;
-              _queuePosition = 0;
-
-              if (teacherNameFromQueue != null &&
-                  teacherNameFromQueue.isNotEmpty) {
-                _currentTeacherName = teacherNameFromQueue;
-              }
-            });
-          }
-
-          if ((teacherNameFromQueue == null || teacherNameFromQueue.isEmpty) &&
-              teacherIdFromQueue != null &&
-              teacherIdFromQueue.isNotEmpty) {
-            await _getCurrentTeacherName(teacherIdFromQueue);
-          }
-
-          return;
-        }
-
-        if (status == 'completed') {
-          await _queueSubscription?.cancel();
-          _queueSubscription = null;
-
-          if (!mounted) return;
-
-          setState(() {
-            _isInQueue = false;
-            _currentQueueId = null;
-            _currentTeacherName = null;
-            _queuePosition = 0;
-          });
-
-          return;
-        }
-
-        if (status == 'cancelled') {
-          if (mounted) {
-            setState(() {
-              _isInQueue = false;
-              _currentQueueId = null;
-              _currentTeacherName = null;
-              _queuePosition = 0;
-            });
-          }
-
-          await _queueSubscription?.cancel();
-          _queueSubscription = null;
-          return;
-        }
-      },
-    );
-  }
-
-  Future<void> _updatePosition(String queueId) async {
-    final queueDoc = await _firestore.collection('queues').doc(queueId).get();
-
-    if (!queueDoc.exists) return;
-
-    final teacherId = queueDoc.data()!['teacherId'];
-
-    final waitingQueues = await _firestore
+    _queueSubscription = _firestore
         .collection('queues')
         .where('teacherId', isEqualTo: teacherId)
-        .where('status', isEqualTo: 'waiting')
-        .get();
+        .where('status', whereIn: ['waiting', 'in_progress'])
+        .snapshots()
+        .listen((snapshot) async {
+      final docs = snapshot.docs.toList();
+      final currentQueueDocs = docs.where((doc) => doc.id == queueId);
 
-    final docs = waitingQueues.docs.toList();
+      if (currentQueueDocs.isEmpty) {
+        await _queueSubscription?.cancel();
+        _queueSubscription = null;
 
-    docs.sort((a, b) => compareQueuePriority(a.data(), b.data()));
+        if (!mounted) return;
 
-    int position = 1;
+        setState(() {
+          _isInQueue = false;
+          _currentQueueId = null;
+          _currentTeacherName = null;
+          _queuePosition = 0;
+          _estimatedWaitMinutes = null;
+        });
+        return;
+      }
 
-    for (var doc in docs) {
-      if (doc.id == queueId) break;
-      position++;
-    }
+      final currentQueueDoc = currentQueueDocs.first;
+      final data = currentQueueDoc.data();
+      final status = data['status'];
+      final teacherNameFromQueue = data['teacherName']?.toString();
 
-    if (mounted) {
+      if (teacherNameFromQueue != null && teacherNameFromQueue.isNotEmpty) {
+        _currentTeacherName = teacherNameFromQueue;
+      } else {
+        await _getCurrentTeacherName(teacherId);
+      }
+
+      if (!mounted) return;
+
+      if (status == 'in_progress') {
+        setState(() {
+          _isInQueue = true;
+          _currentQueueId = queueId;
+          _queuePosition = 0;
+          _estimatedWaitMinutes = null;
+        });
+        return;
+      }
+
+      if (status != 'waiting') {
+        setState(() {
+          _isInQueue = false;
+          _currentQueueId = null;
+          _currentTeacherName = null;
+          _queuePosition = 0;
+          _estimatedWaitMinutes = null;
+        });
+        return;
+      }
+
+      QueryDocumentSnapshot<Map<String, dynamic>>? activeDoc;
+
+      for (final doc in docs) {
+        if (doc.data()['status'] == 'in_progress') {
+          activeDoc = doc;
+          break;
+        }
+      }
+
+      final waitingDocs =
+          docs.where((doc) => doc.data()['status'] == 'waiting').toList();
+
+      waitingDocs.sort((a, b) => compareQueuePriority(a.data(), b.data()));
+
+      int position = 1;
+      var estimatedWaitMinutes =
+          activeDoc == null ? 0 : _activeQueueRemainingMinutes(activeDoc.data());
+
+      for (final doc in waitingDocs) {
+        if (doc.id == queueId) break;
+        final queueData = doc.data();
+        estimatedWaitMinutes +=
+            _queueEstimatedMinutes(queueData) + _toInt(queueData['extraMinutes']);
+        position++;
+      }
+
       setState(() {
+        _isInQueue = true;
+        _currentQueueId = queueId;
         _queuePosition = position;
+        _estimatedWaitMinutes = estimatedWaitMinutes;
       });
-    }
+    });
   }
 
   Future<void> _joinQueue() async {
@@ -802,11 +809,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           _currentTeacherName =
               data['teacherName']?.toString() ?? _selectedTeacherName;
           _queuePosition = 1;
+          _estimatedWaitMinutes = null;
         });
       }
 
       if (!mounted) return;
-      _listenToQueue(queueId);
+      await _listenToQueue(queueId);
+
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sıranız alındı! Lütfen bekleyin.')),
@@ -1101,8 +1111,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           mainAxisSpacing: mainAxisSpacing,
           childAspectRatio: aspectRatio,
           children: [
-            _subjectCard(
-                'MATEMATİK', Icons.calculate, const Color.fromARGB(162, 235, 39, 147)),
+            _subjectCard('MATEMATİK', Icons.calculate, const Color.fromARGB(162, 235, 39, 147)),
             _subjectCard('FİZİK', Icons.biotech, const Color(0xFF0099FF)),
             _subjectCard('KİMYA', Icons.science, const Color(0xFFFF8A00)),
             _subjectCard('BİYOLOJİ', Icons.eco, const Color(0xFF00C878)),
@@ -2012,7 +2021,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             Text(
               isTeacherWorking
                   ? 'Lütfen öğretmenin yönlendirmesini bekleyin.'
-                  : 'Önünüzde $_queuePosition kişi var.',
+                  : 'Bekleme sıranız: $_queuePosition',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.white70,
@@ -2071,7 +2080,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   Text(
                     isTeacherWorking
                         ? 'Şu an ilgileniliyor'
-                        : '~${_queuePosition * 3} dk',
+                        : '~${_estimatedWaitMinutes ?? 0} dk',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 26,
