@@ -215,21 +215,60 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return hour * 60 + minute;
   }
 
-  bool _isNowInSlots(DateTime now, List<Map<String, dynamic>> slots) {
-    final nowMinutes = now.hour * 60 + now.minute;
+  String _dayKey(DateTime date) {
+    switch (date.weekday) {
+      case DateTime.monday:
+        return 'monday';
+      case DateTime.tuesday:
+        return 'tuesday';
+      case DateTime.wednesday:
+        return 'wednesday';
+      case DateTime.thursday:
+        return 'thursday';
+      case DateTime.friday:
+        return 'friday';
+      case DateTime.saturday:
+        return 'saturday';
+      case DateTime.sunday:
+        return 'sunday';
+      default:
+        return 'monday';
+    }
+  }
 
-    for (final slot in slots) {
-      final start = _timeToMinutes('${slot['start']}');
-      final end = _timeToMinutes('${slot['end']}');
+  List<Map<String, dynamic>> _scheduleSlotsFromRaw(dynamic raw) {
+    if (raw is! List) return [];
+    return raw.whereType<Map>().map((slot) {
+      return {
+        'start': '${slot['start']}',
+        'end': '${slot['end']}',
+      };
+    }).toList();
+  }
 
-      if (end <= start) continue;
+  Map<String, dynamic> _dailyScheduleFromData(
+    Map<String, dynamic> data,
+    DateTime now,
+  ) {
+    final weeklySchedule = data['weeklySchedule'];
+    final dayKey = _dayKey(now);
+    final daily = weeklySchedule is Map ? weeklySchedule[dayKey] : null;
 
-      if (nowMinutes >= start && nowMinutes < end) {
-        return true;
-      }
+    if (daily is Map) {
+      return {
+        'closed': daily['closed'] == true,
+        'zumreSlots': _scheduleSlotsFromRaw(daily['zumreSlots']),
+      };
     }
 
-    return false;
+    final isWeekend =
+        now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
+    return {
+      'closed': false,
+      'zumreSlots': _scheduleSlotsFromRaw(
+        isWeekend ? data['weekendSlots'] : data['weekdaySlots'],
+      ),
+    };
   }
 
   bool _isFreshRuntimeState(Map<String, dynamic>? data) {
@@ -383,39 +422,26 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     Map<String, dynamic>? runtimeData,
   }) async {
     final now = DateTime.now();
-    final isWeekend =
-        now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
-
     final doc =
         await _firestore.collection('settings').doc('zumreSchedule').get();
 
     final data = doc.data() ?? {};
-
-    final rawSlots = isWeekend
-        ? List.from(data['weekendSlots'] ?? [])
-        : List.from(data['weekdaySlots'] ?? []);
-
-    final slots = rawSlots.map((e) => Map<String, dynamic>.from(e)).toList();
+    final isWeekend =
+        now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
+    final dailySchedule = _dailyScheduleFromData(data, now);
+    final isClosedDay = dailySchedule['closed'] == true;
+    final slots = isClosedDay
+        ? <Map<String, dynamic>>[]
+        : List<Map<String, dynamic>>.from(dailySchedule['zumreSlots']);
     _cachedZumreSlots = slots;
-    _cachedZumreIsWeekend = isWeekend;
-
-    final lunch = Map<String, dynamic>.from(data['lunchBreak'] ?? {});
+    _cachedZumreIsWeekend =
+        now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
 
     final zumreUiState = _zumreUiStateFromSlots(now, slots, isWeekend);
     final isZumreOpen = zumreUiState['isZumreOpen'] == true;
 
-    bool isLunch = false;
-    if (lunch.isNotEmpty) {
-      isLunch = _isNowInSlots(now, [
-        {
-          'start': lunch['start'] ?? '12:20',
-          'end': lunch['end'] ?? '13:00',
-        }
-      ]);
-    }
-
     var effectiveZumreOpen = isZumreOpen;
-    var effectiveLunch = isLunch;
+    var effectiveLunch = false;
     String? runtimeMessage;
 
     try {
@@ -428,7 +454,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
       if (runtimeState != null) {
         effectiveZumreOpen = runtimeState['isZumreOpen'] ?? isZumreOpen;
-        effectiveLunch = runtimeState['isLunchBreak'] ?? isLunch;
+        effectiveLunch = runtimeState['isLunchBreak'] ?? false;
         runtimeMessage = runtimeState['message']?.toString();
       }
     } catch (_) {}

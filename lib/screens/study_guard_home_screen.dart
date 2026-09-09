@@ -143,6 +143,40 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     }
   }
 
+  List<Map<String, dynamic>> _scheduleSlotsFromRaw(dynamic raw) {
+    if (raw is! List) return [];
+    return raw.whereType<Map>().map((slot) {
+      return {
+        'start': '${slot['start']}',
+        'end': '${slot['end']}',
+      };
+    }).toList();
+  }
+
+  Map<String, dynamic> _dailyStudyScheduleFromData(
+    Map<String, dynamic> data,
+    DateTime now,
+  ) {
+    final weeklySchedule = data['weeklySchedule'];
+    final daily = weeklySchedule is Map ? weeklySchedule[_dayKey(now)] : null;
+
+    if (daily is Map) {
+      return {
+        'closed': daily['closed'] == true,
+        'studySlots': _scheduleSlotsFromRaw(daily['studySlots']),
+      };
+    }
+
+    final isWeekend =
+        now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
+    return {
+      'closed': false,
+      'studySlots': _scheduleSlotsFromRaw(
+        isWeekend ? data['weekendStudySlots'] : data['weekdayStudySlots'],
+      ),
+    };
+  }
+
   String _todayDateKey() {
     final now = DateTime.now();
     return '${now.year.toString().padLeft(4, '0')}-'
@@ -233,12 +267,11 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     if (data == null) return null;
 
     final now = DateTime.now();
-    final isWeekend =
-        now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
-    final rawSlots = isWeekend
-        ? List.from(data['weekendStudySlots'] ?? [])
-        : List.from(data['weekdayStudySlots'] ?? []);
-    final slots = rawSlots.map((e) => Map<String, dynamic>.from(e)).toList();
+    final dailySchedule = _dailyStudyScheduleFromData(data, now);
+    final isClosedDay = dailySchedule['closed'] == true;
+    final slots = isClosedDay
+        ? <Map<String, dynamic>>[]
+        : List<Map<String, dynamic>>.from(dailySchedule['studySlots']);
     final isOpen = _isNowInSlots(now, slots);
 
     var slotText = 'Etüt saati';
@@ -256,10 +289,10 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
       }
     }
 
-    final message = slots.isEmpty
-        ? isWeekend
-            ? 'Hafta sonu etüt saati tanımlı değil.'
-            : 'Hafta içi etüt saati tanımlı değil.'
+    final message = isClosedDay
+        ? 'Kurum bugün kapalı. Yeni etüt başlatılamaz.'
+        : slots.isEmpty
+            ? 'Bugün etüt saati tanımlı değil.'
         : isOpen
             ? 'Etüt saati aktif. Yoklama alabilirsiniz.'
             : 'Şu an etüt saati aktif değil.';
@@ -405,8 +438,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
   Future<void> _checkLocalStudySchedule() async {
     try {
       final now = DateTime.now();
-      final isWeekend =
-          now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
 
       final doc =
           await _firestore.collection('settings').doc('zumreSchedule').get();
@@ -424,11 +455,11 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
       final data = doc.data() ?? {};
       _cachedScheduleData = data;
 
-      final rawSlots = isWeekend
-          ? List.from(data['weekendStudySlots'] ?? [])
-          : List.from(data['weekdayStudySlots'] ?? []);
-
-      final slots = rawSlots.map((e) => Map<String, dynamic>.from(e)).toList();
+      final dailySchedule = _dailyStudyScheduleFromData(data, now);
+      final isClosedDay = dailySchedule['closed'] == true;
+      final slots = isClosedDay
+          ? <Map<String, dynamic>>[]
+          : List<Map<String, dynamic>>.from(dailySchedule['studySlots']);
 
       final isOpen = _isNowInSlots(now, slots);
 
@@ -454,10 +485,11 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
         _isStudyOpenNow = isOpen;
         _activeStudySlotText = slotText;
 
-        if (slots.isEmpty) {
-          _studyScheduleMessage = isWeekend
-              ? 'Hafta sonu etüt saati tanımlı değil.'
-              : 'Hafta içi etüt saati tanımlı değil.';
+        if (isClosedDay) {
+          _studyScheduleMessage =
+              'Kurum bugün kapalı. Yeni etüt başlatılamaz.';
+        } else if (slots.isEmpty) {
+          _studyScheduleMessage = 'Bugün etüt saati tanımlı değil.';
         } else {
           _studyScheduleMessage = isOpen
               ? 'Etüt saati aktif. Yoklama alabilirsiniz.'

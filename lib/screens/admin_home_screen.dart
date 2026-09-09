@@ -338,13 +338,16 @@ class _StatisticsPageState extends State<StatisticsPage> {
   final bool _isImporting = false;
   bool _isChangingInstitutionMode = false;
   Timer? _institutionCountdownTimer;
-  final List<Map<String, String>> _weekdaySlots = [];
-  final List<Map<String, String>> _weekendSlots = [];
-  final List<Map<String, String>> _weekdayStudySlots = [];
-  final List<Map<String, String>> _weekendStudySlots = [];
-
-  String _lunchStart = '12:20';
-  String _lunchEnd = '13:00';
+  final Map<String, Map<String, dynamic>> _weeklyScheduleDraft = {};
+  static const List<Map<String, String>> _scheduleDays = [
+    {'key': 'monday', 'label': 'Pazartesi'},
+    {'key': 'tuesday', 'label': 'Salı'},
+    {'key': 'wednesday', 'label': 'Çarşamba'},
+    {'key': 'thursday', 'label': 'Perşembe'},
+    {'key': 'friday', 'label': 'Cuma'},
+    {'key': 'saturday', 'label': 'Cumartesi'},
+    {'key': 'sunday', 'label': 'Pazar'},
+  ];
 
   @override
   void initState() {
@@ -2561,40 +2564,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
     final doc =
         await _firestore.collection('settings').doc('zumreSchedule').get();
 
-    _weekdaySlots.clear();
-    _weekendSlots.clear();
-    _weekdayStudySlots.clear();
-    _weekendStudySlots.clear();
-
-    if (doc.exists) {
-      final data = doc.data() ?? {};
-      final weekday = List.from(data['weekdaySlots'] ?? []);
-      final weekend = List.from(data['weekendSlots'] ?? []);
-      final weekdayStudy = List.from(data['weekdayStudySlots'] ?? []);
-      final weekendStudy = List.from(data['weekendStudySlots'] ?? []);
-      final lunch = Map<String, dynamic>.from(data['lunchBreak'] ?? {});
-
-      _weekdaySlots.addAll(
-        weekday.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
-      );
-
-      _weekendSlots.addAll(
-        weekend.map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
-      );
-
-      _weekdayStudySlots.addAll(
-        weekdayStudy
-            .map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
-      );
-
-      _weekendStudySlots.addAll(
-        weekendStudy
-            .map((e) => {'start': '${e['start']}', 'end': '${e['end']}'}),
-      );
-
-      _lunchStart = lunch['start'] ?? '12:20';
-      _lunchEnd = lunch['end'] ?? '13:00';
-    }
+    _weeklyScheduleDraft
+      ..clear()
+      ..addAll(_weeklyScheduleFromData(doc.data() ?? {}));
 
     if (!mounted) return;
 
@@ -2641,73 +2613,17 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       ),
                       const SizedBox(height: 6),
                       const Text(
-                        'Zümre, etüt ve öğle arası vakitlerini yönetin',
+                        'Haftanın her günü için zümre ve etüt saatlerini yönetin',
                         style: TextStyle(color: Colors.white60),
                       ),
-                      const SizedBox(height: 20),
-                      _scheduleSection(
-                        title: 'Hafta İçi Zümre Saatleri',
-                        slots: _weekdaySlots,
-                        color: Colors.greenAccent,
-                        onAdd: () {
-                          setDialogState(() {
-                            _weekdaySlots
-                                .add({'start': '10:40', 'end': '11:20'});
-                          });
-                        },
-                        onDelete: (index) {
-                          setDialogState(() => _weekdaySlots.removeAt(index));
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      _scheduleSection(
-                        title: 'Hafta Sonu Zümre Saatleri',
-                        slots: _weekendSlots,
-                        color: Colors.orangeAccent,
-                        onAdd: () {
-                          setDialogState(() {
-                            _weekendSlots
-                                .add({'start': '13:00', 'end': '14:00'});
-                          });
-                        },
-                        onDelete: (index) {
-                          setDialogState(() => _weekendSlots.removeAt(index));
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      _scheduleSection(
-                        title: 'Hafta İçi Etüt Saatleri',
-                        slots: _weekdayStudySlots,
-                        color: Colors.cyanAccent,
-                        onAdd: () {
-                          setDialogState(() {
-                            _weekdayStudySlots
-                                .add({'start': '17:00', 'end': '18:00'});
-                          });
-                        },
-                        onDelete: (index) {
-                          setDialogState(
-                              () => _weekdayStudySlots.removeAt(index));
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      _scheduleSection(
-                        title: 'Hafta Sonu Etüt Saatleri',
-                        slots: _weekendStudySlots,
-                        color: Colors.pinkAccent,
-                        onAdd: () {
-                          setDialogState(() {
-                            _weekendStudySlots
-                                .add({'start': '15:00', 'end': '16:00'});
-                          });
-                        },
-                        onDelete: (index) {
-                          setDialogState(
-                              () => _weekendStudySlots.removeAt(index));
-                        },
-                      ),
                       const SizedBox(height: 16),
-                      _lunchSection(),
+                      ..._scheduleDays.map(
+                        (day) => _dailyScheduleTile(
+                          dayKey: day['key']!,
+                          dayLabel: day['label']!,
+                          setDialogState: setDialogState,
+                        ),
+                      ),
                       const SizedBox(height: 22),
                       Row(
                         children: [
@@ -2721,20 +2637,24 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           Expanded(
                             child: ElevatedButton(
                               onPressed: () async {
+                                final validationError =
+                                    _validateWeeklySchedule();
+                                if (validationError != null) {
+                                  ScaffoldMessenger.of(this.context)
+                                      .showSnackBar(
+                                    SnackBar(content: Text(validationError)),
+                                  );
+                                  return;
+                                }
+
                                 await _firestore
                                     .collection('settings')
                                     .doc('zumreSchedule')
                                     .set({
-                                  'weekdaySlots': _weekdaySlots,
-                                  'weekendSlots': _weekendSlots,
-                                  'weekdayStudySlots': _weekdayStudySlots,
-                                  'weekendStudySlots': _weekendStudySlots,
-                                  'lunchBreak': {
-                                    'start': _lunchStart,
-                                    'end': _lunchEnd,
-                                  },
+                                  'weeklySchedule':
+                                      _weeklyScheduleForFirestore(),
                                   'updatedAt': FieldValue.serverTimestamp(),
-                                });
+                                }, SetOptions(merge: true));
 
                                 if (!mounted) return;
                                 if (ctx.mounted) Navigator.pop(ctx);
@@ -2762,12 +2682,201 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
+  List<Map<String, String>> _slotListFromRaw(dynamic raw) {
+    if (raw is! List) return [];
+
+    return raw
+        .whereType<Map>()
+        .map(
+          (slot) => {
+            'start': '${slot['start'] ?? ''}',
+            'end': '${slot['end'] ?? ''}',
+          },
+        )
+        .where((slot) => slot['start']!.isNotEmpty && slot['end']!.isNotEmpty)
+        .toList();
+  }
+
+  Map<String, Map<String, dynamic>> _weeklyScheduleFromData(
+    Map<String, dynamic> data,
+  ) {
+    final result = <String, Map<String, dynamic>>{};
+    final rawWeekly = data['weeklySchedule'];
+    final weekdayZumre = _slotListFromRaw(data['weekdaySlots']);
+    final weekendZumre = _slotListFromRaw(data['weekendSlots']);
+    final weekdayStudy = _slotListFromRaw(data['weekdayStudySlots']);
+    final weekendStudy = _slotListFromRaw(data['weekendStudySlots']);
+
+    for (final day in _scheduleDays) {
+      final key = day['key']!;
+      final rawDay = rawWeekly is Map ? rawWeekly[key] : null;
+
+      if (rawDay is Map) {
+        result[key] = {
+          'closed': rawDay['closed'] == true,
+          'zumreSlots': _slotListFromRaw(rawDay['zumreSlots']),
+          'studySlots': _slotListFromRaw(rawDay['studySlots']),
+        };
+      } else {
+        final isWeekendDay = key == 'saturday' || key == 'sunday';
+        result[key] = {
+          'closed': false,
+          'zumreSlots': List<Map<String, String>>.from(
+            isWeekendDay ? weekendZumre : weekdayZumre,
+          ),
+          'studySlots': List<Map<String, String>>.from(
+            isWeekendDay ? weekendStudy : weekdayStudy,
+          ),
+        };
+      }
+    }
+
+    return result;
+  }
+
+  Map<String, dynamic> _weeklyScheduleForFirestore() {
+    return _weeklyScheduleDraft.map((key, value) {
+      return MapEntry(key, {
+        'closed': value['closed'] == true,
+        'zumreSlots': List<Map<String, String>>.from(value['zumreSlots']),
+        'studySlots': List<Map<String, String>>.from(value['studySlots']),
+      });
+    });
+  }
+
+  int _clockToMinutes(String value) {
+    final parts = value.split(':');
+    if (parts.length != 2) return -1;
+
+    final hour = int.tryParse(parts[0]) ?? -1;
+    final minute = int.tryParse(parts[1]) ?? -1;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return -1;
+
+    return hour * 60 + minute;
+  }
+
+  String? _validateWeeklySchedule() {
+    for (final day in _scheduleDays) {
+      final key = day['key']!;
+      final label = day['label']!;
+      final config = _weeklyScheduleDraft[key]!;
+
+      for (final entry in [
+        MapEntry('Zümre', config['zumreSlots'] as List<Map<String, String>>),
+        MapEntry('Etüt', config['studySlots'] as List<Map<String, String>>),
+      ]) {
+        for (final slot in entry.value) {
+          final start = _clockToMinutes(slot['start'] ?? '');
+          final end = _clockToMinutes(slot['end'] ?? '');
+          if (start < 0 || end < 0 || start >= end) {
+            return '$label ${entry.key} saatlerinde başlangıç bitişten önce olmalı.';
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  Widget _dailyScheduleTile({
+    required String dayKey,
+    required String dayLabel,
+    required StateSetter setDialogState,
+  }) {
+    final day = _weeklyScheduleDraft[dayKey]!;
+    final closed = day['closed'] == true;
+    final zumreSlots = day['zumreSlots'] as List<Map<String, String>>;
+    final studySlots = day['studySlots'] as List<Map<String, String>>;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+          iconColor: Colors.white70,
+          collapsedIconColor: Colors.white60,
+          title: Text(
+            dayLabel,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          subtitle: Text(
+            closed
+                ? 'Kurum kapalı'
+                : '${zumreSlots.length} zümre • ${studySlots.length} etüt',
+            style: TextStyle(
+              color: closed ? Colors.orangeAccent : Colors.white60,
+              fontSize: 12,
+            ),
+          ),
+          children: [
+            CheckboxListTile(
+              value: closed,
+              onChanged: (value) {
+                setDialogState(() {
+                  day['closed'] = value == true;
+                });
+              },
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              activeColor: Colors.orangeAccent,
+              checkColor: Colors.black,
+              title: const Text(
+                'Kurum Kapalı',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+            _scheduleSection(
+              title: 'Zümre Saatleri',
+              slots: zumreSlots,
+              color: Colors.greenAccent,
+              enabled: !closed,
+              onAdd: () {
+                setDialogState(() {
+                  zumreSlots.add({'start': '09:00', 'end': '09:40'});
+                });
+              },
+              onDelete: (index) {
+                setDialogState(() => zumreSlots.removeAt(index));
+              },
+            ),
+            const SizedBox(height: 10),
+            _scheduleSection(
+              title: 'Etüt Saatleri',
+              slots: studySlots,
+              color: Colors.cyanAccent,
+              enabled: !closed,
+              onAdd: () {
+                setDialogState(() {
+                  studySlots.add({'start': '10:00', 'end': '10:45'});
+                });
+              },
+              onDelete: (index) {
+                setDialogState(() => studySlots.removeAt(index));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _scheduleSection({
     required String title,
     required List<Map<String, String>> slots,
     required Color color,
     required VoidCallback onAdd,
     required Function(int index) onDelete,
+    bool enabled = true,
   }) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2794,7 +2903,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                 ),
               ),
               IconButton(
-                onPressed: onAdd,
+                onPressed: enabled ? onAdd : null,
                 icon: Icon(Icons.add_circle, color: color),
               ),
             ],
@@ -2822,6 +2931,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           _TimeTextInputFormatter(),
                         ],
                         initialValue: slot['start'],
+                        enabled: enabled,
                         style: const TextStyle(color: Colors.white),
                         decoration: _timeInputDecoration('Başlangıç'),
                         onChanged: (value) => slot['start'] = value,
@@ -2837,13 +2947,14 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           LengthLimitingTextInputFormatter(4),
                           _TimeTextInputFormatter(),
                         ],
+                        enabled: enabled,
                         style: const TextStyle(color: Colors.white),
                         decoration: _timeInputDecoration('Bitiş'),
                         onChanged: (value) => slot['end'] = value,
                       ),
                     ),
                     IconButton(
-                      onPressed: () => onDelete(index),
+                      onPressed: enabled ? () => onDelete(index) : null,
                       icon: const Icon(Icons.delete_outline,
                           color: Colors.redAccent),
                     ),
@@ -2851,70 +2962,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
                 ),
               );
             }),
-        ],
-      ),
-    );
-  }
-
-  Widget _lunchSection() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.restaurant_rounded, color: Colors.redAccent),
-              SizedBox(width: 10),
-              Text(
-                'Öğle Arası',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextFormField(
-                  initialValue: _lunchStart,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(4),
-                    _TimeTextInputFormatter(),
-                  ],
-                  style: const TextStyle(color: Colors.white),
-                  decoration: _timeInputDecoration('Başlangıç'),
-                  onChanged: (value) => _lunchStart = value,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextFormField(
-                  initialValue: _lunchEnd,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(4),
-                    _TimeTextInputFormatter(),
-                  ],
-                  style: const TextStyle(color: Colors.white),
-                  decoration: _timeInputDecoration('Bitiş'),
-                  onChanged: (value) => _lunchEnd = value,
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );

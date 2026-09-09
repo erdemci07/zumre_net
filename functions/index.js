@@ -95,11 +95,7 @@ function weekdayAvailabilityKey(weekday) {
   return keys[weekday] || "monday";
 }
 
-function getStudySlots(scheduleData, weekday) {
-  const rawSlots = isWeekend(weekday)
-    ? scheduleData.weekendStudySlots
-    : scheduleData.weekdayStudySlots;
-
+function normalizeScheduleSlots(rawSlots) {
   if (!Array.isArray(rawSlots)) {
     return [];
   }
@@ -119,28 +115,41 @@ function getStudySlots(scheduleData, weekday) {
     );
 }
 
-function getZumreSlots(scheduleData, weekday) {
-  const rawSlots = isWeekend(weekday)
-    ? scheduleData.weekendSlots
-    : scheduleData.weekdaySlots;
+function getDailySchedule(scheduleData, weekday) {
+  const dayKey = weekdayAvailabilityKey(weekday);
+  const weeklySchedule = scheduleData.weeklySchedule || {};
+  const daily = weeklySchedule[dayKey];
 
-  if (!Array.isArray(rawSlots)) {
-    return [];
+  if (daily && typeof daily === "object") {
+    return {
+      closed: daily.closed === true,
+      zumreSlots: normalizeScheduleSlots(daily.zumreSlots),
+      studySlots: normalizeScheduleSlots(daily.studySlots),
+    };
   }
 
-  return rawSlots
-    .map((slot) => ({
-      start: String(slot?.start ?? ""),
-      end: String(slot?.end ?? ""),
-      startMinutes: timeToMinutes(String(slot?.start ?? "")),
-      endMinutes: timeToMinutes(String(slot?.end ?? "")),
-    }))
-    .filter(
-      (slot) =>
-        slot.startMinutes >= 0 &&
-        slot.endMinutes >= 0 &&
-        slot.endMinutes > slot.startMinutes
-    );
+  const weekendDay = isWeekend(weekday);
+  return {
+    closed: false,
+    zumreSlots: normalizeScheduleSlots(
+      weekendDay ? scheduleData.weekendSlots : scheduleData.weekdaySlots
+    ),
+    studySlots: normalizeScheduleSlots(
+      weekendDay
+        ? scheduleData.weekendStudySlots
+        : scheduleData.weekdayStudySlots
+    ),
+  };
+}
+
+function getStudySlots(scheduleData, weekday) {
+  const daily = getDailySchedule(scheduleData, weekday);
+  return daily.closed ? [] : daily.studySlots;
+}
+
+function getZumreSlots(scheduleData, weekday) {
+  const daily = getDailySchedule(scheduleData, weekday);
+  return daily.closed ? [] : daily.zumreSlots;
 }
 
 function isNowInSlots(currentMinutes, slots) {
@@ -301,38 +310,22 @@ async function syncTeacherStatuses(now = new Date()) {
 function buildRuntimeScheduleState(scheduleData, now = new Date()) {
   const nowParts = getIstanbulDateParts(now);
   const currentMinutes = nowParts.hour * 60 + nowParts.minute;
-  const zumreSlots = getZumreSlots(scheduleData, nowParts.weekday);
-  const studySlots = getStudySlots(scheduleData, nowParts.weekday);
-  const lunchBreak = scheduleData.lunchBreak || {};
-  const lunchSlots = [
-    {
-      start: String(lunchBreak.start ?? "12:20"),
-      end: String(lunchBreak.end ?? "13:00"),
-      startMinutes: timeToMinutes(String(lunchBreak.start ?? "12:20")),
-      endMinutes: timeToMinutes(String(lunchBreak.end ?? "13:00")),
-    },
-  ].filter(
-    (slot) =>
-      slot.startMinutes >= 0 &&
-      slot.endMinutes >= 0 &&
-      slot.endMinutes > slot.startMinutes
-  );
-
-  const isLunchBreak = isNowInSlots(currentMinutes, lunchSlots);
+  const dailySchedule = getDailySchedule(scheduleData, nowParts.weekday);
+  const zumreSlots = dailySchedule.closed ? [] : dailySchedule.zumreSlots;
+  const studySlots = dailySchedule.closed ? [] : dailySchedule.studySlots;
   const isZumreOpen = isNowInSlots(currentMinutes, zumreSlots);
   const isStudyOpen = isNowInSlots(currentMinutes, studySlots);
 
   return {
     isZumreOpen,
-    isLunchBreak,
+    isLunchBreak: false,
     isStudyOpen,
-    currentPeriod: isLunchBreak
-      ? "lunch"
-      : isStudyOpen
+    currentPeriod: isStudyOpen
         ? "study"
         : isZumreOpen
           ? "zumre"
           : "closed",
+    dailyClosed: dailySchedule.closed,
   };
 }
 

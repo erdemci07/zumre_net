@@ -129,6 +129,41 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     }
   }
 
+  List<Map<String, dynamic>> _scheduleSlotsFromRaw(dynamic raw) {
+    if (raw is! List) return [];
+    return raw.whereType<Map>().map((slot) {
+      return {
+        'start': '${slot['start']}',
+        'end': '${slot['end']}',
+      };
+    }).toList();
+  }
+
+  Map<String, dynamic> _dailyScheduleFromData(
+    Map<String, dynamic> data,
+    DateTime now,
+  ) {
+    final weeklySchedule = data['weeklySchedule'];
+    final dayKey = _dayKey(now);
+    final daily = weeklySchedule is Map ? weeklySchedule[dayKey] : null;
+
+    if (daily is Map) {
+      return {
+        'closed': daily['closed'] == true,
+        'zumreSlots': _scheduleSlotsFromRaw(daily['zumreSlots']),
+      };
+    }
+
+    final isWeekend =
+        now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
+    return {
+      'closed': false,
+      'zumreSlots': _scheduleSlotsFromRaw(
+        isWeekend ? data['weekendSlots'] : data['weekdaySlots'],
+      ),
+    };
+  }
+
   String _todayDateKey() {
     final now = DateTime.now();
     return '${now.year.toString().padLeft(4, '0')}-'
@@ -547,17 +582,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         await _firestore.collection('settings').doc('zumreSchedule').get();
 
     final settings = settingsDoc.data() ?? {};
-
-    final rawZumreSlots = isWeekend
-        ? List.from(settings['weekendSlots'] ?? [])
-        : List.from(settings['weekdaySlots'] ?? []);
-
-    final zumreSlots =
-        rawZumreSlots.map((e) => Map<String, dynamic>.from(e)).toList();
+    final dailySchedule = _dailyScheduleFromData(settings, now);
+    final isClosedDay = dailySchedule['closed'] == true;
+    final zumreSlots = isClosedDay
+        ? <Map<String, dynamic>>[]
+        : List<Map<String, dynamic>>.from(dailySchedule['zumreSlots']);
     _cachedZumreSlots = zumreSlots;
     _cachedZumreIsWeekend = isWeekend;
-
-    final lunch = Map<String, dynamic>.from(settings['lunchBreak'] ?? {});
 
     final teacherSlots = (_weeklyAvailability[todayKey] ?? [])
         .map((e) => Map<String, dynamic>.from(e))
@@ -567,18 +598,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     final isZumreOpen = zumreUiState['isZumreOpen'] == true;
     final isTeacherWorking = _isNowInSlots(now, teacherSlots);
 
-    bool isLunch = false;
-    if (lunch.isNotEmpty) {
-      isLunch = _isNowInSlots(now, [
-        {
-          'start': lunch['start'] ?? '12:20',
-          'end': lunch['end'] ?? '13:00',
-        }
-      ]);
-    }
-
     var effectiveZumreOpen = isZumreOpen;
-    var effectiveLunch = isLunch;
+    var effectiveLunch = false;
     String? runtimeMessage;
 
     try {
@@ -588,7 +609,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
       if (runtimeState != null) {
         effectiveZumreOpen = runtimeState['isZumreOpen'] ?? isZumreOpen;
-        effectiveLunch = runtimeState['isLunchBreak'] ?? isLunch;
+        effectiveLunch = runtimeState['isLunchBreak'] ?? false;
         runtimeMessage = runtimeState['message']?.toString();
       }
     } catch (_) {}
