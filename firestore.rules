@@ -136,6 +136,29 @@ service cloud.firestore {
     }
 
     // =========================================================
+    // APPOINTMENTS — PLANLI ZÜMRE RANDEVULARI
+    // =========================================================
+
+    match /appointments/{appointmentId} {
+      allow read: if isAdmin()
+        || (isStudent() && resource.data.studentId == request.auth.uid)
+        || (isTeacher() && resource.data.teacherId == request.auth.uid)
+        || (isTeacher()
+          && resource.data.transferredFromTeacherId == request.auth.uid
+          && resource.data.status == "scheduled"
+          && resource.data.transferEditUntil is timestamp
+          && resource.data.transferEditUntil > request.time);
+
+      // Critical lifecycle writes are server-authoritative via callable
+      // Cloud Functions. The Admin SDK bypasses rules for those writes.
+      allow create, update, delete: if false;
+    }
+
+    match /appointmentLocks/{lockId} {
+      allow read, write: if false;
+    }
+
+    // =========================================================
     // QUEUES — ZÜMRE SIRALARI
     // =========================================================
 

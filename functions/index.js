@@ -1,6 +1,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
+const crypto = require("crypto");
 
 admin.initializeApp();
 
@@ -12,6 +13,23 @@ const TIME_ZONE = "Europe/Istanbul";
 const BULK_DELETE_LIMIT = 500;
 const BULK_DELETE_CHUNK_SIZE = 25;
 const AUTH_DELETE_RETRY_DELAYS_MS = [750, 1500, 3000];
+const APPOINTMENT_STATUS_SCHEDULED = "scheduled";
+const ACTIVE_APPOINTMENT_STATUSES = ["scheduled", "started"];
+const APPOINTMENT_STUDENT_TRANSITION_BUFFER_MINUTES = 2;
+const APPOINTMENT_PLANNED_CAPACITY_RATIO = 0.65;
+const APPOINTMENT_OPTION_STEP_MINUTES = 5;
+const MAX_AVAILABILITY_TEACHERS = 50;
+const NO_SHOW_VERIFICATION_PENDING = "pending";
+const NO_SHOW_VERIFICATION_VERIFIED = "verified";
+const NO_SHOW_VERIFICATION_UNVERIFIED = "unverified";
+const NO_SHOW_RECONCILIATION_START_MINUTE = 23 * 60 + 45;
+const NO_SHOW_RECONCILIATION_END_MINUTE = 23 * 60 + 59;
+const PLANNED_EXAM_STATUS_SCHEDULED = "scheduled";
+const PLANNED_EXAM_STATUS_ACTIVE = "active";
+const PLANNED_EXAM_DURATIONS = {
+  tyt: 165,
+  ayt: 180,
+};
 
 // ============================================================
 // ORTAK YARDIMCI FONKSİYONLAR
@@ -150,6 +168,73 @@ function getStudySlots(scheduleData, weekday) {
 function getZumreSlots(scheduleData, weekday) {
   const daily = getDailySchedule(scheduleData, weekday);
   return daily.closed ? [] : daily.zumreSlots;
+}
+
+function weekdayKeyFromDate(date) {
+  return weekdayAvailabilityKey(getIstanbulDateParts(date).weekday);
+}
+
+function weekdayShortFromKey(key) {
+  const map = {
+    monday: "Mon",
+    tuesday: "Tue",
+    wednesday: "Wed",
+    thursday: "Thu",
+    friday: "Fri",
+    saturday: "Sat",
+    sunday: "Sun",
+  };
+
+  return map[key] || "Mon";
+}
+
+function normalizeWeeklySchedule(rawWeekly = {}) {
+  const keys = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+  ];
+  const result = {};
+
+  for (const key of keys) {
+    const day = rawWeekly[key] || {};
+    result[key] = {
+      closed: day.closed === true,
+      zumreSlots: normalizeScheduleSlots(day.zumreSlots),
+      studySlots: normalizeScheduleSlots(day.studySlots),
+    };
+  }
+
+  return result;
+}
+
+function scheduleWithWeekly(scheduleData = {}, weeklySchedule = {}) {
+  return {
+    ...scheduleData,
+    weeklySchedule: normalizeWeeklySchedule(weeklySchedule),
+  };
+}
+
+function slotsSignature(slots) {
+  return normalizeScheduleSlots(slots)
+    .map((slot) => `${slot.start}-${slot.end}`)
+    .join("|");
+}
+
+function changedZumreDayKeys(oldScheduleData = {}, newWeeklySchedule = {}) {
+  const keys = Object.keys(normalizeWeeklySchedule(newWeeklySchedule));
+  const nextSchedule = scheduleWithWeekly(oldScheduleData, newWeeklySchedule);
+
+  return keys.filter((key) => {
+    const oldDay = getDailySchedule(oldScheduleData, weekdayShortFromKey(key));
+    const newDay = nextSchedule.weeklySchedule[key] || {};
+    return oldDay.closed !== (newDay.closed === true) ||
+      slotsSignature(oldDay.zumreSlots) !== slotsSignature(newDay.zumreSlots);
+  });
 }
 
 function isNowInSlots(currentMinutes, slots) {
@@ -734,6 +819,802 @@ function estimatedMinutesForQuestionCount(questionCount) {
   return 13;
 }
 
+function dateKeyFromIstanbulDate(date) {
+  return getIstanbulDateParts(date).dateKey;
+}
+
+function istanbulDayBoundsFromDateKey(dateKey) {
+  if (typeof dateKey !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    return null;
+  }
+
+  const start = new Date(`${dateKey}T00:00:00+03:00`);
+  if (Number.isNaN(start.getTime())) return null;
+
+  return {
+    start,
+    end: new Date(start.getTime() + 24 * 60 * 60 * 1000),
+  };
+}
+
+function shouldRunNoShowReconciliation(now, lastDateKey) {
+  const parts = getIstanbulDateParts(now);
+  const minuteOfDay = parts.hour * 60 + parts.minute;
+
+  return (
+    minuteOfDay >= NO_SHOW_RECONCILIATION_START_MINUTE &&
+    minuteOfDay <= NO_SHOW_RECONCILIATION_END_MINUTE &&
+    lastDateKey !== parts.dateKey
+  );
+}
+
+function noShowVerificationUpdate(activity) {
+  if (activity?.verified) {
+    return {
+      noShowVerificationStatus: NO_SHOW_VERIFICATION_VERIFIED,
+      noShowVerifiedAt: fieldValue.serverTimestamp(),
+      noShowVerificationReason: activity.reason,
+      noShowVerificationCheckedAt: fieldValue.serverTimestamp(),
+      updatedAt: fieldValue.serverTimestamp(),
+    };
+  }
+
+  return {
+    noShowVerificationStatus: NO_SHOW_VERIFICATION_UNVERIFIED,
+    noShowVerifiedAt: null,
+    noShowVerificationReason: null,
+    noShowVerificationCheckedAt: fieldValue.serverTimestamp(),
+    updatedAt: fieldValue.serverTimestamp(),
+  };
+}
+
+function verifiedNoShowPopupEligible(verifiedAt, now = new Date()) {
+  const verifiedDate = timestampToDate(verifiedAt) || verifiedAt;
+  if (!(verifiedDate instanceof Date) || Number.isNaN(verifiedDate.getTime())) {
+    return false;
+  }
+
+  const ageMs = now.getTime() - verifiedDate.getTime();
+  return ageMs >= 0 && ageMs <= 7 * 24 * 60 * 60 * 1000;
+}
+
+function verifiedNoShowHistoryEligible(verifiedAt, now = new Date()) {
+  const verifiedDate = timestampToDate(verifiedAt) || verifiedAt;
+  if (!(verifiedDate instanceof Date) || Number.isNaN(verifiedDate.getTime())) {
+    return false;
+  }
+
+  const ageMs = now.getTime() - verifiedDate.getTime();
+  return ageMs >= 0 && ageMs <= 14 * 24 * 60 * 60 * 1000;
+}
+
+function parseRequestedAppointmentStart(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const date = new Date(value.trim());
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  if (value && typeof value.toDate === "function") {
+    const date = value.toDate();
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  return null;
+}
+
+function parseDateKeyToIstanbulNoon(dateKey) {
+  if (typeof dateKey !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    return null;
+  }
+
+  const date = new Date(`${dateKey}T12:00:00+03:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function timestampFromDate(date) {
+  return admin.firestore.Timestamp.fromDate(date);
+}
+
+function cleanIdempotencyKey(value) {
+  const key = cleanText(value);
+  if (!key || key.length > 80) {
+    return "";
+  }
+
+  return key.replace(/[^A-Za-z0-9._-]/g, "_");
+}
+
+function appointmentIdFor(studentId, idempotencyKey) {
+  const hash = crypto
+    .createHash("sha256")
+    .update(`${studentId}:${idempotencyKey}`)
+    .digest("hex")
+    .slice(0, 32);
+
+  return `${studentId}_${hash}`;
+}
+
+function appointmentLockId(scope, id, dateKey) {
+  const hash = crypto
+    .createHash("sha256")
+    .update(`${scope}:${id}:${dateKey}`)
+    .digest("hex")
+    .slice(0, 32);
+
+  return `${scope}_${hash}`;
+}
+
+function intervalsOverlap(firstStart, firstEnd, secondStart, secondEnd) {
+  return firstStart < secondEnd && secondStart < firstEnd;
+}
+
+function appointmentIntervalMinutes(appointmentData) {
+  const start = timestampToDate(appointmentData.scheduledStart);
+  const end = timestampToDate(appointmentData.scheduledEnd);
+
+  if (!start || !end) {
+    return null;
+  }
+
+  return {
+    start,
+    end,
+    startMs: start.getTime(),
+    endMs: end.getTime(),
+  };
+}
+
+function appointmentStatusIsActive(data) {
+  return !data.status || ACTIVE_APPOINTMENT_STATUSES.includes(data.status);
+}
+
+function plannedExamDurationMinutes(type) {
+  return PLANNED_EXAM_DURATIONS[cleanText(type).toLowerCase()] || 0;
+}
+
+function plannedExamItemFromRaw(raw, fallbackId = "legacy") {
+  if (!raw || typeof raw !== "object") return null;
+
+  const status = cleanText(raw.status);
+  if (
+    status !== PLANNED_EXAM_STATUS_SCHEDULED &&
+    status !== PLANNED_EXAM_STATUS_ACTIVE
+  ) {
+    return null;
+  }
+
+  const start = timestampToDate(raw.scheduledStart);
+  const end = timestampToDate(raw.scheduledEnd);
+  const examType = cleanText(raw.examType).toLowerCase();
+  if (!start || !end || end <= start || !plannedExamDurationMinutes(examType)) {
+    return null;
+  }
+
+  return {
+    id: cleanText(raw.id) || fallbackId,
+    status,
+    examType,
+    scheduledStart: raw.scheduledStart,
+    scheduledEnd: raw.scheduledEnd,
+    start,
+    end,
+  };
+}
+
+function plannedExamItems(plannedExamData = {}) {
+  const items = [];
+  const rawItems = Array.isArray(plannedExamData.items)
+    ? plannedExamData.items
+    : [];
+
+  rawItems.forEach((item, index) => {
+    const parsed = plannedExamItemFromRaw(item, `exam_${index}`);
+    if (parsed) items.push(parsed);
+  });
+
+  if (items.length === 0) {
+    const legacy = plannedExamItemFromRaw(plannedExamData);
+    if (legacy) items.push(legacy);
+  }
+
+  return items.sort((a, b) => a.start.getTime() - b.start.getTime());
+}
+
+function publicPlannedExamItem(item) {
+  return {
+    id: item.id,
+    status: item.status,
+    examType: item.examType,
+    scheduledStart: item.scheduledStart,
+    scheduledEnd: item.scheduledEnd,
+  };
+}
+
+function plannedExamPrimaryFields(items) {
+  const active = items.find((item) => item.status === PLANNED_EXAM_STATUS_ACTIVE);
+  const scheduled = items.find(
+    (item) => item.status === PLANNED_EXAM_STATUS_SCHEDULED
+  );
+  const primary = active || scheduled;
+
+  if (!primary) {
+    return {
+      status: "idle",
+      examType: null,
+      scheduledStart: null,
+      scheduledEnd: null,
+    };
+  }
+
+  return {
+    status: primary.status,
+    examType: primary.examType,
+    scheduledStart: primary.scheduledStart,
+    scheduledEnd: primary.scheduledEnd,
+  };
+}
+
+function activePlannedExamWindow(plannedExamData = {}) {
+  const item = plannedExamItems(plannedExamData)[0];
+  return item ? { start: item.start, end: item.end } : null;
+}
+
+function plannedExamConflictsWithAppointment(
+  plannedExamData,
+  startDate,
+  endDate
+) {
+  return plannedExamItems(plannedExamData).some((item) =>
+    intervalsOverlap(
+      startDate.getTime(),
+      endDate.getTime(),
+      item.start.getTime(),
+      item.end.getTime()
+    )
+  );
+}
+
+function publicDisplayName(userData, fallback) {
+  return (
+    userData.fullName ||
+    userData.name ||
+    userData.username ||
+    fallback
+  );
+}
+
+function findContainingZumreSlot(scheduleData, startDate, endDate) {
+  const parts = getIstanbulDateParts(startDate);
+  const startMinutes = parts.hour * 60 + parts.minute;
+  const durationMinutes = Math.ceil(
+    (endDate.getTime() - startDate.getTime()) / 60000
+  );
+  const endMinutes = startMinutes + durationMinutes;
+  const slots = getZumreSlots(scheduleData, parts.weekday);
+
+  return slots.find(
+    (slot) =>
+      startMinutes >= slot.startMinutes &&
+      endMinutes <= slot.endMinutes
+  ) || null;
+}
+
+function appointmentFitsZumreSchedule(scheduleData, startDate, endDate) {
+  return findContainingZumreSlot(scheduleData, startDate, endDate) !== null;
+}
+
+function buildSlotKey(dateKey, slot) {
+  return `${dateKey}-${slot.start}-${slot.end}`;
+}
+
+function teacherScheduledForAppointment(teacherData, startDate, endDate) {
+  const parts = getIstanbulDateParts(startDate);
+  const startMinutes = parts.hour * 60 + parts.minute;
+  const durationMinutes = Math.ceil(
+    (endDate.getTime() - startDate.getTime()) / 60000
+  );
+  const endMinutes = startMinutes + durationMinutes;
+  const slots = getTeacherAvailabilitySlots(teacherData, parts.weekday);
+
+  return slots.some(
+    (slot) =>
+      startMinutes >= slot.startMinutes &&
+      endMinutes <= slot.endMinutes
+  );
+}
+
+function appointmentOverlapsDocs(docs, startDate, endDate, options = {}) {
+  const startMs = startDate.getTime();
+  const endMs = endDate.getTime();
+  const bufferMs = (options.bufferMinutes || 0) * 60 * 1000;
+
+  return docs.some((doc) => {
+    const data = doc.data();
+    if (!appointmentStatusIsActive(data)) return false;
+
+    const interval = appointmentIntervalMinutes(data);
+    if (!interval) return false;
+
+    return intervalsOverlap(
+      startMs - bufferMs,
+      endMs + bufferMs,
+      interval.startMs,
+      interval.endMs
+    );
+  });
+}
+
+function appointmentMinutesInSlot(docs, slotKey) {
+  return docs.reduce((total, doc) => {
+    const data = doc.data();
+    if (!appointmentStatusIsActive(data)) return total;
+    if (data.slotKey !== slotKey) return total;
+
+    const estimated = Number(data.estimatedMinutes);
+    return total + (Number.isFinite(estimated) ? estimated : 0);
+  }, 0);
+}
+
+function plannedCapacityMinutesForSlot(slot) {
+  return Math.floor(
+    (slot.endMinutes - slot.startMinutes) * APPOINTMENT_PLANNED_CAPACITY_RATIO
+  );
+}
+
+function appointmentMatchesBookingIdentity(data, requestData) {
+  const existingStart = timestampToDate(data.scheduledStart);
+  const requestedStart = requestData.scheduledStart;
+
+  return (
+    data.studentId === requestData.studentId &&
+    data.teacherId === requestData.teacherId &&
+    data.subject === requestData.subject &&
+    Number(data.questionCount) === requestData.questionCount &&
+    data.dateKey === requestData.dateKey &&
+    existingStart &&
+    requestedStart &&
+    existingStart.getTime() === requestedStart.getTime()
+  );
+}
+
+function appointmentCanBecomeLive(appointmentData, now = new Date()) {
+  if (!appointmentData || appointmentData.status !== APPOINTMENT_STATUS_SCHEDULED) {
+    return {
+      ok: false,
+      reason: "Bu planlı zümre artık başlatılabilir durumda değil.",
+    };
+  }
+
+  const scheduledStart = timestampToDate(appointmentData.scheduledStart);
+  const scheduledEnd = timestampToDate(appointmentData.scheduledEnd);
+
+  if (!scheduledStart || !scheduledEnd) {
+    return {
+      ok: false,
+      reason: "Planlı zümre saat bilgisi geçersiz.",
+    };
+  }
+
+  if (scheduledStart.getTime() > now.getTime()) {
+    return {
+      ok: false,
+      reason: "Planlı zümre saati henüz gelmedi.",
+    };
+  }
+
+  if (scheduledEnd.getTime() <= now.getTime()) {
+    return {
+      ok: false,
+      reason: "Planlı zümre zamanı geçti.",
+    };
+  }
+
+  return { ok: true };
+}
+
+function appointmentLinkedQueueId(appointmentId) {
+  return `appointment_${appointmentId}`;
+}
+
+function buildAppointmentLinkedQueueData(appointmentId, appointmentData, now) {
+  return {
+    studentId: appointmentData.studentId,
+    studentName: cleanText(appointmentData.studentName) || "Öğrenci",
+    teacherId: appointmentData.teacherId,
+    teacherName: cleanText(appointmentData.teacherName) || "Öğretmen",
+    subject: cleanText(appointmentData.subject) || "Ders",
+    questionCount: normalizeQuestionCount(appointmentData.questionCount),
+    estimatedMinutes: Number(appointmentData.estimatedMinutes) ||
+      estimatedMinutesForQuestionCount(
+        normalizeQuestionCount(appointmentData.questionCount)
+      ),
+    extraMinutes: 0,
+    status: "in_progress",
+    source: "appointment",
+    appointmentId,
+    isManual: false,
+    createdAt: fieldValue.serverTimestamp(),
+    startedAt: fieldValue.serverTimestamp(),
+    updatedAt: fieldValue.serverTimestamp(),
+    appointmentScheduledStart: appointmentData.scheduledStart,
+    appointmentScheduledEnd: appointmentData.scheduledEnd,
+    appointmentStartedAtLocalCheck: now.toISOString(),
+  };
+}
+
+function appointmentIsFutureScheduled(appointmentData, now = new Date()) {
+  if (!appointmentData || appointmentData.status !== APPOINTMENT_STATUS_SCHEDULED) {
+    return {
+      ok: false,
+      reason: "Bu planlı zümre artık düzenlenebilir durumda değil.",
+    };
+  }
+
+  const scheduledStart = timestampToDate(appointmentData.scheduledStart);
+  const scheduledEnd = timestampToDate(appointmentData.scheduledEnd);
+
+  if (!scheduledStart || !scheduledEnd) {
+    return {
+      ok: false,
+      reason: "Planlı zümre saat bilgisi geçersiz.",
+    };
+  }
+
+  if (scheduledStart.getTime() <= now.getTime()) {
+    return {
+      ok: false,
+      reason: "Başlama zamanı gelen planlı zümre artık düzenlenemez.",
+    };
+  }
+
+  return {
+    ok: true,
+    scheduledStart,
+    scheduledEnd,
+  };
+}
+
+function activeAppointmentDocsForTeacher(docs, teacherId, excludeAppointmentId) {
+  return docs.filter((doc) => {
+    if (doc.id === excludeAppointmentId) return false;
+    const data = doc.data();
+    return data.teacherId === teacherId && appointmentStatusIsActive(data);
+  });
+}
+
+function appointmentTransferEligibility({
+  appointmentId,
+  appointmentData,
+  destinationTeacherDoc,
+  dateAppointmentDocs,
+  studyDutyDocs,
+  scheduleData,
+  runtimeData,
+  plannedExamData,
+}) {
+  if (!destinationTeacherDoc || !destinationTeacherDoc.exists) {
+    return { ok: false, reason: "Seçilen öğretmen bulunamadı." };
+  }
+
+  const teacherData = destinationTeacherDoc.data() || {};
+  const teacherId = destinationTeacherDoc.id;
+  const subject = cleanText(appointmentData.subject);
+  const dateKey = cleanText(appointmentData.dateKey);
+  const scheduledStart = timestampToDate(appointmentData.scheduledStart);
+  const scheduledEnd = timestampToDate(appointmentData.scheduledEnd);
+
+  if (!scheduledStart || !scheduledEnd) {
+    return { ok: false, reason: "Planlı zümre saat bilgisi geçersiz." };
+  }
+
+  if (teacherData.role !== "teacher") {
+    return { ok: false, reason: "Seçilen kullanıcı öğretmen değil." };
+  }
+
+  if (!teacherHasSubject(teacherData, subject)) {
+    return { ok: false, reason: "Seçilen öğretmen bu ders için uygun değil." };
+  }
+
+  if (teacherData.manualAbsentDate === dateKey) {
+    return { ok: false, reason: "Seçilen öğretmen o gün kurumda değil görünüyor." };
+  }
+
+  const slot = findContainingZumreSlot(scheduleData, scheduledStart, scheduledEnd);
+  if (!slot) {
+    return { ok: false, reason: "Seçilen saat tanımlı zümre saatleri içinde değil." };
+  }
+
+  if (!teacherScheduledForAppointment(teacherData, scheduledStart, scheduledEnd)) {
+    return { ok: false, reason: "Seçilen öğretmen bu saatte kurum programında uygun değil." };
+  }
+
+  const runtimeConflict = blockingReasonForAppointment({
+    runtimeData,
+    plannedExamData,
+    startDate: scheduledStart,
+    endDate: scheduledEnd,
+  });
+  if (runtimeConflict) {
+    return { ok: false, reason: runtimeConflict };
+  }
+
+  const teacherDutyDocs = studyDutyDocs.filter(
+    (doc) => doc.data().dutyTeacherId === teacherId
+  );
+  if (studyDutyConflictsWithAppointment(teacherDutyDocs, scheduledStart, scheduledEnd)) {
+    return { ok: false, reason: "Seçilen öğretmenin bu saatte etüt görevi bulunuyor." };
+  }
+
+  const teacherAppointmentDocs = activeAppointmentDocsForTeacher(
+    dateAppointmentDocs,
+    teacherId,
+    appointmentId
+  );
+
+  if (appointmentOverlapsDocs(teacherAppointmentDocs, scheduledStart, scheduledEnd)) {
+    return { ok: false, reason: "Seçilen öğretmenin bu saatte başka planlı zümresi var." };
+  }
+
+  const slotKey = buildSlotKey(dateKey, slot);
+  const usedCapacity = appointmentMinutesInSlot(teacherAppointmentDocs, slotKey);
+  const estimatedMinutes = Number(appointmentData.estimatedMinutes) ||
+    estimatedMinutesForQuestionCount(
+      normalizeQuestionCount(appointmentData.questionCount)
+    );
+
+  if (usedCapacity + estimatedMinutes > plannedCapacityMinutesForSlot(slot)) {
+    return { ok: false, reason: "Seçilen öğretmenin planlı zümre kapasitesi dolu." };
+  }
+
+  return {
+    ok: true,
+    plannedLoad: usedCapacity,
+    teacherName: publicDisplayName(teacherData, "Öğretmen"),
+  };
+}
+
+function transferEditUntilFor(appointmentData, now = new Date()) {
+  const scheduledStart = timestampToDate(appointmentData.scheduledStart);
+  const fifteenMinutesLater = new Date(now.getTime() + 15 * 60 * 1000);
+
+  if (!scheduledStart || scheduledStart <= now) {
+    return now;
+  }
+
+  return scheduledStart < fifteenMinutesLater
+    ? scheduledStart
+    : fifteenMinutesLater;
+}
+
+function canRequesterTransferAppointment(appointmentData, requester, now = new Date()) {
+  if (appointmentData.teacherId === requester.uid) {
+    return true;
+  }
+
+  const editUntil = timestampToDate(appointmentData.transferEditUntil);
+  return appointmentData.transferredFromTeacherId === requester.uid &&
+    editUntil &&
+    editUntil.getTime() > now.getTime() &&
+    timestampToDate(appointmentData.scheduledStart)?.getTime() > now.getTime();
+}
+
+function institutionConflictsWithAppointment(runtimeData, startDate, endDate) {
+  const institutionState = resolveInstitutionMode(runtimeData, new Date());
+
+  if (institutionState.institutionMode === "closed") {
+    const appointmentDateKey = dateKeyFromIstanbulDate(startDate);
+    if (institutionState.closedDate === appointmentDateKey) {
+      return "Kurum seçilen gün kapalı.";
+    }
+  }
+
+  if (runtimeData?.institutionMode === "exam") {
+    const examEndsAt = timestampToDate(runtimeData.examEndsAt);
+    const examStartedAt = timestampToDate(runtimeData.examStartedAt) || new Date();
+    if (
+      examEndsAt &&
+      intervalsOverlap(
+        startDate.getTime(),
+        endDate.getTime(),
+        examStartedAt.getTime(),
+        examEndsAt.getTime()
+      )
+    ) {
+      return "Seçilen saat deneme modu ile çakışıyor.";
+    }
+  }
+
+  return null;
+}
+
+function blockingReasonForAppointment({
+  runtimeData,
+  plannedExamData,
+  startDate,
+  endDate,
+}) {
+  const runtimeConflict = institutionConflictsWithAppointment(
+    runtimeData,
+    startDate,
+    endDate
+  );
+  if (runtimeConflict) return runtimeConflict;
+
+  if (plannedExamConflictsWithAppointment(plannedExamData, startDate, endDate)) {
+    return "Seçilen saat planlı deneme ile çakışıyor.";
+  }
+
+  return null;
+}
+
+function summarizeAppointmentConflicts(docs) {
+  const grouped = new Map();
+
+  for (const doc of docs) {
+    const data = doc.data();
+    const start = timestampToDate(data.scheduledStart);
+    const end = timestampToDate(data.scheduledEnd);
+    if (!start || !end) continue;
+
+    const parts = getIstanbulDateParts(start);
+    const weekdayKey = weekdayAvailabilityKey(parts.weekday);
+    const key = `${data.dateKey || parts.dateKey}|${weekdayKey}|${parts.hour}:${parts.minute}`;
+    const item = grouped.get(key) || {
+      dateKey: data.dateKey || parts.dateKey,
+      weekday: weekdayKey,
+      start: `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`,
+      end: `${String(getIstanbulDateParts(end).hour).padStart(2, "0")}:${String(getIstanbulDateParts(end).minute).padStart(2, "0")}`,
+      count: 0,
+    };
+    item.count += 1;
+    grouped.set(key, item);
+  }
+
+  return Array.from(grouped.values()).sort((a, b) =>
+    `${a.dateKey} ${a.start}`.localeCompare(`${b.dateKey} ${b.start}`)
+  );
+}
+
+function scheduleConflictDocsForChange({
+  appointmentDocs,
+  oldScheduleData,
+  newWeeklySchedule,
+  now = new Date(),
+}) {
+  const changedDays = new Set(
+    changedZumreDayKeys(oldScheduleData, newWeeklySchedule)
+  );
+  if (changedDays.size === 0) {
+    return [];
+  }
+
+  const nextSchedule = scheduleWithWeekly(oldScheduleData, newWeeklySchedule);
+
+  return appointmentDocs.filter((doc) => {
+    const data = doc.data();
+    if (data.status !== APPOINTMENT_STATUS_SCHEDULED) return false;
+
+    const start = timestampToDate(data.scheduledStart);
+    const end = timestampToDate(data.scheduledEnd);
+    if (!start || !end || start.getTime() <= now.getTime()) return false;
+
+    if (!changedDays.has(weekdayKeyFromDate(start))) return false;
+    return !appointmentFitsZumreSchedule(nextSchedule, start, end);
+  });
+}
+
+function plannedExamConflictDocs(appointmentDocs, examStart, examEnd, now = new Date()) {
+  return appointmentDocs.filter((doc) => {
+    const data = doc.data();
+    if (data.status !== APPOINTMENT_STATUS_SCHEDULED) return false;
+
+    const start = timestampToDate(data.scheduledStart);
+    const end = timestampToDate(data.scheduledEnd);
+    if (!start || !end || start.getTime() <= now.getTime()) return false;
+
+    return intervalsOverlap(
+      start.getTime(),
+      end.getTime(),
+      examStart.getTime(),
+      examEnd.getTime()
+    );
+  });
+}
+
+function studyDutyConflictsWithAppointment(studySessionDocs, startDate, endDate) {
+  const startDateKey = dateKeyFromIstanbulDate(startDate);
+  const startParts = getIstanbulDateParts(startDate);
+  const startMinutes = startParts.hour * 60 + startParts.minute;
+  const durationMinutes = Math.ceil(
+    (endDate.getTime() - startDate.getTime()) / 60000
+  );
+  const endMinutes = startMinutes + durationMinutes;
+
+  return studySessionDocs.some((doc) => {
+    const data = doc.data();
+    if (data.status !== "active" || data.slotDate !== startDateKey) {
+      return false;
+    }
+
+    const slotStart = timeToMinutes(String(data.slotStart || ""));
+    const slotEnd = timeToMinutes(String(data.slotEnd || ""));
+    if (slotStart < 0 || slotEnd <= slotStart) {
+      return false;
+    }
+
+    return intervalsOverlap(startMinutes, endMinutes, slotStart, slotEnd);
+  });
+}
+
+function generateAppointmentStartOptions({
+  dateKey,
+  slot,
+  durationMinutes,
+  teacherAppointmentDocs,
+  studentAppointmentDocs,
+}) {
+  const options = [];
+  const baseDate = parseDateKeyToIstanbulNoon(dateKey);
+  if (!baseDate) return options;
+
+  const year = baseDate.getUTCFullYear();
+  const month = String(baseDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(baseDate.getUTCDate()).padStart(2, "0");
+  const plannedCapacity = plannedCapacityMinutesForSlot(slot);
+  const usedCapacity = appointmentMinutesInSlot(
+    teacherAppointmentDocs,
+    buildSlotKey(dateKey, slot)
+  );
+
+  if (usedCapacity + durationMinutes > plannedCapacity) {
+    return options;
+  }
+
+  for (
+    let minute = slot.startMinutes;
+    minute + durationMinutes <= slot.endMinutes;
+    minute += APPOINTMENT_OPTION_STEP_MINUTES
+  ) {
+    const hourText = String(Math.floor(minute / 60)).padStart(2, "0");
+    const minuteText = String(minute % 60).padStart(2, "0");
+    const startDate = new Date(`${year}-${month}-${day}T${hourText}:${minuteText}:00+03:00`);
+    const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
+
+    if (startDate.getTime() <= Date.now()) {
+      continue;
+    }
+
+    if (appointmentOverlapsDocs(teacherAppointmentDocs, startDate, endDate)) {
+      continue;
+    }
+
+    if (
+      appointmentOverlapsDocs(
+        studentAppointmentDocs,
+        startDate,
+        endDate,
+        { bufferMinutes: APPOINTMENT_STUDENT_TRANSITION_BUFFER_MINUTES }
+      )
+    ) {
+      continue;
+    }
+
+    options.push({
+      start: `${hourText}:${minuteText}`,
+      end: `${String(Math.floor((minute + durationMinutes) / 60)).padStart(2, "0")}:${String((minute + durationMinutes) % 60).padStart(2, "0")}`,
+      scheduledStart: startDate.toISOString(),
+      scheduledEnd: endDate.toISOString(),
+    });
+  }
+
+  return options;
+}
+
 function queueCreatedAtMillis(queueData) {
   const createdAt = timestampToDate(queueData.createdAt);
   return createdAt ? createdAt.getTime() : null;
@@ -828,6 +1709,224 @@ async function assertRoleCaller(request, role) {
     uid: request.auth.uid,
     data: userDoc.data() || {},
     ref: userDoc.ref,
+  };
+}
+
+async function assertAuthenticatedUser(request) {
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Oturum doğrulanamadı."
+    );
+  }
+
+  const userDoc = await db.collection("users").doc(request.auth.uid).get();
+
+  if (!userDoc.exists) {
+    throw new HttpsError(
+      "permission-denied",
+      "Bu işlem için yetkiniz yok."
+    );
+  }
+
+  return {
+    uid: request.auth.uid,
+    data: userDoc.data() || {},
+    ref: userDoc.ref,
+  };
+}
+
+async function loadFutureScheduledAppointmentDocs(now = new Date()) {
+  const snapshot = await db
+    .collection("appointments")
+    .where("status", "==", APPOINTMENT_STATUS_SCHEDULED)
+    .where("scheduledStart", ">=", timestampFromDate(now))
+    .orderBy("scheduledStart", "asc")
+    .limit(500)
+    .get();
+
+  return snapshot.docs;
+}
+
+async function findQueueActivityForStudentOnDate(studentId, dateKey) {
+  const bounds = istanbulDayBoundsFromDateKey(dateKey);
+  if (!studentId || !bounds) {
+    return { verified: false };
+  }
+
+  const snapshot = await db.collection("queues")
+    .where("studentId", "==", studentId)
+    .where("createdAt", ">=", timestampFromDate(bounds.start))
+    .where("createdAt", "<", timestampFromDate(bounds.end))
+    .orderBy("createdAt", "asc")
+    .limit(1)
+    .get();
+
+  return snapshot.empty
+    ? { verified: false }
+    : { verified: true, reason: "queue_activity" };
+}
+
+async function findStudyActivityForStudentOnDate(studentId, dateKey) {
+  const bounds = istanbulDayBoundsFromDateKey(dateKey);
+  if (!studentId || !bounds) {
+    return { verified: false };
+  }
+
+  const snapshot = await db.collectionGroup("students")
+    .where("studentId", "==", studentId)
+    .where("checkedAt", ">=", timestampFromDate(bounds.start))
+    .where("checkedAt", "<", timestampFromDate(bounds.end))
+    .orderBy("checkedAt", "asc")
+    .limit(5)
+    .get();
+
+  const hasParticipation = snapshot.docs.some((doc) => {
+    const status = cleanText(doc.data().status || "present");
+    return ["present", "left", "completed"].includes(status);
+  });
+
+  return hasParticipation
+    ? { verified: true, reason: "study_activity" }
+    : { verified: false };
+}
+
+async function findInstitutionActivityForStudentOnDate(studentId, dateKey) {
+  const queueActivity =
+    await findQueueActivityForStudentOnDate(studentId, dateKey);
+  if (queueActivity.verified) return queueActivity;
+
+  return findStudyActivityForStudentOnDate(studentId, dateKey);
+}
+
+async function reconcileNoShowAppointmentDocs(
+  pendingDocs,
+  findActivityForStudent = findInstitutionActivityForStudentOnDate,
+  activityCache = new Map()
+) {
+  const result = {
+    checkedCount: pendingDocs.length,
+    verifiedCount: 0,
+    unverifiedCount: 0,
+    failedCount: 0,
+    uniqueStudentLookups: 0,
+  };
+
+  for (const doc of pendingDocs) {
+    try {
+      const data = doc.data() || {};
+
+      if (
+        data.status !== "no_show" ||
+        data.noShowVerificationStatus !== NO_SHOW_VERIFICATION_PENDING
+      ) {
+        continue;
+      }
+
+      const studentId = cleanText(data.studentId);
+      const dateKey = cleanText(data.dateKey);
+      const cacheKey = `${studentId}|${dateKey}`;
+
+      if (!activityCache.has(cacheKey)) {
+        result.uniqueStudentLookups += 1;
+        activityCache.set(
+          cacheKey,
+          await findActivityForStudent(studentId, dateKey)
+        );
+      }
+
+      const activity = activityCache.get(cacheKey);
+      await doc.ref.update(noShowVerificationUpdate(activity));
+
+      if (activity?.verified) {
+        result.verifiedCount += 1;
+      } else {
+        result.unverifiedCount += 1;
+      }
+    } catch (error) {
+      result.failedCount += 1;
+      console.error("No-show verification record failed.", {
+        appointmentId: doc.id,
+        error,
+      });
+    }
+  }
+
+  return result;
+}
+
+function noShowReconciliationCanWriteMarker(result, remainingPendingCount) {
+  return result.failedCount === 0 && remainingPendingCount === 0;
+}
+
+async function reconcileNoShowsAtDayEnd(now = new Date()) {
+  const runtimeRef = db.collection("settings").doc("runtimeState");
+  const runtimeDoc = await runtimeRef.get();
+  const runtimeData = runtimeDoc.data() || {};
+
+  if (
+    !shouldRunNoShowReconciliation(
+      now,
+      cleanText(runtimeData.lastNoShowReconciliationDateKey)
+    )
+  ) {
+    return { skipped: true };
+  }
+
+  const dateKey = getIstanbulDateParts(now).dateKey;
+  const pendingQuery = db.collection("appointments")
+    .where("status", "==", "no_show")
+    .where("dateKey", "==", dateKey)
+    .where(
+      "noShowVerificationStatus",
+      "==",
+      NO_SHOW_VERIFICATION_PENDING
+    );
+  const activityCache = new Map();
+  const result = {
+    checkedCount: 0,
+    verifiedCount: 0,
+    unverifiedCount: 0,
+    failedCount: 0,
+    uniqueStudentLookups: 0,
+  };
+
+  while (true) {
+    const pendingSnapshot = await pendingQuery.limit(100).get();
+    if (pendingSnapshot.empty) break;
+
+    const batchResult = await reconcileNoShowAppointmentDocs(
+      pendingSnapshot.docs,
+      findInstitutionActivityForStudentOnDate,
+      activityCache
+    );
+    result.checkedCount += batchResult.checkedCount;
+    result.verifiedCount += batchResult.verifiedCount;
+    result.unverifiedCount += batchResult.unverifiedCount;
+    result.failedCount += batchResult.failedCount;
+    result.uniqueStudentLookups += batchResult.uniqueStudentLookups;
+
+    if (batchResult.failedCount > 0 || pendingSnapshot.size < 100) break;
+  }
+
+  const remainingPendingSnapshot = await pendingQuery.limit(1).get();
+  const remainingPendingCount = remainingPendingSnapshot.size;
+
+  if (noShowReconciliationCanWriteMarker(result, remainingPendingCount)) {
+    await runtimeRef.set({
+      lastNoShowReconciliationDateKey: dateKey,
+      lastNoShowReconciledAt: fieldValue.serverTimestamp(),
+      lastNoShowReconciliationCheckedCount: result.checkedCount,
+      lastNoShowReconciliationVerifiedCount: result.verifiedCount,
+      lastNoShowReconciliationUnverifiedCount: result.unverifiedCount,
+    }, { merge: true });
+  }
+
+  return {
+    skipped: false,
+    dateKey,
+    remainingPendingCount,
+    ...result,
   };
 }
 
@@ -1832,6 +2931,418 @@ exports.setInstitutionMode = onCall(
   }
 );
 
+exports.previewZumreScheduleChange = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    await assertAdminCaller(request);
+    const weeklySchedule = request.data?.weeklySchedule;
+    if (!weeklySchedule || typeof weeklySchedule !== "object") {
+      throw new HttpsError("invalid-argument", "Haftalık program eksik.");
+    }
+
+    const now = new Date();
+    const scheduleDoc = await db.collection("settings").doc("zumreSchedule").get();
+    const conflictDocs = scheduleConflictDocsForChange({
+      appointmentDocs: await loadFutureScheduledAppointmentDocs(now),
+      oldScheduleData: scheduleDoc.data() || {},
+      newWeeklySchedule: weeklySchedule,
+      now,
+    });
+
+    return {
+      ok: true,
+      conflictCount: conflictDocs.length,
+      conflicts: summarizeAppointmentConflicts(conflictDocs),
+    };
+  }
+);
+
+exports.applyZumreScheduleChange = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (request) => {
+    const adminUid = await assertAdminCaller(request);
+    const weeklySchedule = request.data?.weeklySchedule;
+    const confirm = request.data?.confirm === true;
+    if (!weeklySchedule || typeof weeklySchedule !== "object") {
+      throw new HttpsError("invalid-argument", "Haftalık program eksik.");
+    }
+
+    const scheduleRef = db.collection("settings").doc("zumreSchedule");
+    const now = new Date();
+    const scheduleDoc = await scheduleRef.get();
+    const scheduleData = scheduleDoc.data() || {};
+    const conflictDocs = scheduleConflictDocsForChange({
+      appointmentDocs: await loadFutureScheduledAppointmentDocs(now),
+      oldScheduleData: scheduleData,
+      newWeeklySchedule: weeklySchedule,
+      now,
+    });
+
+    if (conflictDocs.length > 0 && !confirm) {
+      return {
+        ok: true,
+        requiresConfirm: true,
+        conflictCount: conflictDocs.length,
+        conflicts: summarizeAppointmentConflicts(conflictDocs),
+      };
+    }
+
+    let batch = db.batch();
+    let batchSize = 0;
+
+    batch.set(scheduleRef, {
+      weeklySchedule: normalizeWeeklySchedule(weeklySchedule),
+      updatedAt: fieldValue.serverTimestamp(),
+      updatedBy: adminUid,
+    }, { merge: true });
+    batchSize += 1;
+
+    for (const doc of conflictDocs) {
+      batch.update(doc.ref, {
+        status: "cancelled",
+        cancelledAt: fieldValue.serverTimestamp(),
+        cancelledBy: adminUid,
+        cancelledByRole: "admin",
+        cancelReason: "schedule_changed",
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+      batchSize += 1;
+
+      if (batchSize >= 400) {
+        await batch.commit();
+        batch = db.batch();
+        batchSize = 0;
+      }
+    }
+
+    if (batchSize > 0) {
+      await batch.commit();
+    }
+
+    return {
+      ok: true,
+      cancelledCount: conflictDocs.length,
+      conflicts: summarizeAppointmentConflicts(conflictDocs),
+    };
+  }
+);
+
+exports.createPlannedExam = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (request) => {
+    const adminUid = await assertAdminCaller(request);
+    const examType = cleanText(request.data?.examType).toLowerCase();
+    const requestedExamId = cleanText(request.data?.examId);
+    const durationMinutes = plannedExamDurationMinutes(examType);
+    const confirm = request.data?.confirm === true;
+    const scheduledStart = parseRequestedAppointmentStart(request.data?.scheduledStart);
+
+    if (!durationMinutes) {
+      throw new HttpsError("invalid-argument", "Deneme türü TYT veya AYT olmalıdır.");
+    }
+
+    if (!scheduledStart || scheduledStart.getTime() <= Date.now()) {
+      throw new HttpsError("failed-precondition", "Planlı deneme başlangıcı gelecek bir saat olmalıdır.");
+    }
+
+    const scheduledEnd = new Date(scheduledStart.getTime() + durationMinutes * 60000);
+    const conflictDocs = plannedExamConflictDocs(
+      await loadFutureScheduledAppointmentDocs(new Date()),
+      scheduledStart,
+      scheduledEnd
+    );
+
+    if (conflictDocs.length > 0 && !confirm) {
+      return {
+        ok: true,
+        requiresConfirm: true,
+        conflictCount: conflictDocs.length,
+        conflicts: summarizeAppointmentConflicts(conflictDocs),
+        scheduledEnd: scheduledEnd.toISOString(),
+      };
+    }
+
+    const plannedExamRef = db.collection("settings").doc("plannedExam");
+    const plannedExamDoc = await plannedExamRef.get();
+    const currentData = plannedExamDoc.data() || {};
+    const currentItems = plannedExamItems(currentData)
+      .filter((item) => item.end.getTime() > Date.now())
+      .filter((item) => !requestedExamId || item.id !== requestedExamId)
+      .map(publicPlannedExamItem);
+
+    const hasExamOverlap = plannedExamItems({ items: currentItems }).some(
+      (item) =>
+        intervalsOverlap(
+          scheduledStart.getTime(),
+          scheduledEnd.getTime(),
+          item.start.getTime(),
+          item.end.getTime()
+        )
+    );
+    if (hasExamOverlap) {
+      throw new HttpsError(
+        "already-exists",
+        "Bu saat aralığında başka bir planlı deneme var."
+      );
+    }
+
+    let batch = db.batch();
+    let batchSize = 0;
+    const examId = requestedExamId || `exam_${crypto.randomUUID()}`;
+    const newItem = {
+      id: examId,
+      status: PLANNED_EXAM_STATUS_SCHEDULED,
+      examType,
+      scheduledStart: timestampFromDate(scheduledStart),
+      scheduledEnd: timestampFromDate(scheduledEnd),
+    };
+    const nextItems = [...currentItems, newItem]
+      .sort((a, b) =>
+        timestampToDate(a.scheduledStart).getTime() -
+        timestampToDate(b.scheduledStart).getTime()
+      );
+
+    batch.set(plannedExamRef, {
+      ...plannedExamPrimaryFields(plannedExamItems({ items: nextItems })),
+      items: nextItems,
+      createdAt: fieldValue.serverTimestamp(),
+      createdBy: adminUid,
+      updatedAt: fieldValue.serverTimestamp(),
+    }, { merge: true });
+    batchSize += 1;
+
+    for (const doc of conflictDocs) {
+      batch.update(doc.ref, {
+        status: "cancelled",
+        cancelledAt: fieldValue.serverTimestamp(),
+        cancelledBy: adminUid,
+        cancelledByRole: "admin",
+        cancelReason: "exam_scheduled",
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+      batchSize += 1;
+
+      if (batchSize >= 400) {
+        await batch.commit();
+        batch = db.batch();
+        batchSize = 0;
+      }
+    }
+
+    if (batchSize > 0) {
+      await batch.commit();
+    }
+
+    return {
+      ok: true,
+      examId,
+      examType,
+      scheduledStart: scheduledStart.toISOString(),
+      scheduledEnd: scheduledEnd.toISOString(),
+      cancelledCount: conflictDocs.length,
+    };
+  }
+);
+
+exports.cancelPlannedExam = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const adminUid = await assertAdminCaller(request);
+    const examId = cleanText(request.data?.examId);
+    const plannedExamRef = db.collection("settings").doc("plannedExam");
+    const plannedExamDoc = await plannedExamRef.get();
+
+    if (!plannedExamDoc.exists) {
+      return { ok: true, cancelled: false };
+    }
+
+    const plannedExamData = plannedExamDoc.data() || {};
+    const items = plannedExamItems(plannedExamData);
+    const targetId = examId || items[0]?.id || "";
+    const target = items.find((item) => item.id === targetId);
+
+    if (!target) {
+      return { ok: true, cancelled: false };
+    }
+
+    if (target.status !== PLANNED_EXAM_STATUS_SCHEDULED) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Yalnızca henüz başlamamış planlı deneme iptal edilebilir."
+      );
+    }
+
+    const nextItems = items
+      .filter((item) => item.id !== targetId)
+      .map(publicPlannedExamItem);
+
+    await plannedExamRef.set({
+      ...plannedExamPrimaryFields(plannedExamItems({ items: nextItems })),
+      items: nextItems,
+      cancelledAt: fieldValue.serverTimestamp(),
+      cancelledBy: adminUid,
+      updatedAt: fieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return { ok: true, cancelled: true, examId: targetId };
+  }
+);
+
+exports.startPlannedExamNow = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (request) => {
+    const adminUid = await assertAdminCaller(request);
+    const requestedExamId = cleanText(request.data?.examId);
+    const now = new Date();
+    const plannedExamRef = db.collection("settings").doc("plannedExam");
+    const runtimeRef = db.collection("settings").doc("runtimeState");
+
+    const [
+      plannedExamDoc,
+      scheduleDoc,
+      futureAppointments,
+    ] = await Promise.all([
+      plannedExamRef.get(),
+      db.collection("settings").doc("zumreSchedule").get(),
+      loadFutureScheduledAppointmentDocs(now),
+    ]);
+
+    if (!plannedExamDoc.exists) {
+      throw new HttpsError("not-found", "Planlı deneme bulunamadı.");
+    }
+
+    const plannedExamData = plannedExamDoc.data() || {};
+    const items = plannedExamItems(plannedExamData);
+    const targetId = requestedExamId || items[0]?.id || "";
+    const target = items.find((item) => item.id === targetId);
+
+    if (!target) {
+      throw new HttpsError("not-found", "Planlı deneme bulunamadı.");
+    }
+
+    if (target.status !== PLANNED_EXAM_STATUS_SCHEDULED) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Yalnızca henüz başlamamış planlı deneme şimdi başlatılabilir."
+      );
+    }
+
+    const examType = target.examType;
+    const durationMinutes = plannedExamDurationMinutes(examType);
+    if (!durationMinutes) {
+      throw new HttpsError("failed-precondition", "Planlı deneme türü geçersiz.");
+    }
+
+    const scheduledEnd = new Date(now.getTime() + durationMinutes * 60000);
+    const conflictDocs = plannedExamConflictDocs(
+      futureAppointments,
+      now,
+      scheduledEnd
+    );
+    const startTimestamp = timestampFromDate(now);
+    const endTimestamp = timestampFromDate(scheduledEnd);
+    const scheduleData = scheduleDoc.data() || {};
+    const runtimeState = buildEffectiveRuntimeState(
+      scheduleData,
+      {
+        institutionMode: "exam",
+        examType,
+        examEndsAt: endTimestamp,
+      },
+      now
+    );
+
+    let batch = db.batch();
+    let batchSize = 0;
+
+    batch.set(runtimeRef, {
+      ...runtimeState,
+      closedDate: null,
+      examStartedAt: startTimestamp,
+      updatedAt: fieldValue.serverTimestamp(),
+      updatedBy: adminUid,
+    }, { merge: true });
+    batchSize += 1;
+
+    const nextItems = items.map((item) =>
+      item.id === targetId
+        ? publicPlannedExamItem({
+          ...item,
+          status: PLANNED_EXAM_STATUS_ACTIVE,
+          scheduledStart: startTimestamp,
+          scheduledEnd: endTimestamp,
+        })
+        : publicPlannedExamItem(item)
+    );
+
+    batch.set(plannedExamRef, {
+      ...plannedExamPrimaryFields(plannedExamItems({ items: nextItems })),
+      status: PLANNED_EXAM_STATUS_ACTIVE,
+      examType,
+      scheduledStart: startTimestamp,
+      scheduledEnd: endTimestamp,
+      items: nextItems,
+      startedAt: fieldValue.serverTimestamp(),
+      startedBy: adminUid,
+      updatedAt: fieldValue.serverTimestamp(),
+    }, { merge: true });
+    batchSize += 1;
+
+    for (const doc of conflictDocs) {
+      batch.update(doc.ref, {
+        status: "cancelled",
+        cancelledAt: fieldValue.serverTimestamp(),
+        cancelledBy: adminUid,
+        cancelledByRole: "admin",
+        cancelReason: "exam_started",
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+      batchSize += 1;
+
+      if (batchSize >= 400) {
+        await batch.commit();
+        batch = db.batch();
+        batchSize = 0;
+      }
+    }
+
+    if (batchSize > 0) {
+      await batch.commit();
+    }
+
+    await deleteWaitingZumreQueuesWhenClosed({}, now, {
+      forceClosed: true,
+    });
+    const studyCloseResult = await closeActiveStudySessionsForInstitutionMode();
+
+    return {
+      ok: true,
+      started: true,
+      examId: targetId,
+      examType,
+      examEndsAt: scheduledEnd.toISOString(),
+      cancelledCount: conflictDocs.length,
+      closedStudySessions: studyCloseResult.closedCount,
+    };
+  }
+);
+
 exports.ensureStudySession = onCall(
   {
     region: REGION,
@@ -1927,6 +3438,486 @@ exports.ensureStudySession = onCall(
       ok: true,
       sessionId,
       slotText: `${slot.start} - ${slot.end}`,
+    };
+  }
+);
+
+exports.getAppointmentAvailability = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const student = await assertRoleCaller(request, "student");
+    const subject = cleanText(request.data?.subject);
+    const teacherIdFilter = cleanText(request.data?.teacherId);
+    const dateKey = cleanText(request.data?.dateKey);
+    const questionCount = normalizeQuestionCount(request.data?.questionCount);
+    const estimatedMinutes = estimatedMinutesForQuestionCount(questionCount);
+    const date = parseDateKeyToIstanbulNoon(dateKey);
+
+    if (!subject) {
+      throw new HttpsError("invalid-argument", "Lütfen bir ders seçin.");
+    }
+
+    if (!date) {
+      throw new HttpsError("invalid-argument", "Geçerli bir tarih seçin.");
+    }
+
+    const [
+      scheduleDoc,
+      runtimeDoc,
+      plannedExamDoc,
+      studentAppointmentsSnapshot,
+      teachersSnapshot,
+      studyDutySnapshot,
+    ] = await Promise.all([
+      db.collection("settings").doc("zumreSchedule").get(),
+      db.collection("settings").doc("runtimeState").get(),
+      db.collection("settings").doc("plannedExam").get(),
+      db.collection("appointments")
+        .where("studentId", "==", student.uid)
+        .where("dateKey", "==", dateKey)
+        .where("status", "in", ACTIVE_APPOINTMENT_STATUSES)
+        .orderBy("scheduledStart", "asc")
+        .get(),
+      db.collection("users")
+        .where("role", "==", "teacher")
+        .get(),
+      db.collection("studySessions")
+        .where("status", "==", "active")
+        .get(),
+    ]);
+
+    const scheduleData = scheduleDoc.data() || {};
+    const runtimeData = runtimeDoc.data() || {};
+    const plannedExamData = plannedExamDoc.data() || {};
+    if (
+      resolveInstitutionMode(runtimeData, date).institutionMode === "closed"
+    ) {
+      return {
+        ok: true,
+        dateKey,
+        teachers: [],
+        message: "Kurum seçilen gün kapalı.",
+      };
+    }
+
+    const dayParts = getIstanbulDateParts(date);
+    const slots = getZumreSlots(scheduleData, dayParts.weekday);
+    if (slots.length === 0) {
+      return {
+        ok: true,
+        dateKey,
+        teachers: [],
+        message: "Seçilen gün için zümre saati bulunmuyor.",
+      };
+    }
+
+    const teachers = teachersSnapshot.docs
+      .filter((doc) => {
+        if (teacherIdFilter && doc.id !== teacherIdFilter) return false;
+        const data = doc.data();
+        if (!teacherHasSubject(data, subject)) return false;
+        if (data.manualAbsentDate === dateKey) return false;
+        return true;
+      })
+      .slice(0, MAX_AVAILABILITY_TEACHERS);
+
+    const resultTeachers = [];
+
+    for (const teacherDoc of teachers) {
+      const teacherData = teacherDoc.data();
+      const teacherName = publicDisplayName(teacherData, "Öğretmen");
+
+      const teacherAppointmentsSnapshot = await db.collection("appointments")
+        .where("teacherId", "==", teacherDoc.id)
+        .where("dateKey", "==", dateKey)
+        .where("status", "in", ACTIVE_APPOINTMENT_STATUSES)
+        .orderBy("scheduledStart", "asc")
+        .get();
+
+      const availableSlots = [];
+
+      for (const slot of slots) {
+        for (const option of generateAppointmentStartOptions({
+          dateKey,
+          slot,
+          durationMinutes: estimatedMinutes,
+          teacherAppointmentDocs: teacherAppointmentsSnapshot.docs,
+          studentAppointmentDocs: studentAppointmentsSnapshot.docs,
+        })) {
+          const startDate = new Date(option.scheduledStart);
+          const endDate = new Date(option.scheduledEnd);
+
+          if (blockingReasonForAppointment({
+            runtimeData,
+            plannedExamData,
+            startDate,
+            endDate,
+          })) {
+            continue;
+          }
+
+          if (!teacherScheduledForAppointment(teacherData, startDate, endDate)) {
+            continue;
+          }
+
+          const teacherDutyDocs = studyDutySnapshot.docs.filter(
+            (doc) => doc.data().dutyTeacherId === teacherDoc.id
+          );
+          if (
+            studyDutyConflictsWithAppointment(
+              teacherDutyDocs,
+              startDate,
+              endDate
+            )
+          ) {
+            continue;
+          }
+
+          availableSlots.push(option);
+        }
+      }
+
+      if (availableSlots.length > 0) {
+        resultTeachers.push({
+          teacherId: teacherDoc.id,
+          teacherName,
+          slots: availableSlots.slice(0, 24),
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      dateKey,
+      questionCount,
+      estimatedMinutes,
+      teachers: resultTeachers,
+    };
+  }
+);
+
+exports.createAppointment = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const student = await assertRoleCaller(request, "student");
+    const subject = cleanText(request.data?.subject);
+    const teacherId = cleanText(request.data?.teacherId);
+    const idempotencyKey = cleanIdempotencyKey(request.data?.idempotencyKey);
+    const questionCount = normalizeQuestionCount(request.data?.questionCount);
+    const estimatedMinutes = estimatedMinutesForQuestionCount(questionCount);
+    const scheduledStart = parseRequestedAppointmentStart(
+      request.data?.scheduledStart ?? request.data?.requestedStart
+    );
+
+    if (!subject) {
+      throw new HttpsError("invalid-argument", "Lütfen bir ders seçin.");
+    }
+
+    if (!teacherId) {
+      throw new HttpsError("invalid-argument", "Lütfen bir öğretmen seçin.");
+    }
+
+    if (!idempotencyKey) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Randevu güvenlik anahtarı eksik veya geçersiz."
+      );
+    }
+
+    if (!scheduledStart) {
+      throw new HttpsError("invalid-argument", "Geçerli bir saat seçin.");
+    }
+
+    const now = new Date();
+    if (scheduledStart.getTime() <= now.getTime()) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Geçmiş bir saate planlı zümre oluşturulamaz."
+      );
+    }
+
+    const startParts = getIstanbulDateParts(scheduledStart);
+
+    const scheduledEnd = new Date(
+      scheduledStart.getTime() + estimatedMinutes * 60 * 1000
+    );
+    const dateKey = startParts.dateKey;
+    const appointmentId = appointmentIdFor(student.uid, idempotencyKey);
+    const appointmentRef = db.collection("appointments").doc(appointmentId);
+    const teacherLockRef = db.collection("appointmentLocks").doc(
+      appointmentLockId("teacher", teacherId, dateKey)
+    );
+    const studentLockRef = db.collection("appointmentLocks").doc(
+      appointmentLockId("student", student.uid, dateKey)
+    );
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [
+        appointmentDoc,
+        teacherLockDoc,
+        studentLockDoc,
+        scheduleDoc,
+        runtimeDoc,
+        plannedExamDoc,
+        studentDoc,
+        teacherDoc,
+        teacherAppointmentsSnapshot,
+        studentAppointmentsSnapshot,
+        studyDutySnapshot,
+      ] = await Promise.all([
+        transaction.get(appointmentRef),
+        transaction.get(teacherLockRef),
+        transaction.get(studentLockRef),
+        transaction.get(db.collection("settings").doc("zumreSchedule")),
+        transaction.get(db.collection("settings").doc("runtimeState")),
+        transaction.get(db.collection("settings").doc("plannedExam")),
+        transaction.get(student.ref),
+        transaction.get(db.collection("users").doc(teacherId)),
+        transaction.get(
+          db.collection("appointments")
+            .where("teacherId", "==", teacherId)
+            .where("dateKey", "==", dateKey)
+            .where("status", "in", ACTIVE_APPOINTMENT_STATUSES)
+            .orderBy("scheduledStart", "asc")
+        ),
+        transaction.get(
+          db.collection("appointments")
+            .where("studentId", "==", student.uid)
+            .where("dateKey", "==", dateKey)
+            .where("status", "in", ACTIVE_APPOINTMENT_STATUSES)
+            .orderBy("scheduledStart", "asc")
+        ),
+        transaction.get(
+          db.collection("studySessions")
+            .where("status", "==", "active")
+        ),
+      ]);
+
+      if (appointmentDoc.exists) {
+        const data = appointmentDoc.data() || {};
+        if (
+          data.studentId !== student.uid ||
+          data.idempotencyKey !== idempotencyKey
+        ) {
+          throw new HttpsError(
+            "already-exists",
+            "Bu randevu anahtarı kullanılamıyor."
+          );
+        }
+
+        if (
+          !appointmentMatchesBookingIdentity(data, {
+            studentId: student.uid,
+            teacherId,
+            subject,
+            questionCount,
+            dateKey,
+            scheduledStart,
+          })
+        ) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Bu randevu anahtarı farklı bir planlı zümre için kullanılmış."
+          );
+        }
+
+        return {
+          appointmentId,
+          teacherId: data.teacherId,
+          teacherName: data.teacherName,
+          scheduledStart: timestampToDate(data.scheduledStart)?.toISOString(),
+          scheduledEnd: timestampToDate(data.scheduledEnd)?.toISOString(),
+          idempotent: true,
+        };
+      }
+
+      if (!studentDoc.exists || studentDoc.data()?.role !== "student") {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu işlem için öğrenci hesabı gerekir."
+        );
+      }
+
+      if (!teacherDoc.exists || teacherDoc.data()?.role !== "teacher") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Seçilen öğretmen bulunamadı."
+        );
+      }
+
+      const studentData = studentDoc.data() || {};
+      const teacherData = teacherDoc.data() || {};
+
+      if (studentData.isInStudySession === true) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Etütteyken planlı zümre oluşturulamaz."
+        );
+      }
+
+      if (!teacherHasSubject(teacherData, subject)) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Seçilen öğretmen bu ders için uygun değil."
+        );
+      }
+
+      if (teacherData.manualAbsentDate === dateKey) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Seçilen öğretmen o gün kurumda değil görünüyor."
+        );
+      }
+
+      const scheduleData = scheduleDoc.data() || {};
+      const plannedExamData = plannedExamDoc.data() || {};
+      const slot = findContainingZumreSlot(
+        scheduleData,
+        scheduledStart,
+        scheduledEnd
+      );
+
+      if (!slot) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Seçilen saat tanımlı zümre saatleri içinde değil."
+        );
+      }
+
+      if (!teacherScheduledForAppointment(teacherData, scheduledStart, scheduledEnd)) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Seçilen öğretmen bu saatte kurum programında uygun değil."
+        );
+      }
+
+      const runtimeConflict = blockingReasonForAppointment({
+        runtimeData: runtimeDoc.data() || {},
+        plannedExamData,
+        startDate: scheduledStart,
+        endDate: scheduledEnd,
+      });
+      if (runtimeConflict) {
+        throw new HttpsError("failed-precondition", runtimeConflict);
+      }
+
+      const teacherDutyDocs = studyDutySnapshot.docs.filter(
+        (doc) => doc.data().dutyTeacherId === teacherId
+      );
+      if (
+        studyDutyConflictsWithAppointment(
+          teacherDutyDocs,
+          scheduledStart,
+          scheduledEnd
+        )
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Seçilen öğretmenin bu saatte etüt görevi bulunuyor."
+        );
+      }
+
+      if (
+        appointmentOverlapsDocs(
+          teacherAppointmentsSnapshot.docs,
+          scheduledStart,
+          scheduledEnd
+        )
+      ) {
+        throw new HttpsError(
+          "already-exists",
+          "Seçilen öğretmenin bu saatte başka planlı zümresi var."
+        );
+      }
+
+      if (
+        appointmentOverlapsDocs(
+          studentAppointmentsSnapshot.docs,
+          scheduledStart,
+          scheduledEnd,
+          { bufferMinutes: APPOINTMENT_STUDENT_TRANSITION_BUFFER_MINUTES }
+        )
+      ) {
+        throw new HttpsError(
+          "already-exists",
+          "Bu saatte başka bir planlı zümreniz bulunuyor."
+        );
+      }
+
+      const slotKey = buildSlotKey(dateKey, slot);
+      const plannedCapacity = plannedCapacityMinutesForSlot(slot);
+      const usedCapacity = appointmentMinutesInSlot(
+        teacherAppointmentsSnapshot.docs,
+        slotKey
+      );
+
+      if (usedCapacity + estimatedMinutes > plannedCapacity) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Bu öğretmenin planlı zümre kapasitesi dolu."
+        );
+      }
+
+      const teacherName = publicDisplayName(teacherData, "Öğretmen");
+      const studentName = publicDisplayName(studentData, "Öğrenci");
+
+      transaction.set(appointmentRef, {
+        studentId: student.uid,
+        studentName,
+        teacherId,
+        teacherName,
+        subject,
+        questionCount,
+        estimatedMinutes,
+        dateKey,
+        slotKey,
+        scheduledStart: timestampFromDate(scheduledStart),
+        scheduledEnd: timestampFromDate(scheduledEnd),
+        status: APPOINTMENT_STATUS_SCHEDULED,
+        idempotencyKey,
+        createdAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      transaction.set(teacherLockRef, {
+        scope: "teacher",
+        ownerId: teacherId,
+        dateKey,
+        lastAppointmentId: appointmentId,
+        updatedAt: fieldValue.serverTimestamp(),
+        revision: teacherLockDoc.exists
+          ? fieldValue.increment(1)
+          : 1,
+      }, { merge: true });
+
+      transaction.set(studentLockRef, {
+        scope: "student",
+        ownerId: student.uid,
+        dateKey,
+        lastAppointmentId: appointmentId,
+        updatedAt: fieldValue.serverTimestamp(),
+        revision: studentLockDoc.exists
+          ? fieldValue.increment(1)
+          : 1,
+      }, { merge: true });
+
+      return {
+        appointmentId,
+        teacherId,
+        teacherName,
+        scheduledStart: scheduledStart.toISOString(),
+        scheduledEnd: scheduledEnd.toISOString(),
+        idempotent: false,
+      };
+    });
+
+    return {
+      ok: true,
+      ...result,
     };
   }
 );
@@ -2258,6 +4249,564 @@ exports.teacherTakeNextQueue = onCall(
   }
 );
 
+exports.teacherStartAppointment = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const appointmentId = cleanText(request.data?.appointmentId);
+
+    if (!appointmentId) {
+      throw new HttpsError("invalid-argument", "Geçersiz planlı zümre bilgisi.");
+    }
+
+    const appointmentRef = db.collection("appointments").doc(appointmentId);
+    const queueRef = db.collection("queues").doc(
+      appointmentLinkedQueueId(appointmentId)
+    );
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [
+        appointmentDoc,
+        linkedQueueDoc,
+        teacherActiveSnapshot,
+      ] = await Promise.all([
+        transaction.get(appointmentRef),
+        transaction.get(queueRef),
+        transaction.get(
+          db.collection("queues")
+            .where("teacherId", "==", teacher.uid)
+            .where("status", "==", "in_progress")
+            .limit(1)
+        ),
+      ]);
+
+      if (!appointmentDoc.exists) {
+        throw new HttpsError("not-found", "Planlı zümre bulunamadı.");
+      }
+
+      const appointmentData = appointmentDoc.data() || {};
+
+      if (appointmentData.teacherId !== teacher.uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu planlı zümreyi başlatma yetkiniz yok."
+        );
+      }
+
+      if (appointmentData.status === "started" && appointmentData.linkedQueueId) {
+        return {
+          started: false,
+          linkedQueueId: appointmentData.linkedQueueId,
+          idempotent: true,
+        };
+      }
+
+      if (appointmentData.status !== APPOINTMENT_STATUS_SCHEDULED) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Bu planlı zümre artık başlatılabilir durumda değil."
+        );
+      }
+
+      const dueState = appointmentCanBecomeLive(appointmentData);
+      if (!dueState.ok) {
+        throw new HttpsError("failed-precondition", dueState.reason);
+      }
+
+      if (!teacherActiveSnapshot.empty) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Önce devam eden öğrenci işlemini tamamlayın."
+        );
+      }
+
+      const studentActiveSnapshot = await transaction.get(
+        db.collection("queues")
+          .where("studentId", "==", appointmentData.studentId)
+          .where("status", "in", ["waiting", "in_progress"])
+          .limit(1)
+      );
+
+      if (!studentActiveSnapshot.empty) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Öğrencinin şu anda aktif bir zümre sırası var."
+        );
+      }
+
+      if (linkedQueueDoc.exists) {
+        transaction.update(appointmentRef, {
+          status: "started",
+          startedAt: fieldValue.serverTimestamp(),
+          linkedQueueId: queueRef.id,
+          updatedAt: fieldValue.serverTimestamp(),
+        });
+
+        return {
+          started: true,
+          linkedQueueId: queueRef.id,
+          idempotent: true,
+        };
+      }
+
+      const now = new Date();
+      transaction.set(
+        queueRef,
+        buildAppointmentLinkedQueueData(appointmentId, appointmentData, now)
+      );
+      transaction.update(appointmentRef, {
+        status: "started",
+        startedAt: fieldValue.serverTimestamp(),
+        linkedQueueId: queueRef.id,
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      return {
+        started: true,
+        linkedQueueId: queueRef.id,
+        idempotent: false,
+      };
+    });
+
+    return {
+      ok: true,
+      ...result,
+    };
+  }
+);
+
+exports.teacherNoShowAppointment = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const appointmentId = cleanText(request.data?.appointmentId);
+
+    if (!appointmentId) {
+      throw new HttpsError("invalid-argument", "Geçersiz planlı zümre bilgisi.");
+    }
+
+    const appointmentRef = db.collection("appointments").doc(appointmentId);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const appointmentDoc = await transaction.get(appointmentRef);
+
+      if (!appointmentDoc.exists) {
+        throw new HttpsError("not-found", "Planlı zümre bulunamadı.");
+      }
+
+      const appointmentData = appointmentDoc.data() || {};
+
+      if (appointmentData.teacherId !== teacher.uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu planlı zümre için işlem yetkiniz yok."
+        );
+      }
+
+      if (appointmentData.status !== APPOINTMENT_STATUS_SCHEDULED) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Bu planlı zümre için gelmedi işlemi yapılamaz."
+        );
+      }
+
+      const dueState = appointmentCanBecomeLive(appointmentData);
+      if (!dueState.ok) {
+        throw new HttpsError("failed-precondition", dueState.reason);
+      }
+
+      transaction.update(appointmentRef, {
+        status: "no_show",
+        noShowAt: fieldValue.serverTimestamp(),
+        noShowVerificationStatus: NO_SHOW_VERIFICATION_PENDING,
+        noShowVerifiedAt: null,
+        noShowVerificationReason: null,
+        noShowVerificationCheckedAt: null,
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      return { noShow: true };
+    });
+
+    return {
+      ok: true,
+      ...result,
+    };
+  }
+);
+
+exports.getAppointmentTransferOptions = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const appointmentId = cleanText(request.data?.appointmentId);
+
+    if (!appointmentId) {
+      throw new HttpsError("invalid-argument", "Geçersiz planlı zümre bilgisi.");
+    }
+
+    const appointmentDoc = await db.collection("appointments").doc(appointmentId).get();
+    if (!appointmentDoc.exists) {
+      throw new HttpsError("not-found", "Planlı zümre bulunamadı.");
+    }
+
+    const appointmentData = appointmentDoc.data() || {};
+    const now = new Date();
+    if (!canRequesterTransferAppointment(appointmentData, teacher, now)) {
+      throw new HttpsError(
+        "permission-denied",
+        "Bu planlı zümreyi devretme yetkiniz yok."
+      );
+    }
+
+    const futureState = appointmentIsFutureScheduled(appointmentData, now);
+    if (!futureState.ok) {
+      throw new HttpsError("failed-precondition", futureState.reason);
+    }
+
+    const dateKey = cleanText(appointmentData.dateKey);
+    const [
+      scheduleDoc,
+      runtimeDoc,
+      plannedExamDoc,
+      teachersSnapshot,
+      dateAppointmentsSnapshot,
+      studyDutySnapshot,
+    ] = await Promise.all([
+      db.collection("settings").doc("zumreSchedule").get(),
+      db.collection("settings").doc("runtimeState").get(),
+      db.collection("settings").doc("plannedExam").get(),
+      db.collection("users").where("role", "==", "teacher").get(),
+      db.collection("appointments")
+        .where("dateKey", "==", dateKey)
+        .where("status", "in", ACTIVE_APPOINTMENT_STATUSES)
+        .get(),
+      db.collection("studySessions")
+        .where("status", "==", "active")
+        .get(),
+    ]);
+
+    const scheduleData = scheduleDoc.data() || {};
+    const runtimeData = runtimeDoc.data() || {};
+    const plannedExamData = plannedExamDoc.data() || {};
+    const options = [];
+
+    for (const teacherDoc of teachersSnapshot.docs) {
+      if (teacherDoc.id === appointmentData.teacherId) continue;
+
+      const eligibility = appointmentTransferEligibility({
+        appointmentId,
+        appointmentData,
+        destinationTeacherDoc: teacherDoc,
+        dateAppointmentDocs: dateAppointmentsSnapshot.docs,
+        studyDutyDocs: studyDutySnapshot.docs,
+        scheduleData,
+        runtimeData,
+        plannedExamData,
+      });
+
+      if (!eligibility.ok) continue;
+
+      options.push({
+        teacherId: teacherDoc.id,
+        teacherName: eligibility.teacherName,
+        plannedLoad: eligibility.plannedLoad,
+      });
+    }
+
+    options.sort((a, b) => {
+      if (a.plannedLoad !== b.plannedLoad) return a.plannedLoad - b.plannedLoad;
+      return a.teacherName.localeCompare(b.teacherName, "tr");
+    });
+
+    const selfEligibility = appointmentData.teacherId !== teacher.uid
+      ? appointmentTransferEligibility({
+        appointmentId,
+        appointmentData,
+        destinationTeacherDoc: teachersSnapshot.docs.find((doc) => doc.id === teacher.uid),
+        dateAppointmentDocs: dateAppointmentsSnapshot.docs,
+        studyDutyDocs: studyDutySnapshot.docs,
+        scheduleData,
+        runtimeData,
+        plannedExamData,
+      })
+      : { ok: false };
+
+    return {
+      ok: true,
+      teachers: options.slice(0, MAX_AVAILABILITY_TEACHERS),
+      canReturnToSelf: selfEligibility.ok === true,
+    };
+  }
+);
+
+exports.transferAppointment = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const appointmentId = cleanText(request.data?.appointmentId);
+    const mode = cleanText(request.data?.mode || "manual");
+    const requestedTeacherId = cleanText(request.data?.teacherId);
+
+    if (!appointmentId) {
+      throw new HttpsError("invalid-argument", "Geçersiz planlı zümre bilgisi.");
+    }
+
+    if (mode !== "auto" && mode !== "manual" && mode !== "self") {
+      throw new HttpsError("invalid-argument", "Geçersiz devretme türü.");
+    }
+
+    const appointmentRef = db.collection("appointments").doc(appointmentId);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const appointmentDoc = await transaction.get(appointmentRef);
+
+      if (!appointmentDoc.exists) {
+        throw new HttpsError("not-found", "Planlı zümre bulunamadı.");
+      }
+
+      const appointmentData = appointmentDoc.data() || {};
+      const now = new Date();
+
+      if (!canRequesterTransferAppointment(appointmentData, teacher, now)) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu planlı zümreyi devretme yetkiniz yok."
+        );
+      }
+
+      const futureState = appointmentIsFutureScheduled(appointmentData, now);
+      if (!futureState.ok) {
+        throw new HttpsError("failed-precondition", futureState.reason);
+      }
+
+      const dateKey = cleanText(appointmentData.dateKey);
+      const [
+        scheduleDoc,
+        runtimeDoc,
+        plannedExamDoc,
+        teachersSnapshot,
+        dateAppointmentsSnapshot,
+        studyDutySnapshot,
+      ] = await Promise.all([
+        transaction.get(db.collection("settings").doc("zumreSchedule")),
+        transaction.get(db.collection("settings").doc("runtimeState")),
+        transaction.get(db.collection("settings").doc("plannedExam")),
+        transaction.get(db.collection("users").where("role", "==", "teacher")),
+        transaction.get(
+          db.collection("appointments")
+            .where("dateKey", "==", dateKey)
+            .where("status", "in", ACTIVE_APPOINTMENT_STATUSES)
+        ),
+        transaction.get(
+          db.collection("studySessions")
+            .where("status", "==", "active")
+        ),
+      ]);
+
+      let destinationTeacherDoc = null;
+      let destinationEligibility = null;
+      const plannedExamData = plannedExamDoc.data() || {};
+
+      if (mode === "manual") {
+        if (!requestedTeacherId) {
+          throw new HttpsError("invalid-argument", "Lütfen öğretmen seçin.");
+        }
+
+        if (requestedTeacherId === appointmentData.teacherId) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Planlı zümre zaten bu öğretmende."
+          );
+        }
+
+        destinationTeacherDoc = teachersSnapshot.docs.find(
+          (doc) => doc.id === requestedTeacherId
+        );
+        destinationEligibility = appointmentTransferEligibility({
+          appointmentId,
+          appointmentData,
+          destinationTeacherDoc,
+          dateAppointmentDocs: dateAppointmentsSnapshot.docs,
+          studyDutyDocs: studyDutySnapshot.docs,
+          scheduleData: scheduleDoc.data() || {},
+          runtimeData: runtimeDoc.data() || {},
+          plannedExamData,
+        });
+      } else if (mode === "self") {
+        destinationTeacherDoc = teachersSnapshot.docs.find(
+          (doc) => doc.id === teacher.uid
+        );
+        destinationEligibility = appointmentTransferEligibility({
+          appointmentId,
+          appointmentData,
+          destinationTeacherDoc,
+          dateAppointmentDocs: dateAppointmentsSnapshot.docs,
+          studyDutyDocs: studyDutySnapshot.docs,
+          scheduleData: scheduleDoc.data() || {},
+          runtimeData: runtimeDoc.data() || {},
+          plannedExamData,
+        });
+      } else {
+        const candidates = [];
+        for (const teacherDoc of teachersSnapshot.docs) {
+          if (teacherDoc.id === appointmentData.teacherId) continue;
+
+          const eligibility = appointmentTransferEligibility({
+            appointmentId,
+            appointmentData,
+            destinationTeacherDoc: teacherDoc,
+            dateAppointmentDocs: dateAppointmentsSnapshot.docs,
+            studyDutyDocs: studyDutySnapshot.docs,
+            scheduleData: scheduleDoc.data() || {},
+            runtimeData: runtimeDoc.data() || {},
+            plannedExamData,
+          });
+
+          if (eligibility.ok) {
+            candidates.push({ teacherDoc, eligibility });
+          }
+        }
+
+        candidates.sort((a, b) => {
+          if (a.eligibility.plannedLoad !== b.eligibility.plannedLoad) {
+            return a.eligibility.plannedLoad - b.eligibility.plannedLoad;
+          }
+          return Math.random() < 0.5 ? -1 : 1;
+        });
+
+        if (candidates.length > 0) {
+          destinationTeacherDoc = candidates[0].teacherDoc;
+          destinationEligibility = candidates[0].eligibility;
+        }
+      }
+
+      if (!destinationEligibility?.ok || !destinationTeacherDoc) {
+        throw new HttpsError(
+          "failed-precondition",
+          destinationEligibility?.reason || "Uygun öğretmen bulunamadı."
+        );
+      }
+
+      const destinationTeacherId = destinationTeacherDoc.id;
+      if (destinationTeacherId === appointmentData.teacherId) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Planlı zümre zaten bu öğretmende."
+        );
+      }
+
+      const destinationLockRef = db.collection("appointmentLocks").doc(
+        appointmentLockId("teacher", destinationTeacherId, dateKey)
+      );
+      const destinationLockDoc = await transaction.get(destinationLockRef);
+      const editUntil = transferEditUntilFor(appointmentData, now);
+      const fromTeacherName = cleanText(appointmentData.teacherName) || "Öğretmen";
+      const toTeacherName = destinationEligibility.teacherName;
+
+      transaction.update(appointmentRef, {
+        teacherId: destinationTeacherId,
+        teacherName: toTeacherName,
+        transferredAt: fieldValue.serverTimestamp(),
+        transferredFromTeacherId: teacher.uid,
+        transferredFromTeacherName: fromTeacherName,
+        transferToTeacherId: destinationTeacherId,
+        transferToTeacherName: toTeacherName,
+        transferEditUntil: timestampFromDate(editUntil),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      transaction.set(destinationLockRef, {
+        scope: "teacher",
+        ownerId: destinationTeacherId,
+        dateKey,
+        lastAppointmentId: appointmentId,
+        updatedAt: fieldValue.serverTimestamp(),
+        revision: destinationLockDoc.exists
+          ? fieldValue.increment(1)
+          : 1,
+      }, { merge: true });
+
+      return {
+        transferred: true,
+        teacherId: destinationTeacherId,
+        teacherName: toTeacherName,
+        transferEditUntil: editUntil.toISOString(),
+      };
+    });
+
+    return {
+      ok: true,
+      ...result,
+    };
+  }
+);
+
+exports.cancelAppointment = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const user = await assertAuthenticatedUser(request);
+    const appointmentId = cleanText(request.data?.appointmentId);
+
+    if (!appointmentId) {
+      throw new HttpsError("invalid-argument", "Geçersiz planlı zümre bilgisi.");
+    }
+
+    const appointmentRef = db.collection("appointments").doc(appointmentId);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const appointmentDoc = await transaction.get(appointmentRef);
+
+      if (!appointmentDoc.exists) {
+        throw new HttpsError("not-found", "Planlı zümre bulunamadı.");
+      }
+
+      const appointmentData = appointmentDoc.data() || {};
+      const futureState = appointmentIsFutureScheduled(appointmentData);
+      if (!futureState.ok) {
+        throw new HttpsError("failed-precondition", futureState.reason);
+      }
+
+      const role = user.data.role;
+      const canCancel = appointmentData.studentId === user.uid ||
+        appointmentData.teacherId === user.uid ||
+        role === "admin";
+
+      if (!canCancel) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu planlı zümreyi iptal etme yetkiniz yok."
+        );
+      }
+
+      transaction.update(appointmentRef, {
+        status: "cancelled",
+        cancelledAt: fieldValue.serverTimestamp(),
+        cancelledBy: user.uid,
+        cancelledByRole: role,
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      return { cancelled: true };
+    });
+
+    return {
+      ok: true,
+      ...result,
+    };
+  }
+);
+
 exports.teacherStartQueue = onCall(
   {
     region: REGION,
@@ -2398,12 +4947,48 @@ exports.teacherCompleteQueue = onCall(
         waitingSnapshot.docs,
         queueId
       );
+      let appointmentRef = null;
+      let appointmentDoc = null;
+
+      if (queueData.source === "appointment" && queueData.appointmentId) {
+        appointmentRef = db.collection("appointments").doc(
+          cleanText(queueData.appointmentId)
+        );
+        appointmentDoc = await transaction.get(appointmentRef);
+
+        if (!appointmentDoc.exists) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Bağlı planlı zümre kaydı bulunamadı."
+          );
+        }
+
+        const appointmentData = appointmentDoc.data() || {};
+        if (
+          appointmentData.teacherId !== teacher.uid ||
+          appointmentData.linkedQueueId !== queueId ||
+          appointmentData.status !== "started"
+        ) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Bağlı planlı zümre durumu geçerli değil."
+          );
+        }
+      }
 
       transaction.update(queueRef, {
         status: "completed",
         completedAt: fieldValue.serverTimestamp(),
         updatedAt: fieldValue.serverTimestamp(),
       });
+
+      if (appointmentRef) {
+        transaction.update(appointmentRef, {
+          status: "completed",
+          completedAt: fieldValue.serverTimestamp(),
+          updatedAt: fieldValue.serverTimestamp(),
+        });
+      }
 
       if (otherActiveQueues.length > 0) {
         return { completed: true, startedNextQueueId: null };
@@ -2723,6 +5308,97 @@ async function closeActiveStudySessionsForInstitutionMode() {
   };
 }
 
+async function applyPlannedExamRuntime(now = new Date()) {
+  const plannedExamRef = db.collection("settings").doc("plannedExam");
+  const plannedExamDoc = await plannedExamRef.get();
+  if (!plannedExamDoc.exists) return null;
+
+  const plannedExamData = plannedExamDoc.data() || {};
+  const allItems = plannedExamItems(plannedExamData);
+  const items = allItems.filter((item) => item.end.getTime() > now.getTime());
+
+  const runtimeRef = db.collection("settings").doc("runtimeState");
+  const activeItem = allItems.find(
+    (item) => item.status === PLANNED_EXAM_STATUS_ACTIVE
+  );
+  const dueItem = items.find(
+    (item) =>
+      item.status === PLANNED_EXAM_STATUS_SCHEDULED &&
+      item.start.getTime() <= now.getTime() &&
+      item.end.getTime() > now.getTime()
+  );
+
+  if (dueItem) {
+    const nextItems = items.map((item) =>
+      item.id === dueItem.id
+        ? publicPlannedExamItem({
+          ...item,
+          status: PLANNED_EXAM_STATUS_ACTIVE,
+        })
+        : publicPlannedExamItem(item)
+    );
+
+    await runtimeRef.set({
+      institutionMode: "exam",
+      examType: dueItem.examType,
+      examStartedAt: dueItem.scheduledStart,
+      examEndsAt: dueItem.scheduledEnd,
+      closedDate: null,
+      isZumreOpen: false,
+      isStudyOpen: false,
+      isLunchBreak: false,
+      currentPeriod: "exam",
+      updatedAt: fieldValue.serverTimestamp(),
+      plannedExamId: dueItem.id,
+    }, { merge: true });
+
+    await plannedExamRef.set({
+      ...plannedExamPrimaryFields(plannedExamItems({ items: nextItems })),
+      items: nextItems,
+      activatedAt: fieldValue.serverTimestamp(),
+      updatedAt: fieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    await deleteWaitingZumreQueuesWhenClosed({}, now, { forceClosed: true });
+    await closeActiveStudySessionsForInstitutionMode();
+
+    return {
+      institutionMode: "exam",
+      examType: dueItem.examType,
+      examEndsAt: dueItem.scheduledEnd,
+      applied: true,
+    };
+  }
+
+  if (activeItem && activeItem.end.getTime() <= now.getTime()) {
+    const nextItems = allItems
+      .filter((item) => item.id !== activeItem.id)
+      .map(publicPlannedExamItem);
+
+    await plannedExamRef.set({
+      ...plannedExamPrimaryFields(plannedExamItems({ items: nextItems })),
+      items: nextItems,
+      completedAt: fieldValue.serverTimestamp(),
+      updatedAt: fieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    await runtimeRef.set({
+      institutionMode: "active",
+      examType: null,
+      examStartedAt: null,
+      examEndsAt: null,
+      plannedExamId: null,
+      updatedAt: fieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return { completed: true };
+  }
+
+  if (items.length === 0) return null;
+
+  return null;
+}
+
 // ============================================================
 // SUNUCU TARAFI GENEL ZAMAN DURUMU
 // ============================================================
@@ -2749,6 +5425,20 @@ exports.syncRuntimeSchedule = onSchedule(
     }
 
     const now = new Date();
+    const plannedExamRuntime = await applyPlannedExamRuntime(now);
+    if (plannedExamRuntime?.applied) {
+      try {
+        const noShowResult = await reconcileNoShowsAtDayEnd(now);
+        if (!noShowResult.skipped) {
+          console.log("Planlı zümre no-show doğrulaması tamamlandı.", noShowResult);
+        }
+      } catch (error) {
+        console.error("Planlı zümre no-show doğrulaması tamamlanamadı.", error);
+      }
+      console.log("Planlı deneme mevcut deneme moduna alındı.", plannedExamRuntime);
+      return;
+    }
+
     const runtimeRef = db.collection("settings").doc("runtimeState");
     const runtimeDoc = await runtimeRef.get();
     const runtimeState = buildEffectiveRuntimeState(
@@ -2777,6 +5467,12 @@ exports.syncRuntimeSchedule = onSchedule(
       }
     );
     const teacherStatusResult = await syncTeacherStatuses(now);
+    let noShowResult = { skipped: true };
+    try {
+      noShowResult = await reconcileNoShowsAtDayEnd(now);
+    } catch (error) {
+      console.error("Planlı zümre no-show doğrulaması tamamlanamadı.", error);
+    }
 
     console.log("Runtime zaman durumu güncellendi.", {
       ...runtimeState,
@@ -2788,6 +5484,7 @@ exports.syncRuntimeSchedule = onSchedule(
         waitingCleanupResult.skippedBecauseOpen,
       teacherStatusesChecked: teacherStatusResult.checkedCount,
       teacherStatusesUpdated: teacherStatusResult.updatedCount,
+      noShowReconciliation: noShowResult,
     });
   }
 );
@@ -2875,3 +5572,40 @@ exports.syncStudySessions = onSchedule(
     });
   }
 );
+
+if (process.env.NODE_ENV === "test") {
+  exports.__appointmentTest = {
+    APPOINTMENT_OPTION_STEP_MINUTES,
+    APPOINTMENT_PLANNED_CAPACITY_RATIO,
+    APPOINTMENT_STUDENT_TRANSITION_BUFFER_MINUTES,
+    appointmentMatchesBookingIdentity,
+    appointmentMinutesInSlot,
+    appointmentIdFor,
+    appointmentLockId,
+    appointmentOverlapsDocs,
+    appointmentCanBecomeLive,
+    appointmentLinkedQueueId,
+    appointmentIsFutureScheduled,
+    appointmentTransferEligibility,
+    buildSlotKey,
+    buildAppointmentLinkedQueueData,
+    canRequesterTransferAppointment,
+    changedZumreDayKeys,
+    transferEditUntilFor,
+    dateKeyFromIstanbulDate,
+    estimatedMinutesForQuestionCount,
+    findContainingZumreSlot,
+    generateAppointmentStartOptions,
+    noShowVerificationUpdate,
+    noShowReconciliationCanWriteMarker,
+    plannedExamConflictsWithAppointment,
+    plannedExamDurationMinutes,
+    plannedExamConflictDocs,
+    plannedCapacityMinutesForSlot,
+    reconcileNoShowAppointmentDocs,
+    scheduleConflictDocsForChange,
+    shouldRunNoShowReconciliation,
+    verifiedNoShowHistoryEligible,
+    verifiedNoShowPopupEligible,
+  };
+}

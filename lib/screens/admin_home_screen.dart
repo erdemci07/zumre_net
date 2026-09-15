@@ -266,8 +266,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           duration: const Duration(milliseconds: 220),
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color:
-                selected ? Colors.white.withValues(alpha: 0.14) : Colors.transparent,
+            color: selected
+                ? Colors.white.withValues(alpha: 0.14)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Column(
@@ -379,26 +380,122 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return '$minutes dk kaldı';
   }
 
+  String _messageWithCancelledCount(String base, dynamic data) {
+    final map = data is Map ? Map<String, dynamic>.from(data) : {};
+    final cancelledCount = (map['cancelledCount'] as num?)?.toInt() ?? 0;
+    if (cancelledCount <= 0) return base;
+    return '$base $cancelledCount planlı zümre iptal edildi.';
+  }
+
+  Future<T?> _runInstitutionAction<T>(
+    String loadingText,
+    Future<T> Function() action,
+  ) async {
+    if (_isChangingInstitutionMode) return null;
+
+    setState(() => _isChangingInstitutionMode = true);
+    var dialogShown = false;
+
+    if (mounted) {
+      dialogShown = true;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 360),
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: const Color(0xFF071A3A),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    color: Colors.lightBlueAccent,
+                    strokeWidth: 2.4,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    loadingText,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    try {
+      return await action();
+    } finally {
+      if (mounted && dialogShown && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+      if (mounted) {
+        setState(() => _isChangingInstitutionMode = false);
+      }
+    }
+  }
+
   String _institutionModeFromRuntime(Map<String, dynamic>? data) {
     final mode = '${data?['institutionMode'] ?? 'active'}';
     if (mode == 'closed' || mode == 'exam') return mode;
     return 'active';
   }
 
+  String _institutionActionErrorMessage(Object error) {
+    if (error is FirebaseFunctionsException) {
+      final message = error.message?.trim();
+      if (message != null && message.isNotEmpty) return message;
+
+      switch (error.code) {
+        case 'permission-denied':
+          return 'Bu işlem için yetkiniz bulunmuyor.';
+        case 'already-exists':
+          return 'Seçilen aralıkta başka bir planlı işlem var.';
+        case 'failed-precondition':
+          return 'Bu işlem şu anda yapılamıyor.';
+        case 'not-found':
+          return 'Planlı işlem bulunamadı.';
+        case 'invalid-argument':
+          return 'Girilen bilgileri kontrol edin.';
+        default:
+          return 'İşlem tamamlanamadı.';
+      }
+    }
+
+    return 'İşlem tamamlanamadı.';
+  }
+
   Future<void> _setInstitutionMode(
     String mode, {
     String? examType,
   }) async {
-    if (_isChangingInstitutionMode) return;
-
-    setState(() => _isChangingInstitutionMode = true);
-
     try {
-      final callable = _functions.httpsCallable('setInstitutionMode');
-      await callable.call({
-        'mode': mode,
-        if (examType != null) 'examType': examType,
-      });
+      final response = await _runInstitutionAction(
+        'Kurum durumu güncelleniyor...',
+        () async {
+          final callable = _functions.httpsCallable('setInstitutionMode');
+          return callable.call<Map<String, dynamic>>({
+            'mode': mode,
+            if (examType != null) 'examType': examType,
+          });
+        },
+      );
+      if (response == null) return;
 
       if (!mounted) return;
 
@@ -409,17 +506,18 @@ class _StatisticsPageState extends State<StatisticsPage> {
       };
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
+        SnackBar(
+            content: Text(_messageWithCancelledCount(message, response.data))),
       );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Kurum durumu güncellenemedi: $error')),
+        SnackBar(
+          content: Text(
+            'Kurum durumu güncellenemedi: ${_institutionActionErrorMessage(error)}',
+          ),
+        ),
       );
-    } finally {
-      if (mounted) {
-        setState(() => _isChangingInstitutionMode = false);
-      }
     }
   }
 
@@ -460,8 +558,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
     }
   }
 
-  Future<void> _showExamModeDialog() async {
-    var selectedType = 'tyt';
+  Future<void> _showExamModeDialog({
+    String initialType = 'tyt',
+    DateTime? initialStart,
+    String? examId,
+  }) async {
+    var selectedType = initialType.toLowerCase() == 'ayt' ? 'ayt' : 'tyt';
+    DateTime? scheduledDateTime = initialStart;
 
     await showDialog<void>(
       context: context,
@@ -471,6 +574,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
           builder: (context, setDialogState) {
             final minutes = selectedType == 'tyt' ? 165 : 180;
             final estimatedEnd = DateTime.now().add(Duration(minutes: minutes));
+            final plannedEnd =
+                scheduledDateTime?.add(Duration(minutes: minutes));
+            final canPlan = scheduledDateTime != null &&
+                scheduledDateTime!.isAfter(DateTime.now());
 
             return Dialog(
               backgroundColor: Colors.transparent,
@@ -537,31 +644,91 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       subtitle:
                           'Başlangıç: Şimdi · ${_formatClock(DateTime.now())}\nTahmini bitiş: ${_formatClock(estimatedEnd)}',
                     ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final pickedDate = await showDatePicker(
+                          context: context,
+                          initialDate: scheduledDateTime ?? DateTime.now(),
+                          firstDate: DateTime.now(),
+                          lastDate:
+                              DateTime.now().add(const Duration(days: 30)),
+                        );
+                        if (pickedDate == null) return;
+                        if (!context.mounted) return;
+                        final pickedTime = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.fromDateTime(
+                            scheduledDateTime ?? DateTime.now(),
+                          ),
+                          initialEntryMode: TimePickerEntryMode.input,
+                        );
+                        if (pickedTime == null) return;
+                        setDialogState(() {
+                          scheduledDateTime = DateTime(
+                            pickedDate.year,
+                            pickedDate.month,
+                            pickedDate.day,
+                            pickedTime.hour,
+                            pickedTime.minute,
+                          );
+                        });
+                      },
+                      icon: const Icon(Icons.edit_calendar_rounded),
+                      label: Text(
+                        scheduledDateTime == null
+                            ? 'Planlı deneme tarihini seç'
+                            : '${_formatDisplayDate(scheduledDateTime!)} · ${_formatClock(scheduledDateTime!)}',
+                      ),
+                    ),
+                    if (scheduledDateTime != null && plannedEnd != null) ...[
+                      const SizedBox(height: 10),
+                      _adminInfoCard(
+                        icon: Icons.event_rounded,
+                        title: 'Planlı Deneme',
+                        subtitle:
+                            'Başlangıç: ${_formatDisplayDate(scheduledDateTime!)} · ${_formatClock(scheduledDateTime!)}\nBitiş: ${_formatClock(plannedEnd)}',
+                      ),
+                    ],
                     const SizedBox(height: 18),
-                    Row(
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
                       children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text('Vazgeç'),
-                          ),
+                        OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('Vazgeç'),
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              Navigator.pop(ctx);
-                              await _setInstitutionMode(
-                                'exam',
-                                examType: selectedType,
-                              );
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.lightBlueAccent,
-                              foregroundColor: const Color(0xFF071A3A),
-                            ),
-                            child: const Text('Denemeyi Başlat'),
+                        ElevatedButton(
+                          onPressed: () async {
+                            Navigator.pop(ctx);
+                            await _setInstitutionMode(
+                              'exam',
+                              examType: selectedType,
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.lightBlueAccent,
+                            foregroundColor: const Color(0xFF071A3A),
                           ),
+                          child: const Text('Şimdi Başlat'),
+                        ),
+                        ElevatedButton(
+                          onPressed: canPlan
+                              ? () async {
+                                  Navigator.pop(ctx);
+                                  await _createPlannedExam(
+                                    examType: selectedType,
+                                    scheduledStart: scheduledDateTime!,
+                                    examId: examId,
+                                  );
+                                }
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.amber,
+                            foregroundColor: const Color(0xFF071A3A),
+                          ),
+                          child: const Text('Denemeyi Planla'),
                         ),
                       ],
                     ),
@@ -605,6 +772,264 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
     if (confirmed == true) {
       await _setInstitutionMode('active');
+    }
+  }
+
+  List<Map<String, dynamic>> _conflictsFromResponse(dynamic data) {
+    if (data is! Map) return [];
+    final raw = data['conflicts'];
+    if (raw is! List) return [];
+    return raw
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  String _conflictSummaryText(List<Map<String, dynamic>> conflicts) {
+    if (conflicts.isEmpty) return 'Etkilenen planlı zümre bulunmuyor.';
+    return conflicts.take(6).map((item) {
+      return '${item['dateKey']} · ${item['start']}-${item['end']} · ${item['count']} planlı öğrenci';
+    }).join('\n');
+  }
+
+  Future<bool> _confirmAppointmentCancellations({
+    required String title,
+    required int count,
+    required List<Map<String, dynamic>> conflicts,
+    required String reason,
+  }) async {
+    if (count <= 0) return true;
+
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF071A3A),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            title: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            content: Text(
+              '$reason\n\n${_conflictSummaryText(conflicts)}',
+              style: const TextStyle(color: Colors.white70, height: 1.35),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Vazgeç'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orangeAccent,
+                  foregroundColor: const Color(0xFF071A3A),
+                ),
+                child: const Text('Onayla'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _createPlannedExam({
+    required String examType,
+    required DateTime scheduledStart,
+    String? examId,
+  }) async {
+    try {
+      final callable = _functions.httpsCallable('createPlannedExam');
+      var response = await _runInstitutionAction(
+        'Deneme planlanıyor...',
+        () => callable.call<Map<String, dynamic>>({
+          'examType': examType,
+          'scheduledStart': scheduledStart.toIso8601String(),
+          if (examId != null) 'examId': examId,
+        }),
+      );
+      if (response == null) return;
+      var data = response.data;
+
+      if (data['requiresConfirm'] == true) {
+        final conflicts = _conflictsFromResponse(data);
+        final confirmed = await _confirmAppointmentCancellations(
+          title: 'Planlı zümreler iptal edilecek',
+          count: data['conflictCount'] as int? ?? conflicts.length,
+          conflicts: conflicts,
+          reason:
+              'Bu deneme saatine denk gelen planlı zümreler iptal edilecek.',
+        );
+        if (!confirmed) return;
+
+        response = await _runInstitutionAction(
+          'Deneme planlanıyor...',
+          () => callable.call<Map<String, dynamic>>({
+            'examType': examType,
+            'scheduledStart': scheduledStart.toIso8601String(),
+            'confirm': true,
+            if (examId != null) 'examId': examId,
+          }),
+        );
+        if (response == null) return;
+        data = response.data;
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _messageWithCancelledCount('Deneme planlandı.', data),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Deneme planlanamadı: ${_institutionActionErrorMessage(error)}',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _cancelPlannedExam([String? examId]) async {
+    if (_isChangingInstitutionMode) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF071A3A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text(
+          'Planlı deneme iptal edilsin mi?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'Henüz başlamamış planlı deneme kaldırılacaktır.',
+          style: TextStyle(color: Colors.white70, height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('İptal Et'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final response = await _runInstitutionAction(
+        'Planlı deneme iptal ediliyor...',
+        () {
+          final callable = _functions.httpsCallable('cancelPlannedExam');
+          return callable.call<Map<String, dynamic>>({
+            if (examId != null) 'examId': examId,
+          });
+        },
+      );
+      if (response == null) return;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Planlı deneme iptal edildi.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Planlı deneme iptal edilemedi: ${_institutionActionErrorMessage(error)}',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _startPlannedExamNow([String? examId]) async {
+    if (_isChangingInstitutionMode) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF071A3A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text(
+          'Planlı deneme şimdi başlatılsın mı?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'Kurum deneme moduna alınır. O an bekleyen zümre/etüt akışları durdurulur.',
+          style: TextStyle(color: Colors.white70, height: 1.35),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.lightBlueAccent,
+              foregroundColor: const Color(0xFF071A3A),
+            ),
+            child: const Text('Şimdi Başlat'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final response = await _runInstitutionAction(
+        'Planlı deneme başlatılıyor...',
+        () {
+          final callable = _functions.httpsCallable('startPlannedExamNow');
+          return callable.call<Map<String, dynamic>>({
+            if (examId != null) 'examId': examId,
+          });
+        },
+      );
+      if (response == null) return;
+      final data = response.data;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _messageWithCancelledCount('Planlı deneme başlatıldı.', data),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Planlı deneme başlatılamadı: ${_institutionActionErrorMessage(error)}',
+          ),
+        ),
+      );
     }
   }
 
@@ -2032,6 +2457,156 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
+  Widget _buildPlannedExamSummary() {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _firestore.collection('settings').doc('plannedExam').snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data();
+        if (data == null) {
+          return const SizedBox.shrink();
+        }
+
+        final items = <Map<String, dynamic>>[];
+        final rawItems = data['items'];
+        if (rawItems is List) {
+          for (final item in rawItems) {
+            if (item is Map) {
+              items.add(Map<String, dynamic>.from(item));
+            }
+          }
+        } else {
+          items.add(data);
+        }
+
+        final visibleItems = items.where((item) {
+          final status = '${item['status'] ?? ''}';
+          final endValue = item['scheduledEnd'];
+          final endDate = endValue is Timestamp ? endValue.toDate() : null;
+          return (status == 'scheduled' || status == 'active') &&
+              (endDate == null || endDate.isAfter(DateTime.now()));
+        }).toList()
+          ..sort((a, b) {
+            final aStart = a['scheduledStart'];
+            final bStart = b['scheduledStart'];
+            final aDate = aStart is Timestamp ? aStart.toDate() : DateTime(0);
+            final bDate = bStart is Timestamp ? bStart.toDate() : DateTime(0);
+            return aDate.compareTo(bDate);
+          });
+
+        if (visibleItems.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Column(
+          children: visibleItems.map((item) {
+            final status = '${item['status'] ?? ''}';
+            final examId = item['id']?.toString();
+            final examType = '${item['examType'] ?? ''}'.toUpperCase();
+            final startValue = item['scheduledStart'];
+            final endValue = item['scheduledEnd'];
+            final startDate =
+                startValue is Timestamp ? startValue.toDate() : null;
+            final endDate = endValue is Timestamp ? endValue.toDate() : null;
+            final active = status == 'active';
+            final accent = active ? Colors.lightBlueAccent : Colors.amber;
+            final title = active ? 'Deneme Devam Ediyor' : 'Planlı Deneme';
+            final subtitle = [
+              if (examType.isNotEmpty) examType,
+              if (startDate != null)
+                'Başlangıç: ${_formatDisplayDate(startDate)} · ${_formatClock(startDate)}',
+              if (endDate != null) 'Bitiş: ${_formatClock(endDate)}',
+            ].join('\n');
+
+            return Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 14),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: accent.withValues(alpha: 0.35)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        active
+                            ? Icons.assignment_turned_in_rounded
+                            : Icons.event_note_rounded,
+                        color: accent,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: Colors.white70, height: 1.35),
+                  ),
+                  if (!active) ...[
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed:
+                              _isChangingInstitutionMode || startDate == null
+                                  ? null
+                                  : () => _showExamModeDialog(
+                                        initialType: examType,
+                                        initialStart: startDate,
+                                        examId: examId,
+                                      ),
+                          icon: const Icon(Icons.edit_calendar_rounded),
+                          label: const Text('Düzenle'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _isChangingInstitutionMode
+                              ? null
+                              : () => _cancelPlannedExam(examId),
+                          icon: const Icon(Icons.close_rounded),
+                          label: const Text('İptal'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.redAccent,
+                            side: const BorderSide(color: Colors.redAccent),
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: _isChangingInstitutionMode
+                              ? null
+                              : () => _startPlannedExamNow(examId),
+                          icon: const Icon(Icons.play_arrow_rounded),
+                          label: const Text('Şimdi Başlat'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.lightBlueAccent,
+                            foregroundColor: const Color(0xFF071A3A),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
   Widget _buildInstitutionModeCard() {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _firestore.collection('settings').doc('runtimeState').snapshots(),
@@ -2161,6 +2736,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   ),
                 ),
               ],
+              _buildPlannedExamSummary(),
             ],
           ),
         );
@@ -2231,19 +2807,19 @@ class _StatisticsPageState extends State<StatisticsPage> {
                             _operationMetricCard(
                               title: 'Çözümü Devam Eden',
                               value: '$inProgress',
-                              icon: Icons.psychology_rounded,
+                              icon: Icons.hourglass_bottom_rounded,
                               color: Colors.lightBlueAccent,
                             ),
                             _operationMetricCard(
                               title: 'Etütteki Öğrenci',
                               value: '$activeStudyStudents',
-                              icon: Icons.groups_rounded,
+                              icon: Icons.auto_stories_rounded,
                               color: Colors.greenAccent,
                             ),
                             _operationMetricCard(
                               title: 'Müsait Öğretmen',
                               value: '$availableTeachers',
-                              icon: Icons.record_voice_over_rounded,
+                              icon: Icons.how_to_reg_rounded,
                               color: Colors.purpleAccent,
                             ),
                           ],
@@ -2647,21 +3223,46 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                   return;
                                 }
 
-                                await _firestore
-                                    .collection('settings')
-                                    .doc('zumreSchedule')
-                                    .set({
-                                  'weeklySchedule':
-                                      _weeklyScheduleForFirestore(),
-                                  'updatedAt': FieldValue.serverTimestamp(),
-                                }, SetOptions(merge: true));
+                                final weeklySchedule =
+                                    _weeklyScheduleForFirestore();
+                                final callable = _functions
+                                    .httpsCallable('applyZumreScheduleChange');
+                                var response = await callable.call({
+                                  'weeklySchedule': weeklySchedule,
+                                });
+                                var data = Map<String, dynamic>.from(
+                                    response.data as Map);
+
+                                if (data['requiresConfirm'] == true) {
+                                  final conflicts =
+                                      _conflictsFromResponse(data);
+                                  final confirmed =
+                                      await _confirmAppointmentCancellations(
+                                    title: 'Planlı zümreler iptal edilecek',
+                                    count: data['conflictCount'] as int? ??
+                                        conflicts.length,
+                                    conflicts: conflicts,
+                                    reason:
+                                        'Program değişikliğiyle artık geçerli olmayan planlı zümreler iptal edilecek.',
+                                  );
+                                  if (!confirmed) return;
+
+                                  response = await callable.call({
+                                    'weeklySchedule': weeklySchedule,
+                                    'confirm': true,
+                                  });
+                                  data = Map<String, dynamic>.from(
+                                      response.data as Map);
+                                }
 
                                 if (!mounted) return;
                                 if (ctx.mounted) Navigator.pop(ctx);
 
                                 ScaffoldMessenger.of(this.context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Saatler güncellendi'),
+                                  SnackBar(
+                                    content: Text(
+                                      'Saatler güncellendi. ${data['cancelledCount'] ?? 0} planlı zümre iptal edildi.',
+                                    ),
                                   ),
                                 );
                               },
@@ -3649,7 +4250,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         strokeWidth: 2,
                         color: Colors.white,
                       ),
-                  )
+                    )
                   : const Icon(Icons.delete_sweep_rounded, size: 18),
               label: Text(
                 _isBulkDeleting ? 'Siliniyor...' : 'Seçilenleri Sil',
@@ -3816,382 +4417,395 @@ class _UserManagementPageState extends State<UserManagementPage> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            isEditing
-                                ? 'Kullanıcı Düzenle'
-                                : 'Yeni Kullanıcı Ekle',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                isEditing
+                                    ? 'Kullanıcı Düzenle'
+                                    : 'Yeni Kullanıcı Ekle',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Flexible(
+                          child: SingleChildScrollView(
+                            child: Form(
+                              key: formKey,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  TextFormField(
+                                    initialValue: username,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Kullanıcı Adı',
+                                      helperText:
+                                          'Girişte kullanılacak kullanıcı adıdır. E-posta otomatik oluşturulur.',
+                                      suffixText: '@bilimkalesi.com',
+                                    ),
+                                    onChanged: (val) {
+                                      username = val
+                                          .trim()
+                                          .replaceAll(' ', '')
+                                          .toLowerCase();
+                                      email = '$username$domain';
+                                    },
+                                    validator: (val) {
+                                      if (val == null || val.trim().isEmpty) {
+                                        return 'Kullanıcı adı zorunlu';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                  if (!isEditing) ...[
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      decoration: InputDecoration(
+                                        labelText: 'Şifre',
+                                        suffixIcon: IconButton(
+                                          tooltip: showPassword
+                                              ? 'Şifreyi gizle'
+                                              : 'Şifreyi göster',
+                                          onPressed: () {
+                                            setStateDialog(() {
+                                              showPassword = !showPassword;
+                                            });
+                                          },
+                                          icon: Icon(
+                                            showPassword
+                                                ? Icons.visibility_off_rounded
+                                                : Icons.visibility_rounded,
+                                          ),
+                                        ),
+                                      ),
+                                      obscureText: !showPassword,
+                                      onChanged: (val) => password = val,
+                                      validator: (val) =>
+                                          val == null || val.length < 6
+                                              ? 'Şifre en az 6 karakter'
+                                              : null,
+                                    ),
+                                  ],
+                                  if (isEditing) ...[
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      decoration: InputDecoration(
+                                        labelText: 'Yeni Şifre',
+                                        helperText:
+                                            'Boş bırakırsanız şifre değişmez',
+                                        suffixIcon: IconButton(
+                                          tooltip: showNewPassword
+                                              ? 'Şifreyi gizle'
+                                              : 'Şifreyi göster',
+                                          onPressed: () {
+                                            setStateDialog(() {
+                                              showNewPassword =
+                                                  !showNewPassword;
+                                            });
+                                          },
+                                          icon: Icon(
+                                            showNewPassword
+                                                ? Icons.visibility_off_rounded
+                                                : Icons.visibility_rounded,
+                                          ),
+                                        ),
+                                      ),
+                                      obscureText: !showNewPassword,
+                                      onChanged: (val) => newPassword = val,
+                                      validator: (val) {
+                                        if (val == null || val.isEmpty) {
+                                          return null;
+                                        }
+                                        if (val.length < 6) {
+                                          return 'Şifre en az 6 karakter olmalı';
+                                        }
+                                        return null;
+                                      },
+                                    ),
+                                  ],
+                                  const SizedBox(height: 8),
+                                  TextFormField(
+                                    initialValue: firstName,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Ad',
+                                      hintText: 'Örneğin: Mehmet Ali',
+                                    ),
+                                    textCapitalization:
+                                        TextCapitalization.words,
+                                    onChanged: (val) => firstName = val.trim(),
+                                    validator: (val) {
+                                      if (val == null || val.trim().isEmpty) {
+                                        return 'Ad zorunludur';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                  const SizedBox(height: 12),
+                                  TextFormField(
+                                    initialValue: surname,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Soyad',
+                                      hintText: 'Örneğin: Yılmaz',
+                                    ),
+                                    textCapitalization:
+                                        TextCapitalization.words,
+                                    onChanged: (val) => surname = val.trim(),
+                                    validator: (val) {
+                                      if (val == null || val.trim().isEmpty) {
+                                        return 'Soyad zorunludur';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                  const SizedBox(height: 8),
+                                  DropdownButtonFormField<String>(
+                                    initialValue: role,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Rol',
+                                    ),
+                                    items: _roles.map((roleValue) {
+                                      return DropdownMenuItem<String>(
+                                        value: roleValue,
+                                        child: Text(_roleLabel(roleValue)),
+                                      );
+                                    }).toList(),
+                                    onChanged: (value) {
+                                      if (value == null) return;
+
+                                      setStateDialog(() {
+                                        role = value;
+
+                                        if (role != 'teacher') {
+                                          selectedSubjects.clear();
+                                        }
+                                      });
+                                    },
+                                  ),
+                                  if (role == 'student') ...[
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      initialValue: className,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Sınıf'),
+                                      onChanged: (val) =>
+                                          className = val.trim(),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      initialValue: branch,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Şube'),
+                                      onChanged: (val) => branch = val.trim(),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      initialValue: department,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Alan / Bölüm'),
+                                      onChanged: (val) =>
+                                          department = val.trim(),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      initialValue: studentNo,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Öğrenci No'),
+                                      onChanged: (val) =>
+                                          studentNo = val.trim(),
+                                    ),
+                                  ],
+                                  if (role == 'teacher') ...[
+                                    const SizedBox(height: 12),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: Colors.grey),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'Verdiği Ders',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          RadioGroup<String>(
+                                            groupValue:
+                                                selectedSubjects.isNotEmpty
+                                                    ? selectedSubjects.first
+                                                    : null,
+                                            onChanged: (value) {
+                                              if (value == null) return;
+                                              setStateDialog(() {
+                                                selectedSubjects
+                                                  ..clear()
+                                                  ..add(value);
+                                              });
+                                            },
+                                            child: Column(
+                                              children: _allSubjects.map(
+                                                (final subject) {
+                                                  return RadioListTile<String>(
+                                                    contentPadding:
+                                                        EdgeInsets.zero,
+                                                    dense: true,
+                                                    value: subject,
+                                                    title: Text(subject),
+                                                  );
+                                                },
+                                              ).toList(),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                        IconButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(
-                            Icons.close_rounded,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Flexible(
-                      child: SingleChildScrollView(
-                        child: Form(
-                          key: formKey,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TextFormField(
-                                initialValue: username,
-                                decoration: const InputDecoration(
-                                  labelText: 'Kullanıcı Adı',
-                                  helperText:
-                                      'Girişte kullanılacak kullanıcı adıdır. E-posta otomatik oluşturulur.',
-                                  suffixText: '@bilimkalesi.com',
-                                ),
-                                onChanged: (val) {
-                                  username = val
-                                      .trim()
-                                      .replaceAll(' ', '')
-                                      .toLowerCase();
-                                  email = '$username$domain';
-                                },
-                                validator: (val) {
-                                  if (val == null || val.trim().isEmpty) {
-                                    return 'Kullanıcı adı zorunlu';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              if (!isEditing) ...[
-                                const SizedBox(height: 8),
-                                TextFormField(
-                                  decoration: InputDecoration(
-                                    labelText: 'Şifre',
-                                    suffixIcon: IconButton(
-                                      tooltip: showPassword
-                                          ? 'Şifreyi gizle'
-                                          : 'Şifreyi göster',
-                                      onPressed: () {
-                                        setStateDialog(() {
-                                          showPassword = !showPassword;
-                                        });
-                                      },
-                                      icon: Icon(
-                                        showPassword
-                                            ? Icons.visibility_off_rounded
-                                            : Icons.visibility_rounded,
-                                      ),
-                                    ),
+                        const SizedBox(height: 18),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Colors.white38),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
                                   ),
-                                  obscureText: !showPassword,
-                                  onChanged: (val) => password = val,
-                                  validator: (val) =>
-                                      val == null || val.length < 6
-                                          ? 'Şifre en az 6 karakter'
-                                          : null,
                                 ),
-                              ],
-                              if (isEditing) ...[
-                                const SizedBox(height: 8),
-                                TextFormField(
-                                  decoration: InputDecoration(
-                                    labelText: 'Yeni Şifre',
-                                    helperText:
-                                        'Boş bırakırsanız şifre değişmez',
-                                    suffixIcon: IconButton(
-                                      tooltip: showNewPassword
-                                          ? 'Şifreyi gizle'
-                                          : 'Şifreyi göster',
-                                      onPressed: () {
-                                        setStateDialog(() {
-                                          showNewPassword = !showNewPassword;
-                                        });
-                                      },
-                                      icon: Icon(
-                                        showNewPassword
-                                            ? Icons.visibility_off_rounded
-                                            : Icons.visibility_rounded,
-                                      ),
-                                    ),
+                                child: const Text('İptal'),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
                                   ),
-                                  obscureText: !showNewPassword,
-                                  onChanged: (val) => newPassword = val,
-                                  validator: (val) {
-                                    if (val == null || val.isEmpty) {
-                                      return null;
-                                    }
-                                    if (val.length < 6) {
-                                      return 'Şifre en az 6 karakter olmalı';
-                                    }
-                                    return null;
-                                  },
                                 ),
-                              ],
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                initialValue: firstName,
-                                decoration: const InputDecoration(
-                                  labelText: 'Ad',
-                                  hintText: 'Örneğin: Mehmet Ali',
-                                ),
-                                textCapitalization: TextCapitalization.words,
-                                onChanged: (val) => firstName = val.trim(),
-                                validator: (val) {
-                                  if (val == null || val.trim().isEmpty) {
-                                    return 'Ad zorunludur';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              TextFormField(
-                                initialValue: surname,
-                                decoration: const InputDecoration(
-                                  labelText: 'Soyad',
-                                  hintText: 'Örneğin: Yılmaz',
-                                ),
-                                textCapitalization: TextCapitalization.words,
-                                onChanged: (val) => surname = val.trim(),
-                                validator: (val) {
-                                  if (val == null || val.trim().isEmpty) {
-                                    return 'Soyad zorunludur';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                              DropdownButtonFormField<String>(
-                                initialValue: role,
-                                decoration: const InputDecoration(
-                                  labelText: 'Rol',
-                                ),
-                                items: _roles.map((roleValue) {
-                                  return DropdownMenuItem<String>(
-                                    value: roleValue,
-                                    child: Text(_roleLabel(roleValue)),
-                                  );
-                                }).toList(),
-                                onChanged: (value) {
-                                  if (value == null) return;
+                                onPressed: () async {
+                                  if (!formKey.currentState!.validate()) return;
 
                                   setStateDialog(() {
-                                    role = value;
-
-                                    if (role != 'teacher') {
-                                      selectedSubjects.clear();
-                                    }
+                                    isUserDialogSaving = true;
                                   });
-                                },
-                              ),
-                              if (role == 'student') ...[
-                                const SizedBox(height: 8),
-                                TextFormField(
-                                  initialValue: className,
-                                  decoration:
-                                      const InputDecoration(labelText: 'Sınıf'),
-                                  onChanged: (val) => className = val.trim(),
-                                ),
-                                const SizedBox(height: 8),
-                                TextFormField(
-                                  initialValue: branch,
-                                  decoration:
-                                      const InputDecoration(labelText: 'Şube'),
-                                  onChanged: (val) => branch = val.trim(),
-                                ),
-                                const SizedBox(height: 8),
-                                TextFormField(
-                                  initialValue: department,
-                                  decoration: const InputDecoration(
-                                      labelText: 'Alan / Bölüm'),
-                                  onChanged: (val) => department = val.trim(),
-                                ),
-                                const SizedBox(height: 8),
-                                TextFormField(
-                                  initialValue: studentNo,
-                                  decoration: const InputDecoration(
-                                      labelText: 'Öğrenci No'),
-                                  onChanged: (val) => studentNo = val.trim(),
-                                ),
-                              ],
-                              if (role == 'teacher') ...[
-                                const SizedBox(height: 12),
-                                Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.grey),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'Verdiği Ders',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
+                                  try {
+                                    final cleanFirstName = firstName
+                                        .replaceAll(RegExp(r'\s+'), ' ')
+                                        .trim();
+
+                                    final cleanSurname = surname
+                                        .replaceAll(RegExp(r'\s+'), ' ')
+                                        .trim();
+
+                                    final fullName =
+                                        '$cleanFirstName $cleanSurname'
+                                            .replaceAll(RegExp(r'\s+'), ' ')
+                                            .trim();
+
+                                    if (isEditing) {
+                                      await _updateUser(
+                                        editingUid,
+                                        email,
+                                        cleanFirstName,
+                                        cleanSurname,
+                                        fullName,
+                                        role,
+                                        selectedSubjects,
+                                        username,
+                                        className,
+                                        branch,
+                                        department,
+                                        studentNo,
+                                      );
+
+                                      if (newPassword.trim().isNotEmpty) {
+                                        await _updateUserPassword(
+                                          uid: editingUid,
+                                          password: newPassword.trim(),
+                                        );
+                                      }
+                                    } else {
+                                      await _createUser(
+                                        email,
+                                        password,
+                                        cleanFirstName,
+                                        cleanSurname,
+                                        fullName,
+                                        role,
+                                        selectedSubjects,
+                                        username,
+                                        className,
+                                        branch,
+                                        department,
+                                        studentNo,
+                                      );
+                                    }
+                                    if (ctx.mounted) Navigator.pop(ctx);
+
+                                    if (!mounted) return;
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          isEditing
+                                              ? 'Kullanıcı güncellendi'
+                                              : 'Kullanıcı oluşturuldu',
                                         ),
                                       ),
-                                      const SizedBox(height: 8),
-                                      RadioGroup<String>(
-                                        groupValue: selectedSubjects.isNotEmpty
-                                            ? selectedSubjects.first
-                                            : null,
-                                        onChanged: (value) {
-                                          if (value == null) return;
-                                          setStateDialog(() {
-                                            selectedSubjects
-                                              ..clear()
-                                              ..add(value);
-                                          });
-                                        },
-                                        child: Column(
-                                          children: _allSubjects.map(
-                                            (final subject) {
-                                              return RadioListTile<String>(
-                                                contentPadding: EdgeInsets.zero,
-                                                dense: true,
-                                                value: subject,
-                                                title: Text(subject),
-                                              );
-                                            },
-                                          ).toList(),
+                                    );
+                                  } catch (e) {
+                                    if (ctx.mounted) {
+                                      setStateDialog(() {
+                                        isUserDialogSaving = false;
+                                      });
+                                    }
+                                    if (!mounted) return;
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Hata: ${_adminFunctionErrorMessage(e)}',
                                         ),
                                       ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              side: const BorderSide(color: Colors.white38),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                            ),
-                            child: const Text('İptal'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                            ),
-                            onPressed: () async {
-                              if (!formKey.currentState!.validate()) return;
-
-                              setStateDialog(() {
-                                isUserDialogSaving = true;
-                              });
-                              try {
-                                final cleanFirstName = firstName
-                                    .replaceAll(RegExp(r'\s+'), ' ')
-                                    .trim();
-
-                                final cleanSurname = surname
-                                    .replaceAll(RegExp(r'\s+'), ' ')
-                                    .trim();
-
-                                final fullName = '$cleanFirstName $cleanSurname'
-                                    .replaceAll(RegExp(r'\s+'), ' ')
-                                    .trim();
-
-                                if (isEditing) {
-                                  await _updateUser(
-                                    editingUid,
-                                    email,
-                                    cleanFirstName,
-                                    cleanSurname,
-                                    fullName,
-                                    role,
-                                    selectedSubjects,
-                                    username,
-                                    className,
-                                    branch,
-                                    department,
-                                    studentNo,
-                                  );
-
-                                  if (newPassword.trim().isNotEmpty) {
-                                    await _updateUserPassword(
-                                      uid: editingUid,
-                                      password: newPassword.trim(),
                                     );
                                   }
-                                } else {
-                                  await _createUser(
-                                    email,
-                                    password,
-                                    cleanFirstName,
-                                    cleanSurname,
-                                    fullName,
-                                    role,
-                                    selectedSubjects,
-                                    username,
-                                    className,
-                                    branch,
-                                    department,
-                                    studentNo,
-                                  );
-                                }
-                                if (ctx.mounted) Navigator.pop(ctx);
-
-                                if (!mounted) return;
-                                ScaffoldMessenger.of(this.context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      isEditing
-                                          ? 'Kullanıcı güncellendi'
-                                          : 'Kullanıcı oluşturuldu',
-                                    ),
-                                  ),
-                                );
-                              } catch (e) {
-                                if (ctx.mounted) {
-                                  setStateDialog(() {
-                                    isUserDialogSaving = false;
-                                  });
-                                }
-                                if (!mounted) return;
-                                ScaffoldMessenger.of(this.context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Hata: ${_adminFunctionErrorMessage(e)}',
-                                    ),
-                                  ),
-                                );
-                              }
-                            },
-                            child: Text(isEditing ? 'Güncelle' : 'Oluştur'),
-                          ),
+                                },
+                                child: Text(isEditing ? 'Güncelle' : 'Oluştur'),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
                       ],
                     ),
                   ),
@@ -4199,8 +4813,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     Positioned.fill(
                       child: Container(
                         decoration: BoxDecoration(
-                          color: const Color(0xFF071A3A)
-                              .withValues(alpha: 0.72),
+                          color:
+                              const Color(0xFF071A3A).withValues(alpha: 0.72),
                           borderRadius: BorderRadius.circular(24),
                         ),
                         child: const Center(
@@ -4325,9 +4939,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
   Future<void> _bulkDeleteUsers(
     List<QueryDocumentSnapshot<Object?>> visibleUsers,
   ) async {
-    final visibleSelectedUsers = visibleUsers
-        .where((doc) => _selectedUserIds.contains(doc.id))
-        .toList();
+    final visibleSelectedUsers =
+        visibleUsers.where((doc) => _selectedUserIds.contains(doc.id)).toList();
 
     if (visibleSelectedUsers.isEmpty) return;
 
@@ -4353,15 +4966,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
     try {
       final callable = _functions.httpsCallable('adminBulkDeleteUsers');
 
-      for (
-        var start = 0;
-        start < selectedUids.length;
-        start += _bulkDeleteClientBatchSize
-      ) {
-        final batchUids = selectedUids
-            .skip(start)
-            .take(_bulkDeleteClientBatchSize)
-            .toList();
+      for (var start = 0;
+          start < selectedUids.length;
+          start += _bulkDeleteClientBatchSize) {
+        final batchUids =
+            selectedUids.skip(start).take(_bulkDeleteClientBatchSize).toList();
 
         try {
           final response = await callable.call({
@@ -4601,10 +5210,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
 
   Future<void> _showBulkDeleteResultDialog(Map<String, dynamic> data) {
     final results = _bulkResultItems(data);
-    final detailItems = results
-        .where((item) => item['status'] != 'deleted')
-        .take(12)
-        .toList();
+    final detailItems =
+        results.where((item) => item['status'] != 'deleted').take(12).toList();
 
     return showDialog<void>(
       context: context,
@@ -4818,7 +5425,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 decoration: BoxDecoration(
                   color: Colors.redAccent.withValues(alpha: 0.16),
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.redAccent.withValues(alpha: 0.35)),
+                  border: Border.all(
+                      color: Colors.redAccent.withValues(alpha: 0.35)),
                 ),
                 child: const Icon(
                   Icons.delete_outline_rounded,

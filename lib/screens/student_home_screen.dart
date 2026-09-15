@@ -18,6 +18,50 @@ class _TeacherChoice {
   final List<String> subjects;
 }
 
+class _SubjectOption {
+  const _SubjectOption(this.name, this.icon, this.color);
+
+  final String name;
+  final IconData icon;
+  final Color color;
+}
+
+class _AppointmentSlot {
+  const _AppointmentSlot({
+    required this.start,
+    required this.end,
+    required this.scheduledStart,
+    required this.scheduledEnd,
+  });
+
+  final String start;
+  final String end;
+  final String scheduledStart;
+  final String scheduledEnd;
+}
+
+class _AppointmentTeacherOption {
+  const _AppointmentTeacherOption({
+    required this.id,
+    required this.name,
+    required this.slots,
+  });
+
+  final String id;
+  final String name;
+  final List<_AppointmentSlot> slots;
+}
+
+class _AppointmentAvailabilityResult {
+  const _AppointmentAvailabilityResult({
+    required this.teachers,
+    this.message,
+  });
+
+  final List<_AppointmentTeacherOption> teachers;
+  final String? message;
+}
+
 class StudentHomeScreen extends StatefulWidget {
   const StudentHomeScreen({super.key});
 
@@ -26,6 +70,22 @@ class StudentHomeScreen extends StatefulWidget {
 }
 
 class _StudentHomeScreenState extends State<StudentHomeScreen> {
+  static const List<_SubjectOption> _subjectOptions = [
+    _SubjectOption(
+      'MATEMATİK',
+      Icons.calculate,
+      Color.fromARGB(162, 235, 39, 147),
+    ),
+    _SubjectOption('FİZİK', Icons.biotech, Color(0xFF0099FF)),
+    _SubjectOption('KİMYA', Icons.science, Color(0xFFFF8A00)),
+    _SubjectOption('BİYOLOJİ', Icons.eco, Color(0xFF00C878)),
+    _SubjectOption('TÜRKÇE', Icons.menu_book, Color(0xFFE91E63)),
+    _SubjectOption('TARİH', Icons.history_edu, Color(0xFFFFC107)),
+    _SubjectOption('COĞRAFYA', Icons.public, Color(0xFF00BCD4)),
+    _SubjectOption(
+        'GEOMETRİ', Icons.square_foot, Color.fromARGB(255, 139, 176, 39)),
+  ];
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseFunctions _functions =
@@ -50,6 +110,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String _zumreSlotText = '';
   String _nextZumreText = '';
   int? _zumreRemainingMinutes;
+  bool _didShowVerifiedNoShowWarning = false;
+  static const int _appointmentPlanningDayCount = 7;
+  static const int _appointmentPlanningMaxOffsetDays = 7;
 
   int _estimatedMinutesForQuestionCount(int count) {
     switch (count) {
@@ -131,13 +194,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }
 
     final seen = <String>{};
-    return subjects
-        .map((item) => item.trim())
-        .where((item) {
-          if (item.isEmpty) return false;
-          return seen.add(_normalizeSubjectText(item));
-        })
-        .toList();
+    return subjects.map((item) => item.trim()).where((item) {
+      if (item.isEmpty) return false;
+      return seen.add(_normalizeSubjectText(item));
+    }).toList();
   }
 
   bool _teacherMatchesSelectedSubject(Map<String, dynamic> data) {
@@ -178,6 +238,281 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       ..sort((a, b) => a.name.compareTo(b.name));
 
     return teachers;
+  }
+
+  DateTime _istanbulNow() => DateTime.now().toUtc().add(
+        const Duration(hours: 3),
+      );
+
+  String _dateKey(DateTime date) {
+    final year = date.year.toString().padLeft(4, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+
+  bool _hasPlanningTimeRemainingToday(int questionCount) {
+    if (_isInstitutionBlockingZumre || _cachedZumreSlots.isEmpty) {
+      return false;
+    }
+
+    final now = _istanbulNow();
+    final nowMinutes = now.hour * 60 + now.minute;
+    final duration = _estimatedMinutesForQuestionCount(questionCount);
+
+    for (final slot in _cachedZumreSlots) {
+      final startMin = _timeToMinutes('${slot['start']}');
+      final endMin = _timeToMinutes('${slot['end']}');
+      if (endMin <= startMin) continue;
+
+      final nextStart =
+          nowMinutes < startMin ? startMin : (((nowMinutes ~/ 5) + 1) * 5);
+
+      if (nextStart + duration <= endMin) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  List<String> _planningDateKeys({
+    int questionCount = 1,
+  }) {
+    final today = _istanbulNow();
+    final startOffset = _hasPlanningTimeRemainingToday(questionCount) ? 0 : 1;
+
+    return List.generate(_appointmentPlanningDayCount, (index) {
+      final dayOffset = startOffset + index;
+      return _dateKey(
+        DateTime(today.year, today.month, today.day + dayOffset),
+      );
+    });
+  }
+
+  List<String> _upcomingAppointmentDateKeys() {
+    final today = _istanbulNow();
+
+    return List.generate(_appointmentPlanningMaxOffsetDays + 1, (index) {
+      return _dateKey(DateTime(today.year, today.month, today.day + index));
+    });
+  }
+
+  DateTime _parseDateKey(String dateKey) {
+    final parts = dateKey.split('-');
+    if (parts.length != 3) return _istanbulNow();
+
+    final year = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final day = int.tryParse(parts[2]);
+    if (year == null || month == null || day == null) {
+      return _istanbulNow();
+    }
+
+    return DateTime(year, month, day);
+  }
+
+  DateTime _appointmentDateTimeInIstanbul(Object? value) {
+    if (value is Timestamp) {
+      return value.toDate().toUtc().add(const Duration(hours: 3));
+    }
+
+    if (value is String) {
+      final parsed = DateTime.tryParse(value);
+      if (parsed != null) {
+        return parsed.toUtc().add(const Duration(hours: 3));
+      }
+    }
+
+    return _istanbulNow();
+  }
+
+  String _formatPlanningDay(String dateKey) {
+    const weekdays = [
+      'Pzt',
+      'Sal',
+      'Çar',
+      'Per',
+      'Cum',
+      'Cmt',
+      'Paz',
+    ];
+    const months = [
+      'Oca',
+      'Şub',
+      'Mar',
+      'Nis',
+      'May',
+      'Haz',
+      'Tem',
+      'Ağu',
+      'Eyl',
+      'Eki',
+      'Kas',
+      'Ara',
+    ];
+
+    final date = _parseDateKey(dateKey);
+    final todayKey = _dateKey(_istanbulNow());
+    if (dateKey == todayKey) return 'Bugün';
+
+    return '${weekdays[date.weekday - 1]} ${date.day} ${months[date.month - 1]}';
+  }
+
+  String _formatAppointmentDate(Object? value) {
+    const months = [
+      'Ocak',
+      'Şubat',
+      'Mart',
+      'Nisan',
+      'Mayıs',
+      'Haziran',
+      'Temmuz',
+      'Ağustos',
+      'Eylül',
+      'Ekim',
+      'Kasım',
+      'Aralık',
+    ];
+    final date = _appointmentDateTimeInIstanbul(value);
+    return '${date.day} ${months[date.month - 1]}';
+  }
+
+  String _formatAppointmentClock(Object? value) {
+    final date = _appointmentDateTimeInIstanbul(value);
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  _AppointmentSlot _appointmentSlotFromMap(Map<String, dynamic> data) {
+    return _AppointmentSlot(
+      start: data['start']?.toString() ?? '',
+      end: data['end']?.toString() ?? '',
+      scheduledStart: data['scheduledStart']?.toString() ?? '',
+      scheduledEnd: data['scheduledEnd']?.toString() ?? '',
+    );
+  }
+
+  Future<_AppointmentAvailabilityResult> _loadAppointmentAvailability({
+    required String subject,
+    required int questionCount,
+    required String dateKey,
+  }) async {
+    final callable = _functions.httpsCallable('getAppointmentAvailability');
+    final response = await callable.call<Map<String, dynamic>>({
+      'subject': subject,
+      'questionCount': questionCount,
+      'dateKey': dateKey,
+    });
+    final data = response.data;
+    final rawTeachers = data['teachers'];
+    final teachers = <_AppointmentTeacherOption>[];
+
+    if (rawTeachers is List) {
+      for (final rawTeacher in rawTeachers) {
+        if (rawTeacher is! Map) continue;
+
+        final teacherMap = Map<String, dynamic>.from(rawTeacher);
+        final rawSlots = teacherMap['slots'];
+        final slots = <_AppointmentSlot>[];
+
+        if (rawSlots is List) {
+          for (final rawSlot in rawSlots) {
+            if (rawSlot is Map) {
+              slots.add(_appointmentSlotFromMap(
+                Map<String, dynamic>.from(rawSlot),
+              ));
+            }
+          }
+        }
+
+        if (slots.isEmpty) continue;
+
+        teachers.add(
+          _AppointmentTeacherOption(
+            id: teacherMap['teacherId']?.toString() ?? '',
+            name: teacherMap['teacherName']?.toString() ?? 'Öğretmen',
+            slots: slots,
+          ),
+        );
+      }
+    }
+
+    teachers.sort((a, b) => a.name.compareTo(b.name));
+    return _AppointmentAvailabilityResult(
+      teachers: teachers.where((teacher) => teacher.id.isNotEmpty).toList(),
+      message: data['message']?.toString(),
+    );
+  }
+
+  String _appointmentErrorMessage(
+    FirebaseFunctionsException error,
+    String fallback,
+  ) {
+    final message = error.message?.trim();
+    if (message == null || message.isEmpty) return fallback;
+
+    final technicalMessages = {
+      'internal',
+      'unknown',
+      'deadline-exceeded',
+      'unavailable',
+    };
+
+    if (technicalMessages.contains(message.toLowerCase())) {
+      return fallback;
+    }
+
+    return message;
+  }
+
+  String _newAppointmentIdempotencyKey(String userId) {
+    return '$userId-${DateTime.now().microsecondsSinceEpoch}';
+  }
+
+  bool _appointmentIsFuture(Object? value) {
+    if (value is Timestamp) {
+      return value.toDate().isAfter(DateTime.now());
+    }
+
+    if (value is String) {
+      final parsed = DateTime.tryParse(value);
+      return parsed != null && parsed.isAfter(DateTime.now());
+    }
+
+    return false;
+  }
+
+  Future<void> _cancelAppointment(String appointmentId) async {
+    final confirm = await _studentConfirmDialog(
+      title: 'Planlı zümre iptal edilsin mi?',
+      message: 'Planlı zümrenizi iptal etmek istediğinize emin misiniz?',
+      confirmText: 'İptal Et',
+      icon: Icons.event_busy_rounded,
+      color: Colors.orangeAccent,
+    );
+
+    if (!confirm || !mounted) return;
+
+    try {
+      final callable = _functions.httpsCallable('cancelAppointment');
+      await callable.call<Map<String, dynamic>>({
+        'appointmentId': appointmentId,
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Planlı zümre iptal edildi.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Planlı zümre şu anda iptal edilemedi.'),
+        ),
+      );
+    }
   }
 
   int _cooldownUntil = 0;
@@ -448,7 +783,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       final runtimeState = runtimeData != null
           ? _runtimeZumreState(runtimeData)
           : _runtimeZumreState(
-              (await _firestore.collection('settings').doc('runtimeState').get())
+              (await _firestore
+                      .collection('settings')
+                      .doc('runtimeState')
+                      .get())
                   .data(),
             );
 
@@ -687,92 +1025,93 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         .where('status', whereIn: ['waiting', 'in_progress'])
         .snapshots()
         .listen((snapshot) async {
-      final docs = snapshot.docs.toList();
-      final currentQueueDocs = docs.where((doc) => doc.id == queueId);
+          final docs = snapshot.docs.toList();
+          final currentQueueDocs = docs.where((doc) => doc.id == queueId);
 
-      if (currentQueueDocs.isEmpty) {
-        await _queueSubscription?.cancel();
-        _queueSubscription = null;
+          if (currentQueueDocs.isEmpty) {
+            await _queueSubscription?.cancel();
+            _queueSubscription = null;
 
-        if (!mounted) return;
+            if (!mounted) return;
 
-        setState(() {
-          _isInQueue = false;
-          _currentQueueId = null;
-          _currentTeacherName = null;
-          _queuePosition = 0;
-          _estimatedWaitMinutes = null;
+            setState(() {
+              _isInQueue = false;
+              _currentQueueId = null;
+              _currentTeacherName = null;
+              _queuePosition = 0;
+              _estimatedWaitMinutes = null;
+            });
+            return;
+          }
+
+          final currentQueueDoc = currentQueueDocs.first;
+          final data = currentQueueDoc.data();
+          final status = data['status'];
+          final teacherNameFromQueue = data['teacherName']?.toString();
+
+          if (teacherNameFromQueue != null && teacherNameFromQueue.isNotEmpty) {
+            _currentTeacherName = teacherNameFromQueue;
+          } else {
+            await _getCurrentTeacherName(teacherId);
+          }
+
+          if (!mounted) return;
+
+          if (status == 'in_progress') {
+            setState(() {
+              _isInQueue = true;
+              _currentQueueId = queueId;
+              _queuePosition = 0;
+              _estimatedWaitMinutes = null;
+            });
+            return;
+          }
+
+          if (status != 'waiting') {
+            setState(() {
+              _isInQueue = false;
+              _currentQueueId = null;
+              _currentTeacherName = null;
+              _queuePosition = 0;
+              _estimatedWaitMinutes = null;
+            });
+            return;
+          }
+
+          QueryDocumentSnapshot<Map<String, dynamic>>? activeDoc;
+
+          for (final doc in docs) {
+            if (doc.data()['status'] == 'in_progress') {
+              activeDoc = doc;
+              break;
+            }
+          }
+
+          final waitingDocs =
+              docs.where((doc) => doc.data()['status'] == 'waiting').toList();
+
+          waitingDocs.sort((a, b) => compareQueuePriority(a.data(), b.data()));
+
+          int position = 1;
+          var estimatedWaitMinutes = activeDoc == null
+              ? 0
+              : _activeQueueRemainingMinutes(activeDoc.data());
+
+          for (final doc in waitingDocs) {
+            if (doc.id == queueId) break;
+            final queueData = doc.data();
+            estimatedWaitMinutes += _queueEstimatedMinutes(queueData) +
+                _toInt(queueData['extraMinutes']);
+            position++;
+          }
+
+          setState(() {
+            _isInQueue = true;
+            _currentQueueId = queueId;
+            _queuePosition = position;
+            _estimatedWaitMinutes = estimatedWaitMinutes;
+          });
         });
-        return;
-      }
-
-      final currentQueueDoc = currentQueueDocs.first;
-      final data = currentQueueDoc.data();
-      final status = data['status'];
-      final teacherNameFromQueue = data['teacherName']?.toString();
-
-      if (teacherNameFromQueue != null && teacherNameFromQueue.isNotEmpty) {
-        _currentTeacherName = teacherNameFromQueue;
-      } else {
-        await _getCurrentTeacherName(teacherId);
-      }
-
-      if (!mounted) return;
-
-      if (status == 'in_progress') {
-        setState(() {
-          _isInQueue = true;
-          _currentQueueId = queueId;
-          _queuePosition = 0;
-          _estimatedWaitMinutes = null;
-        });
-        return;
-      }
-
-      if (status != 'waiting') {
-        setState(() {
-          _isInQueue = false;
-          _currentQueueId = null;
-          _currentTeacherName = null;
-          _queuePosition = 0;
-          _estimatedWaitMinutes = null;
-        });
-        return;
-      }
-
-      QueryDocumentSnapshot<Map<String, dynamic>>? activeDoc;
-
-      for (final doc in docs) {
-        if (doc.data()['status'] == 'in_progress') {
-          activeDoc = doc;
-          break;
-        }
-      }
-
-      final waitingDocs =
-          docs.where((doc) => doc.data()['status'] == 'waiting').toList();
-
-      waitingDocs.sort((a, b) => compareQueuePriority(a.data(), b.data()));
-
-      int position = 1;
-      var estimatedWaitMinutes =
-          activeDoc == null ? 0 : _activeQueueRemainingMinutes(activeDoc.data());
-
-      for (final doc in waitingDocs) {
-        if (doc.id == queueId) break;
-        final queueData = doc.data();
-        estimatedWaitMinutes +=
-            _queueEstimatedMinutes(queueData) + _toInt(queueData['extraMinutes']);
-        position++;
-      }
-
-      setState(() {
-        _isInQueue = true;
-        _currentQueueId = queueId;
-        _queuePosition = position;
-        _estimatedWaitMinutes = estimatedWaitMinutes;
-      });
-    });
   }
 
   Future<void> _joinQueue() async {
@@ -920,7 +1259,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       decoration: BoxDecoration(
                         color: color.withValues(alpha: 0.16),
                         shape: BoxShape.circle,
-                        border: Border.all(color: color.withValues(alpha: 0.35)),
+                        border:
+                            Border.all(color: color.withValues(alpha: 0.35)),
                       ),
                       child: Icon(icon, color: color, size: 30),
                     ),
@@ -1136,16 +1476,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           crossAxisSpacing: crossAxisSpacing,
           mainAxisSpacing: mainAxisSpacing,
           childAspectRatio: aspectRatio,
-          children: [
-            _subjectCard('MATEMATİK', Icons.calculate, const Color.fromARGB(162, 235, 39, 147)),
-            _subjectCard('FİZİK', Icons.biotech, const Color(0xFF0099FF)),
-            _subjectCard('KİMYA', Icons.science, const Color(0xFFFF8A00)),
-            _subjectCard('BİYOLOJİ', Icons.eco, const Color(0xFF00C878)),
-            _subjectCard('TÜRKÇE', Icons.menu_book, const Color(0xFFE91E63)),
-            _subjectCard('TARİH', Icons.history_edu, const Color(0xFFFFC107)),
-            _subjectCard('COĞRAFYA', Icons.public, const Color(0xFF00BCD4)),
-            _subjectCard('GEOMETRİ', Icons.square_foot, const Color.fromARGB(255, 139, 176, 39)),
-          ],
+          children: _subjectOptions
+              .map((subject) => _subjectCard(
+                    subject.name,
+                    subject.icon,
+                    subject.color,
+                  ))
+              .toList(),
         );
       },
     );
@@ -1455,8 +1792,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                     width: double.infinity,
                                     padding: const EdgeInsets.all(14),
                                     decoration: BoxDecoration(
-                                      color: Colors.white
-                                          .withValues(alpha: 0.08),
+                                      color:
+                                          Colors.white.withValues(alpha: 0.08),
                                       borderRadius: BorderRadius.circular(20),
                                       border: Border.all(
                                         color: Colors.white
@@ -1476,8 +1813,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                     (teacher) => Padding(
                                       padding: const EdgeInsets.only(bottom: 8),
                                       child: _teacherOptionTile(
-                                        selected:
-                                            dialogTeacherId == teacher.id,
+                                        selected: dialogTeacherId == teacher.id,
                                         icon: Icons.person_rounded,
                                         title: teacher.name,
                                         subtitle: teacher.subjects.isEmpty
@@ -1554,6 +1890,599 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           },
         );
       },
+    );
+  }
+
+  Future<void> _showPlanAppointmentDialog() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    var dateKeys = _planningDateKeys(questionCount: _selectedQuestionCount);
+    String selectedDateKey = dateKeys.first;
+    String selectedSubject = _selectedSubject ?? _subjectOptions.first.name;
+    int selectedQuestionCount = _selectedQuestionCount;
+    List<_AppointmentTeacherOption> teachers = [];
+    String? availabilityMessage;
+    String? availabilityError;
+    String? selectedTeacherId;
+    String? selectedTeacherName;
+    _AppointmentSlot? selectedSlot;
+    bool isLoadingAvailability = false;
+    bool isCreating = false;
+    bool didRequestInitialAvailability = false;
+    String? bookingIdempotencyKey;
+    int requestVersion = 0;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> refreshAvailability() async {
+              if (!dateKeys.contains(selectedDateKey)) {
+                selectedDateKey = dateKeys.first;
+              }
+
+              final version = ++requestVersion;
+              setDialogState(() {
+                isLoadingAvailability = true;
+                availabilityError = null;
+                availabilityMessage = null;
+                selectedTeacherId = null;
+                selectedTeacherName = null;
+                selectedSlot = null;
+              });
+
+              try {
+                final result = await _loadAppointmentAvailability(
+                  subject: selectedSubject,
+                  questionCount: selectedQuestionCount,
+                  dateKey: selectedDateKey,
+                );
+
+                if (!context.mounted || version != requestVersion) return;
+
+                setDialogState(() {
+                  teachers = result.teachers;
+                  availabilityMessage = result.message;
+                  isLoadingAvailability = false;
+                });
+              } on FirebaseFunctionsException catch (e) {
+                if (!context.mounted || version != requestVersion) return;
+
+                setDialogState(() {
+                  teachers = [];
+                  availabilityError = _appointmentErrorMessage(
+                    e,
+                    'Müsait saatler şu anda yüklenemedi. Lütfen tekrar deneyin.',
+                  );
+                  isLoadingAvailability = false;
+                });
+              } catch (e) {
+                if (!context.mounted || version != requestVersion) return;
+
+                setDialogState(() {
+                  teachers = [];
+                  availabilityError =
+                      'Müsait saatler şu anda yüklenemedi. Lütfen tekrar deneyin.';
+                  isLoadingAvailability = false;
+                });
+              }
+            }
+
+            Future<void> createAppointment() async {
+              final teacherId = selectedTeacherId;
+              final slot = selectedSlot;
+              if (teacherId == null || slot == null || isCreating) return;
+
+              setDialogState(() {
+                isCreating = true;
+              });
+
+              try {
+                final callable = _functions.httpsCallable('createAppointment');
+                bookingIdempotencyKey ??=
+                    _newAppointmentIdempotencyKey(user.uid);
+                await callable.call<Map<String, dynamic>>({
+                  'subject': selectedSubject,
+                  'questionCount': selectedQuestionCount,
+                  'teacherId': teacherId,
+                  'scheduledStart': slot.scheduledStart,
+                  'idempotencyKey': bookingIdempotencyKey,
+                });
+
+                if (!context.mounted) return;
+                Navigator.pop(ctx);
+
+                if (!mounted) return;
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Planlı zümre oluşturuldu: $selectedSubject • '
+                      '${selectedTeacherName ?? 'Öğretmen'} • ${slot.start}',
+                    ),
+                  ),
+                );
+              } on FirebaseFunctionsException catch (e) {
+                if (!context.mounted) return;
+                setDialogState(() {
+                  isCreating = false;
+                  availabilityError = _appointmentErrorMessage(
+                    e,
+                    'Planlı zümre şu anda oluşturulamadı. Lütfen tekrar deneyin.',
+                  );
+                  selectedSlot = null;
+                });
+                if (e.code == 'already-exists' ||
+                    e.code == 'resource-exhausted' ||
+                    e.code == 'failed-precondition') {
+                  await refreshAvailability();
+                }
+              } catch (e) {
+                if (!context.mounted) return;
+                setDialogState(() {
+                  isCreating = false;
+                  availabilityError =
+                      'Planlı zümre şu anda oluşturulamadı. Lütfen tekrar deneyin.';
+                  selectedSlot = null;
+                });
+              }
+            }
+
+            if (!didRequestInitialAvailability) {
+              didRequestInitialAvailability = true;
+              Future.microtask(refreshAvailability);
+            }
+
+            final canCreate = selectedTeacherId != null &&
+                selectedSlot != null &&
+                !isCreating;
+
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+              child: Container(
+                constraints:
+                    const BoxConstraints(maxWidth: 560, maxHeight: 720),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFF12103F),
+                      Color(0xFF261369),
+                      Color(0xFF071A3A),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: Colors.white24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.30),
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withValues(alpha: 0.16),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.event_available_rounded,
+                            color: Colors.amber,
+                            size: 26,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Zümre Planla',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Uygun öğretmen ve saat seçin.',
+                                style: TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed:
+                              isCreating ? null : () => Navigator.pop(ctx),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _planningSectionTitle('Gün'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: dateKeys.map((dateKey) {
+                                return _planningChoiceChip(
+                                  label: _formatPlanningDay(dateKey),
+                                  selected: selectedDateKey == dateKey,
+                                  enabled:
+                                      !isLoadingAvailability && !isCreating,
+                                  onTap: () {
+                                    if (selectedDateKey == dateKey) return;
+                                    selectedDateKey = dateKey;
+                                    bookingIdempotencyKey = null;
+                                    refreshAvailability();
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 14),
+                            _planningSectionTitle('Ders'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: _subjectOptions.map((subject) {
+                                return _planningChoiceChip(
+                                  label: subject.name,
+                                  selected: selectedSubject == subject.name,
+                                  enabled:
+                                      !isLoadingAvailability && !isCreating,
+                                  onTap: () {
+                                    if (selectedSubject == subject.name) {
+                                      return;
+                                    }
+                                    selectedSubject = subject.name;
+                                    bookingIdempotencyKey = null;
+                                    refreshAvailability();
+                                  },
+                                  color: subject.color,
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 14),
+                            _planningSectionTitle('Soru'),
+                            Row(
+                              children: [1, 2, 3, 4].map((questionCount) {
+                                return Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 7),
+                                    child: _planningChoiceChip(
+                                      label: questionCount == 4
+                                          ? '4+'
+                                          : '$questionCount',
+                                      selected: selectedQuestionCount ==
+                                          questionCount,
+                                      enabled:
+                                          !isLoadingAvailability && !isCreating,
+                                      centered: true,
+                                      onTap: () {
+                                        if (selectedQuestionCount ==
+                                            questionCount) {
+                                          return;
+                                        }
+                                        selectedQuestionCount = questionCount;
+                                        dateKeys = _planningDateKeys(
+                                          questionCount: selectedQuestionCount,
+                                        );
+                                        bookingIdempotencyKey = null;
+                                        refreshAvailability();
+                                      },
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Tahmini süre: ~${_estimatedMinutesForQuestionCount(selectedQuestionCount)} dk',
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            _planningSectionTitle('Öğretmen ve Saat'),
+                            if (isLoadingAvailability)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 26),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              )
+                            else if (availabilityError != null)
+                              _planningInfoBox(
+                                availabilityError!,
+                                color: Colors.orangeAccent,
+                              )
+                            else if (teachers.isEmpty)
+                              _planningInfoBox(
+                                availabilityMessage ??
+                                    'Bu seçim için uygun randevu saati yok.',
+                              )
+                            else
+                              ...teachers.map((teacher) {
+                                final teacherSelected =
+                                    selectedTeacherId == teacher.id;
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 9),
+                                  child: _planningTeacherTile(
+                                    teacher: teacher,
+                                    selected: teacherSelected,
+                                    selectedSlot:
+                                        teacherSelected ? selectedSlot : null,
+                                    onTeacherTap: () {
+                                      setDialogState(() {
+                                        selectedTeacherId = teacher.id;
+                                        selectedTeacherName = teacher.name;
+                                        selectedSlot = teacher.slots.first;
+                                        bookingIdempotencyKey = null;
+                                      });
+                                    },
+                                    onSlotTap: (slot) {
+                                      setDialogState(() {
+                                        selectedTeacherId = teacher.id;
+                                        selectedTeacherName = teacher.name;
+                                        selectedSlot = slot;
+                                        bookingIdempotencyKey = null;
+                                      });
+                                    },
+                                  ),
+                                );
+                              }),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton(
+                        onPressed: canCreate ? createAppointment : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF6C3DFF),
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor:
+                              Colors.white.withValues(alpha: 0.14),
+                          disabledForegroundColor: Colors.white54,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        child: isCreating
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                'Planlı Zümre Oluştur',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _planningSectionTitle(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Widget _planningChoiceChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    Color color = const Color(0xFF6C3DFF),
+    bool centered = false,
+    bool enabled = true,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: enabled ? onTap : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        constraints: const BoxConstraints(minHeight: 38),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          color: !enabled
+              ? Colors.white.withValues(alpha: 0.05)
+              : selected
+                  ? color.withValues(alpha: 0.75)
+                  : Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected
+                ? Colors.white.withValues(alpha: 0.55)
+                : Colors.white24,
+          ),
+        ),
+        child: Align(
+          alignment: centered ? Alignment.center : Alignment.centerLeft,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 13.5,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _planningInfoBox(String text, {Color color = Colors.white70}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 12.5,
+          height: 1.35,
+        ),
+      ),
+    );
+  }
+
+  Widget _planningTeacherTile({
+    required _AppointmentTeacherOption teacher,
+    required bool selected,
+    required _AppointmentSlot? selectedSlot,
+    required VoidCallback onTeacherTap,
+    required ValueChanged<_AppointmentSlot> onSlotTap,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: selected
+            ? Colors.greenAccent.withValues(alpha: 0.13)
+            : Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: selected
+              ? Colors.greenAccent.withValues(alpha: 0.55)
+              : Colors.white12,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: onTeacherTap,
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.greenAccent.withValues(alpha: 0.16),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.person_rounded,
+                    color: Colors.greenAccent,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        teacher.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${teacher.slots.length} uygun saat',
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: selected ? Colors.greenAccent : Colors.white38,
+                ),
+              ],
+            ),
+          ),
+          if (selected) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: teacher.slots.map((slot) {
+                return _planningChoiceChip(
+                  label: '${slot.start}-${slot.end}',
+                  selected: selectedSlot?.scheduledStart == slot.scheduledStart,
+                  onTap: () => onSlotTap(slot),
+                  color: Colors.greenAccent,
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -1753,6 +2682,408 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _verifiedNoShowWarningStream() {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) return null;
+
+    final historyStart = DateTime.now().subtract(const Duration(days: 14));
+    return _firestore
+        .collection('appointments')
+        .where('studentId', isEqualTo: userId)
+        .where('status', isEqualTo: 'no_show')
+        .where('noShowVerificationStatus', isEqualTo: 'verified')
+        .where(
+          'noShowVerifiedAt',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(historyStart),
+        )
+        .orderBy('noShowVerifiedAt', descending: true)
+        .snapshots();
+  }
+
+  bool _isVerifiedNoShowPopupEligible(Map<String, dynamic> data) {
+    final verifiedAt = data['noShowVerifiedAt'];
+    if (verifiedAt is! Timestamp) return false;
+
+    final age = DateTime.now().difference(verifiedAt.toDate());
+    return !age.isNegative && age <= const Duration(days: 7);
+  }
+
+  Future<void> _showVerifiedNoShowWarningDialog(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) async {
+    if (!mounted || docs.isEmpty) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF17123F),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          title: const Text(
+            'Planlı Zümre Katılım Uyarısı',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  docs.length == 1
+                      ? 'Planladığınız zümre saatinde öğretmeniniz sizin için zaman ayırmasına rağmen katılım sağlamadığınız tespit edildi. Planlı zümrelere zamanında katılmanız beklenmektedir. Tekrarlanan katılmama durumları rehberlik birimi ve veli ile paylaşılabilir.'
+                      : '${docs.length} planlı zümre katılım uyarınız bulunuyor. Planlı zümrelere zamanında katılmanız beklenmektedir. Tekrarlanan katılmama durumları rehberlik birimi ve veli ile paylaşılabilir.',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ...docs.take(5).map((doc) {
+                  final data = doc.data();
+                  final start = data['scheduledStart'];
+                  final teacher =
+                      data['teacherName']?.toString() ?? 'Öğretmen';
+                  final subject = data['subject']?.toString() ?? 'Ders';
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Text(
+                      '${_formatAppointmentDate(start)} '
+                      '${_formatAppointmentClock(start)} • $subject • $teacher',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6C3DFF),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Anladım'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showVerifiedNoShowHistoryDialog(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) async {
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF17123F),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Planlı Zümre Bildirimleri',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (docs.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 18),
+                    child: Text(
+                      'Son 14 gün içinde bildirim bulunmuyor.',
+                      style: TextStyle(color: Colors.white60),
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: docs.map((doc) {
+                          final data = doc.data();
+                          final start = data['scheduledStart'];
+                          final teacher =
+                              data['teacherName']?.toString() ?? 'Öğretmen';
+                          final subject = data['subject']?.toString() ?? 'Ders';
+
+                          return Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${_formatAppointmentDate(start)} '
+                                  '${_formatAppointmentClock(start)}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  '$subject • $teacher',
+                                  style: const TextStyle(
+                                    color: Colors.white60,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                const Text(
+                                  'Katılım sağlanmadı',
+                                  style: TextStyle(
+                                    color: Colors.orangeAccent,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildVerifiedNoShowBell() {
+    final stream = _verifiedNoShowWarningStream();
+    if (stream == null) return const SizedBox.shrink();
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final docs = snapshot.data?.docs ?? [];
+        final popupDocs = docs
+            .where((doc) => _isVerifiedNoShowPopupEligible(doc.data()))
+            .toList();
+
+        if (!_didShowVerifiedNoShowWarning && popupDocs.isNotEmpty) {
+          _didShowVerifiedNoShowWarning = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _showVerifiedNoShowWarningDialog(popupDocs);
+          });
+        }
+
+        final hasBadge = docs.isNotEmpty;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              tooltip: 'Planlı Zümre Bildirimleri',
+              onPressed: () => _showVerifiedNoShowHistoryDialog(docs),
+              icon: const Icon(
+                Icons.notifications_none_rounded,
+                color: Colors.white,
+              ),
+            ),
+            if (hasBadge)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: const BoxDecoration(
+                    color: Colors.orangeAccent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildUpcomingAppointmentsSection() {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) return const SizedBox.shrink();
+
+    final dateKeys = _upcomingAppointmentDateKeys();
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore
+          .collection('appointments')
+          .where('studentId', isEqualTo: userId)
+          .where('status', isEqualTo: 'scheduled')
+          .where('dateKey', whereIn: dateKeys)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError || !snapshot.hasData) {
+          return const SizedBox.shrink();
+        }
+
+        final appointments = snapshot.data!.docs.toList()
+          ..sort((a, b) {
+            final aStart = _appointmentDateTimeInIstanbul(
+              a.data()['scheduledStart'],
+            );
+            final bStart = _appointmentDateTimeInIstanbul(
+              b.data()['scheduledStart'],
+            );
+            return aStart.compareTo(bStart);
+          });
+
+        if (appointments.isEmpty) return const SizedBox.shrink();
+
+        final visibleAppointments = appointments.take(2).toList();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 7),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.event_available_rounded,
+                      color: Colors.amber.shade300,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Planlı Zümre',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                ...visibleAppointments.map((doc) {
+                  final data = doc.data();
+                  final subject = data['subject']?.toString() ?? 'Ders';
+                  final teacher = data['teacherName']?.toString() ?? 'Öğretmen';
+                  final start = data['scheduledStart'];
+                  final questionCount = _toInt(
+                    data['questionCount'],
+                    fallback: 1,
+                  );
+                  final questionLabel =
+                      questionCount == 4 ? '4+ soru' : '$questionCount soru';
+                  final canCancel = _appointmentIsFuture(start);
+
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '$subject • $teacher',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            '${_formatAppointmentDate(start)} '
+                            '${_formatAppointmentClock(start)} • $questionLabel',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                        if (canCancel) ...[
+                          const SizedBox(width: 4),
+                          SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: IconButton(
+                              tooltip: 'İptal Et',
+                              padding: EdgeInsets.zero,
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                size: 17,
+                                color: Colors.orangeAccent,
+                              ),
+                              onPressed: () => _cancelAppointment(doc.id),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildHomeView() {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1765,6 +3096,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               _buildWelcomeCard(),
               SizedBox(height: compact ? 8 : 10),
               _buildCooldownCard(),
+              _buildUpcomingAppointmentsSection(),
               SizedBox(height: compact ? 4 : 6),
               if (_isInStudySession) ...[
                 Container(
@@ -1799,7 +3131,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               SizedBox(height: compact ? 8 : 9),
               _buildTeacherSelector(),
               SizedBox(height: compact ? 8 : 10),
-              _buildJoinQueueButton(),
+              _buildQueueActions(),
             ],
           ),
         );
@@ -1879,6 +3211,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   ],
                 ),
               ),
+              _buildVerifiedNoShowBell(),
               IconButton(
                 tooltip: 'Çıkış Yap',
                 onPressed: () async {
@@ -1898,6 +3231,55 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQueueActions() {
+    return Row(
+      children: [
+        Expanded(
+          flex: 5,
+          child: _buildJoinQueueButton(),
+        ),
+        const SizedBox(width: 9),
+        Expanded(
+          flex: 4,
+          child: _buildPlanAppointmentButton(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPlanAppointmentButton() {
+    return SizedBox(
+      height: 54,
+      child: OutlinedButton.icon(
+        onPressed: _isRoutingQueue ? null : _showPlanAppointmentDialog,
+        icon: const Icon(Icons.event_available_rounded, size: 19),
+        label: const FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            'Zümre Planla',
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.amber.shade200,
+          disabledForegroundColor: Colors.white38,
+          side: BorderSide(
+            color: Colors.amber.shade200.withValues(alpha: 0.60),
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          backgroundColor: Colors.white.withValues(alpha: 0.06),
+        ),
       ),
     );
   }
@@ -1955,7 +3337,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-          ),
+        ),
       ),
     );
   }

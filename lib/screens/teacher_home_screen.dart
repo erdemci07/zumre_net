@@ -75,11 +75,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   bool _isTimeDialogOpen = false;
   int _elapsedSeconds = 0;
   final Set<String> _transferringQueueIds = {};
+  final Set<String> _appointmentActionIds = {};
   StreamSubscription<DocumentSnapshot>? _teacherSubscription;
   StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
   List<Map<String, dynamic>> _cachedZumreSlots = [];
   bool _cachedZumreIsWeekend = false;
   static const Duration _runtimeStateMaxAge = Duration(minutes: 3);
+  static const int _appointmentPlanningMaxOffsetDays = 7;
 
   @override
   void initState() {
@@ -165,10 +167,95 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 
   String _todayDateKey() {
-    final now = DateTime.now();
+    final now = _istanbulNow();
     return '${now.year.toString().padLeft(4, '0')}-'
         '${now.month.toString().padLeft(2, '0')}-'
         '${now.day.toString().padLeft(2, '0')}';
+  }
+
+  DateTime _istanbulNow() {
+    return DateTime.now().toUtc().add(const Duration(hours: 3));
+  }
+
+  String _dateKey(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+  }
+
+  List<String> _teacherAppointmentDateKeys() {
+    final today = _istanbulNow();
+    return List.generate(_appointmentPlanningMaxOffsetDays + 1, (index) {
+      return _dateKey(today.add(Duration(days: index)));
+    });
+  }
+
+  DateTime? _timestampDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    return null;
+  }
+
+  String _formatAppointmentDay(dynamic value) {
+    final date = _timestampDate(value);
+    if (date == null) return '-';
+
+    const months = [
+      'Oca',
+      'Şub',
+      'Mar',
+      'Nis',
+      'May',
+      'Haz',
+      'Tem',
+      'Ağu',
+      'Eyl',
+      'Eki',
+      'Kas',
+      'Ara',
+    ];
+
+    return '${date.day} ${months[date.month - 1]}';
+  }
+
+  String _formatAppointmentClock(dynamic startValue, [dynamic endValue]) {
+    String format(DateTime date) {
+      return '${date.hour.toString().padLeft(2, '0')}:'
+          '${date.minute.toString().padLeft(2, '0')}';
+    }
+
+    final start = _timestampDate(startValue);
+    if (start == null) return '-';
+
+    final end = _timestampDate(endValue);
+    if (end == null) return format(start);
+
+    return '${format(start)}-${format(end)}';
+  }
+
+  bool _isAppointmentDue(Map<String, dynamic> data) {
+    final start = _timestampDate(data['scheduledStart']);
+    final end = _timestampDate(data['scheduledEnd']);
+    if (start == null || end == null) return false;
+
+    final now = DateTime.now();
+    return !now.isBefore(start) && now.isBefore(end);
+  }
+
+  int _remainingTransferEditMinutes(Map<String, dynamic> data) {
+    final editUntil = _timestampDate(data['transferEditUntil']);
+    if (editUntil == null) return 0;
+
+    final remaining = editUntil.difference(DateTime.now()).inMinutes;
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  String _friendlyCallableError(Object error, String fallback) {
+    if (error is FirebaseFunctionsException) {
+      final message = error.message;
+      if (message != null && message.trim().isNotEmpty) return message;
+    }
+
+    return fallback;
   }
 
   bool _hasManualAbsentOverrideToday([String? dateKey]) {
@@ -828,7 +915,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                                       BorderRadius.circular(18),
                                                   borderSide: BorderSide(
                                                     color: Colors.white
-                                                        .withValues(alpha: 0.08),
+                                                        .withValues(
+                                                            alpha: 0.08),
                                                   ),
                                                 ),
                                                 focusedBorder:
@@ -904,7 +992,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                                       BorderRadius.circular(18),
                                                   borderSide: BorderSide(
                                                     color: Colors.white
-                                                        .withValues(alpha: 0.08),
+                                                        .withValues(
+                                                            alpha: 0.08),
                                                   ),
                                                 ),
                                                 focusedBorder:
@@ -1477,10 +1566,22 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       return;
     }
 
+    var message = '${_statusText(_teacherStatus)} durumundan '
+        '${_statusText(value)} durumuna geçmek istiyor musunuz?';
+
+    if (value == 'absent') {
+      final futureAppointments = await _futureScheduledAppointmentCountToday();
+      if (!mounted) return;
+
+      if (futureAppointments > 0) {
+        message = 'Bugün ilerleyen saatte $futureAppointments planlı zümreniz '
+            'bulunuyor.\n\n$message';
+      }
+    }
+
     final confirm = await _confirmAction(
       title: 'Durum değiştirilsin mi?',
-      message: '${_statusText(_teacherStatus)} durumundan '
-          '${_statusText(value)} durumuna geçmek istiyor musunuz?',
+      message: message,
       confirmText: 'Onayla',
       icon: Icons.swap_horiz_rounded,
       color: value == 'available'
@@ -1492,6 +1593,30 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
     if (confirm == true) {
       await _updateTeacherStatus(value);
+    }
+  }
+
+  Future<int> _futureScheduledAppointmentCountToday() async {
+    final teacherId = _auth.currentUser?.uid;
+    if (teacherId == null) return 0;
+
+    try {
+      final snapshot = await _firestore
+          .collection('appointments')
+          .where('teacherId', isEqualTo: teacherId)
+          .where('status', isEqualTo: 'scheduled')
+          .where('dateKey', isEqualTo: _todayDateKey())
+          .get();
+
+      final now = DateTime.now();
+      return snapshot.docs.where((doc) {
+        final data = doc.data();
+        final start = _timestampDate(data['scheduledStart']);
+        return start != null && start.isAfter(now);
+      }).length;
+    } catch (e) {
+      debugPrint('Planlı zümre absent uyarısı okunamadı: $e');
+      return 0;
     }
   }
 
@@ -1820,7 +1945,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                   if (_teacherStatus != 'available' ||
                                       !_isZumreOpenNow ||
                                       _isLunchNow) {
-                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
                                       SnackBar(content: Text(_scheduleMessage)),
                                     );
                                     return;
@@ -1838,7 +1964,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                               ?.toString()
                                               .trim() !=
                                           'available') {
-                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
                                       const SnackBar(
                                         content: Text(
                                           'Durumunuz müsait değil. Öğrenci sıraya eklenemedi.',
@@ -1858,7 +1985,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
                                   if (selectedStudentData['isInStudySession'] ==
                                       true) {
-                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
                                       const SnackBar(
                                         content: Text(
                                           'Bu öğrenci şu anda etütte görünüyor.',
@@ -1880,7 +2008,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                   if (!mounted) return;
 
                                   if (selectedActiveQueue.docs.isNotEmpty) {
-                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
                                       const SnackBar(
                                         content: Text(
                                           'Bu öğrencinin zaten aktif zümre sırası var.',
@@ -1911,14 +2040,16 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                   if (!mounted) return;
                                   if (ctx.mounted) Navigator.pop(ctx);
 
-                                  ScaffoldMessenger.of(this.context).showSnackBar(
+                                  ScaffoldMessenger.of(this.context)
+                                      .showSnackBar(
                                     const SnackBar(
                                       content: Text('Öğrenci sıraya eklendi'),
                                     ),
                                   );
                                 } catch (e) {
                                   if (!mounted) return;
-                                  ScaffoldMessenger.of(this.context).showSnackBar(
+                                  ScaffoldMessenger.of(this.context)
+                                      .showSnackBar(
                                     SnackBar(content: Text('Hata: $e')),
                                   );
                                 }
@@ -2110,6 +2241,408 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     }
   }
 
+  Future<void> _startAppointment(String appointmentId) async {
+    if (_appointmentActionIds.contains(appointmentId)) return;
+
+    setState(() {
+      _appointmentActionIds.add(appointmentId);
+    });
+
+    try {
+      final callable = _functions.httpsCallable('teacherStartAppointment');
+      await callable.call<Map<String, dynamic>>({
+        'appointmentId': appointmentId,
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Planlı zümre başlatıldı')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _friendlyCallableError(e, 'Planlı zümre başlatılamadı.'),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _appointmentActionIds.remove(appointmentId);
+        });
+      }
+    }
+  }
+
+  Future<void> _markAppointmentNoShow(String appointmentId) async {
+    if (_appointmentActionIds.contains(appointmentId)) return;
+
+    final confirm = await _confirmAction(
+      title: 'Öğrenci gelmedi mi?',
+      message: 'Bu planlı zümreyi gelmedi olarak işaretlemek istiyor musunuz?',
+      confirmText: 'Gelmedi',
+      icon: Icons.person_off_rounded,
+      color: Colors.orangeAccent,
+    );
+
+    if (!confirm) return;
+
+    setState(() {
+      _appointmentActionIds.add(appointmentId);
+    });
+
+    try {
+      final callable = _functions.httpsCallable('teacherNoShowAppointment');
+      await callable.call<Map<String, dynamic>>({
+        'appointmentId': appointmentId,
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Planlı zümre gelmedi olarak işlendi')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _friendlyCallableError(e, 'Gelmedi işlemi yapılamadı.'),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _appointmentActionIds.remove(appointmentId);
+        });
+      }
+    }
+  }
+
+  Future<void> _cancelAppointment(String appointmentId) async {
+    if (_appointmentActionIds.contains(appointmentId)) return;
+
+    final confirm = await _confirmAction(
+      title: 'Planlı zümre iptal edilsin mi?',
+      message: 'Bu planlı zümreyi iptal etmek istiyor musunuz?',
+      confirmText: 'İptal Et',
+      icon: Icons.event_busy_rounded,
+      color: Colors.redAccent,
+    );
+
+    if (!confirm) return;
+
+    setState(() {
+      _appointmentActionIds.add(appointmentId);
+    });
+
+    try {
+      final callable = _functions.httpsCallable('cancelAppointment');
+      await callable.call<Map<String, dynamic>>({
+        'appointmentId': appointmentId,
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Planlı zümre iptal edildi')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _friendlyCallableError(e, 'Planlı zümre iptal edilemedi.'),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _appointmentActionIds.remove(appointmentId);
+        });
+      }
+    }
+  }
+
+  Future<void> _transferAppointment({
+    required String appointmentId,
+    required String mode,
+    String? teacherId,
+  }) async {
+    if (_appointmentActionIds.contains(appointmentId)) return;
+
+    setState(() {
+      _appointmentActionIds.add(appointmentId);
+    });
+
+    try {
+      final callable = _functions.httpsCallable('transferAppointment');
+      final response = await callable.call<Map<String, dynamic>>({
+        'appointmentId': appointmentId,
+        'mode': mode,
+        if (teacherId != null) 'teacherId': teacherId,
+      });
+
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).maybePop();
+
+      final teacherName = response.data['teacherName']?.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            teacherName == null || teacherName.isEmpty
+                ? 'Planlı zümre devredildi'
+                : 'Planlı zümre $teacherName öğretmenine devredildi',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _friendlyCallableError(e, 'Planlı zümre devredilemedi.'),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _appointmentActionIds.remove(appointmentId);
+        });
+      }
+    }
+  }
+
+  Future<void> _showAppointmentTransferDialog({
+    required String appointmentId,
+    bool allowSelfReturn = false,
+  }) async {
+    if (_appointmentActionIds.contains(appointmentId)) return;
+
+    Future<List<Map<String, dynamic>>> loadOptions() async {
+      final callable =
+          _functions.httpsCallable('getAppointmentTransferOptions');
+      final response = await callable.call<Map<String, dynamic>>({
+        'appointmentId': appointmentId,
+      });
+      final rawTeachers = response.data['teachers'];
+      if (rawTeachers is! List) return [];
+
+      return rawTeachers
+          .whereType<Map>()
+          .map((teacher) => Map<String, dynamic>.from(teacher))
+          .toList();
+    }
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(18),
+            constraints: const BoxConstraints(maxWidth: 420),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF06312E),
+                  Color(0xFF008A5C),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: loadOptions(),
+              builder: (context, snapshot) {
+                final loading =
+                    snapshot.connectionState == ConnectionState.waiting;
+                final teachers = snapshot.data ?? [];
+
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Planlı Zümre Devret',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: loading
+                            ? null
+                            : () => _transferAppointment(
+                                  appointmentId: appointmentId,
+                                  mode: 'auto',
+                                ),
+                        icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                        label: const Text('En uygun öğretmene devret'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(0, 42),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (allowSelfReturn) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: loading
+                              ? null
+                              : () => _transferAppointment(
+                                    appointmentId: appointmentId,
+                                    mode: 'self',
+                                  ),
+                          icon: const Icon(Icons.undo_rounded, size: 18),
+                          label: const Text('Geri al'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.lightBlueAccent,
+                            side: const BorderSide(
+                              color: Colors.lightBlueAccent,
+                            ),
+                            minimumSize: const Size(0, 40),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    if (loading)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 18),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (snapshot.hasError)
+                      Text(
+                        _friendlyCallableError(
+                          snapshot.error!,
+                          'Müsait öğretmenler yüklenemedi.',
+                        ),
+                        style: const TextStyle(
+                          color: Colors.orangeAccent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
+                    else if (teachers.isEmpty)
+                      const Text(
+                        'Listelenebilecek müsait öğretmen bulunamadı.',
+                        style: TextStyle(color: Colors.white70),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 260),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            children: teachers.map((teacher) {
+                              final teacherId =
+                                  teacher['teacherId']?.toString();
+                              final teacherName =
+                                  teacher['teacherName']?.toString() ??
+                                      'Öğretmen';
+                              final plannedLoad =
+                                  _toInt(teacher['plannedLoad']);
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.white12),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.person_rounded,
+                                      color: Colors.greenAccent,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            teacherName,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          Text(
+                                            'Planlı yük: $plannedLoad',
+                                            style: const TextStyle(
+                                              color: Colors.white60,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: teacherId == null
+                                          ? null
+                                          : () => _transferAppointment(
+                                                appointmentId: appointmentId,
+                                                mode: 'manual',
+                                                teacherId: teacherId,
+                                              ),
+                                      child: const Text('Seç'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _showTransferDialog({
     required String queueId,
     required String subject,
@@ -2225,11 +2758,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
+          debugPrint('Aktif soru yüklenemedi: ${snapshot.error}');
           _resetActiveQuestionTimer();
           return _glassInfoCard(
             icon: Icons.error_outline,
             title: 'Aktif soru yüklenemedi',
-            subtitle: '${snapshot.error}',
+            subtitle: 'Lütfen biraz sonra tekrar deneyin.',
             iconColor: Colors.redAccent,
           );
         }
@@ -2262,6 +2796,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         final estimatedMinutes = _toInt(data['estimatedMinutes'], fallback: 4);
         final extraMinutes = _toInt(data['extraMinutes']);
         final startedAt = data['startedAt'] as Timestamp?;
+        final isAppointmentQuestion = data['source'] == 'appointment';
 
         _startActiveQuestionTimer(
           queueId: doc.id,
@@ -2302,9 +2837,14 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Aktif Soru',
-                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        Text(
+                          isAppointmentQuestion
+                              ? 'Aktif Planlı Zümre'
+                              : 'Aktif Soru',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                          ),
                         ),
                         Text(
                           data['studentName'] ?? 'Öğrenci',
@@ -2384,34 +2924,37 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  _compactQueueAction(
-                    icon: Icons.swap_horiz_rounded,
-                    color: Colors.lightBlueAccent,
-                    tooltip: 'Devret',
-                    onTap: () async {
-                      await _showTransferDialog(
-                        queueId: doc.id,
-                        subject: data['subject'] ?? 'Ders',
-                        studentName: data['studentName'] ?? 'Öğrenci',
-                      );
-                    },
-                  ),
-                  _compactQueueAction(
-                    icon: Icons.close_rounded,
-                    color: Colors.redAccent,
-                    tooltip: 'İptal',
-                    onTap: () async {
-                      final confirm = await _confirmAction(
-                        title: 'Soru iptal edilsin mi?',
-                        message: 'Bu aktif soruyu iptal etmek istiyor musunuz?',
-                        confirmText: 'İptal Et',
-                      );
+                  if (!isAppointmentQuestion) ...[
+                    _compactQueueAction(
+                      icon: Icons.swap_horiz_rounded,
+                      color: Colors.lightBlueAccent,
+                      tooltip: 'Devret',
+                      onTap: () async {
+                        await _showTransferDialog(
+                          queueId: doc.id,
+                          subject: data['subject'] ?? 'Ders',
+                          studentName: data['studentName'] ?? 'Öğrenci',
+                        );
+                      },
+                    ),
+                    _compactQueueAction(
+                      icon: Icons.close_rounded,
+                      color: Colors.redAccent,
+                      tooltip: 'İptal',
+                      onTap: () async {
+                        final confirm = await _confirmAction(
+                          title: 'Soru iptal edilsin mi?',
+                          message:
+                              'Bu aktif soruyu iptal etmek istiyor musunuz?',
+                          confirmText: 'İptal Et',
+                        );
 
-                      if (confirm) {
-                        await _cancelQueue(doc.id);
-                      }
-                    },
-                  ),
+                        if (confirm) {
+                          await _cancelQueue(doc.id);
+                        }
+                      },
+                    ),
+                  ],
                 ],
               ),
             ],
@@ -2426,11 +2969,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     required String title,
     required String subtitle,
     required Color iconColor,
+    bool compact = false,
   }) {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-      padding: const EdgeInsets.all(17),
+      padding: EdgeInsets.all(compact ? 13 : 17),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(24),
@@ -2439,13 +2983,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       child: Row(
         children: [
           Container(
-            width: 46,
-            height: 46,
+            width: compact ? 40 : 46,
+            height: compact ? 40 : 46,
             decoration: BoxDecoration(
               color: iconColor.withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: iconColor, size: 26),
+            child: Icon(icon, color: iconColor, size: compact ? 22 : 26),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -2454,9 +2998,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
-                    fontSize: 17,
+                    fontSize: compact ? 15.5 : 17,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -2477,6 +3021,349 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
   }
 
+  Widget _appointmentActionButton({
+    required String text,
+    required IconData icon,
+    required Color color,
+    required VoidCallback? onPressed,
+    bool filled = false,
+  }) {
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(13),
+    );
+
+    if (filled) {
+      return ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 17),
+        label: Text(text),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(0, 38),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          shape: shape,
+        ),
+      );
+    }
+
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 17),
+      label: Text(text),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: color,
+        side: BorderSide(color: color.withValues(alpha: 0.65)),
+        minimumSize: const Size(0, 38),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        shape: shape,
+      ),
+    );
+  }
+
+  Widget _appointmentCard({
+    required QueryDocumentSnapshot doc,
+    bool transferredSummary = false,
+  }) {
+    final data = doc.data() as Map<String, dynamic>;
+    final due = _isAppointmentDue(data);
+    final busy = _appointmentActionIds.contains(doc.id);
+    final studentName = data['studentName']?.toString() ?? 'Öğrenci';
+    final subject = data['subject']?.toString() ?? 'Ders';
+    final questionCount = _toInt(data['questionCount'], fallback: 1);
+    final fromTeacher = data['transferredFromTeacherName']?.toString();
+    final editMinutes = _remainingTransferEditMinutes(data);
+    final accent = due ? Colors.orangeAccent : Colors.greenAccent;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: due
+            ? Colors.orangeAccent.withValues(alpha: 0.12)
+            : Colors.white.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: due
+              ? Colors.orangeAccent.withValues(alpha: 0.42)
+              : Colors.white.withValues(alpha: 0.14),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.16),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  due ? Icons.notifications_active_rounded : Icons.event_note,
+                  color: accent,
+                  size: 21,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      studentName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15.5,
+                      ),
+                    ),
+                    Text(
+                      '${_formatAppointmentDay(data['scheduledStart'])} • '
+                      '${_formatAppointmentClock(data['scheduledStart'], data['scheduledEnd'])} • '
+                      '$subject • $questionCount soru',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 12.2,
+                      ),
+                    ),
+                    if (fromTeacher != null && fromTeacher.isNotEmpty)
+                      Text(
+                        '$fromTeacher tarafından devredildi',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.lightBlueAccent,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    if (transferredSummary && editMinutes > 0)
+                      Text(
+                        'Düzenleme süresi: $editMinutes dk',
+                        style: const TextStyle(
+                          color: Colors.orangeAccent,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (busy)
+            const SizedBox(
+              height: 34,
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else if (transferredSummary)
+            Row(
+              children: [
+                Expanded(
+                  child: _appointmentActionButton(
+                    text: 'Düzenle',
+                    icon: Icons.swap_horiz_rounded,
+                    color: Colors.lightBlueAccent,
+                    onPressed: () => _showAppointmentTransferDialog(
+                      appointmentId: doc.id,
+                      allowSelfReturn: true,
+                    ),
+                  ),
+                ),
+              ],
+            )
+          else if (due)
+            Row(
+              children: [
+                Expanded(
+                  child: _appointmentActionButton(
+                    text: 'Başlat',
+                    icon: Icons.play_arrow_rounded,
+                    color: Colors.green,
+                    filled: true,
+                    onPressed: () => _startAppointment(doc.id),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _appointmentActionButton(
+                    text: 'Gelmedi',
+                    icon: Icons.person_off_rounded,
+                    color: Colors.orangeAccent,
+                    onPressed: () => _markAppointmentNoShow(doc.id),
+                  ),
+                ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: _appointmentActionButton(
+                    text: 'Devret',
+                    icon: Icons.swap_horiz_rounded,
+                    color: Colors.lightBlueAccent,
+                    onPressed: () => _showAppointmentTransferDialog(
+                      appointmentId: doc.id,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _appointmentActionButton(
+                    text: 'İptal',
+                    icon: Icons.close_rounded,
+                    color: Colors.redAccent,
+                    onPressed: () => _cancelAppointment(doc.id),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTeacherAppointments() {
+    final teacherId = _auth.currentUser!.uid;
+    final dateKeys = _teacherAppointmentDateKeys();
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('appointments')
+          .where('teacherId', isEqualTo: teacherId)
+          .where('status', isEqualTo: 'scheduled')
+          .where('dateKey', whereIn: dateKeys)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          debugPrint('Planlı zümreler yüklenemedi: ${snapshot.error}');
+          return _glassInfoCard(
+            icon: Icons.event_busy_rounded,
+            title: 'Planlı zümreler yüklenemedi',
+            subtitle: 'Lütfen biraz sonra tekrar deneyin.',
+            iconColor: Colors.orangeAccent,
+            compact: true,
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 14),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final appointments = snapshot.data!.docs.toList()
+          ..sort((a, b) {
+            final aData = a.data() as Map<String, dynamic>;
+            final bData = b.data() as Map<String, dynamic>;
+            final aStart = _timestampDate(aData['scheduledStart']);
+            final bStart = _timestampDate(bData['scheduledStart']);
+            if (aStart == null && bStart == null) return 0;
+            if (aStart == null) return 1;
+            if (bStart == null) return -1;
+            return aStart.compareTo(bStart);
+          });
+
+        if (appointments.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(18, 6, 18, 3),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Planlı Zümreler',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            ...appointments.take(8).map((doc) => _appointmentCard(doc: doc)),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTransferredAppointmentSummaries() {
+    final teacherId = _auth.currentUser!.uid;
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('appointments')
+          .where('transferredFromTeacherId', isEqualTo: teacherId)
+          .where('status', isEqualTo: 'scheduled')
+          .where('transferEditUntil', isGreaterThan: Timestamp.now())
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          debugPrint('Devredilen planlı zümreler okunamadı: ${snapshot.error}');
+          return const SizedBox.shrink();
+        }
+
+        if (!snapshot.hasData) return const SizedBox.shrink();
+
+        final appointments = snapshot.data!.docs.toList()
+          ..sort((a, b) {
+            final aData = a.data() as Map<String, dynamic>;
+            final bData = b.data() as Map<String, dynamic>;
+            final aStart = _timestampDate(aData['scheduledStart']);
+            final bStart = _timestampDate(bData['scheduledStart']);
+            if (aStart == null && bStart == null) return 0;
+            if (aStart == null) return 1;
+            if (bStart == null) return -1;
+            return aStart.compareTo(bStart);
+          });
+
+        if (appointments.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(18, 4, 18, 3),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Devredilen Planlı Zümre',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            ...appointments.take(3).map((doc) => _appointmentCard(
+                  doc: doc,
+                  transferredSummary: true,
+                )),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildWaitingQueueList() {
     final teacherId = _auth.currentUser!.uid;
 
@@ -2488,10 +3375,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
+          debugPrint('Bekleyenler yüklenemedi: ${snapshot.error}');
           return _glassInfoCard(
             icon: Icons.error_outline,
             title: 'Bekleyenler yüklenemedi',
-            subtitle: '${snapshot.error}',
+            subtitle: 'Lütfen biraz sonra tekrar deneyin.',
             iconColor: Colors.redAccent,
           );
         }
@@ -2523,15 +3411,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
         return Column(
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(18, 6, 18, 4),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 6, 18, 4),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Bekleyen Öğrenciler',
-                  style: TextStyle(
+                  'Bekleyen Öğrenciler · ${queues.length}',
+                  style: const TextStyle(
                     color: Colors.white,
-                  fontSize: 18,
+                    fontSize: 17,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -2547,20 +3435,22 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
               return Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                  borderRadius: BorderRadius.circular(20),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.14)),
                 ),
                 child: Row(
                   children: [
                     CircleAvatar(
-                      radius: 19,
+                      radius: 18,
                       backgroundColor: isManual ? Colors.orange : Colors.green,
                       child: Icon(
                         isManual ? Icons.person_add : Icons.person,
                         color: Colors.white,
+                        size: 20,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -2597,7 +3487,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       ),
                     ),
                     SizedBox(
-                      width: 82,
+                      width: 80,
                       child: Column(
                         children: [
                           SizedBox(
@@ -2612,7 +3502,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.green,
                                 foregroundColor: Colors.white,
-                                minimumSize: const Size(0, 36),
+                                minimumSize: const Size(0, 34),
                                 padding:
                                     const EdgeInsets.symmetric(horizontal: 8),
                                 shape: RoundedRectangleBorder(
@@ -2627,8 +3517,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                             child: IconButton(
                               visualDensity: VisualDensity.compact,
                               constraints: const BoxConstraints(
-                                minWidth: 34,
-                                minHeight: 34,
+                                minWidth: 32,
+                                minHeight: 32,
                               ),
                               padding: EdgeInsets.zero,
                               icon: const Icon(
@@ -2650,7 +3540,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                               },
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 3),
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
@@ -2658,8 +3548,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                 await _showTransferDialog(
                                   queueId: doc.id,
                                   subject: data['subject'] ?? 'Ders',
-                                  studentName:
-                                      data['studentName'] ?? 'Öğrenci',
+                                  studentName: data['studentName'] ?? 'Öğrenci',
                                 );
                               },
                               icon: const Icon(
@@ -2672,7 +3561,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                 side: const BorderSide(
                                   color: Colors.lightBlueAccent,
                                 ),
-                                minimumSize: const Size(0, 34),
+                                minimumSize: const Size(0, 32),
                                 padding:
                                     const EdgeInsets.symmetric(horizontal: 6),
                                 shape: RoundedRectangleBorder(
@@ -2726,6 +3615,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         _buildTeacherHeader(),
         _buildStatusCard(),
         _buildActiveQuestion(),
+        _buildTeacherAppointments(),
+        _buildTransferredAppointmentSummaries(),
         _buildWaitingQueueList(),
       ],
     );
@@ -2749,8 +3640,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           : null,
       child: Container(
         padding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
+          horizontal: 12,
+          vertical: 10,
         ),
         decoration: BoxDecoration(
           color: selected
@@ -2771,6 +3662,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
+                fontSize: 13.5,
               ),
             ),
           ],
@@ -2783,7 +3675,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Container(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(24),
@@ -2794,20 +3686,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Durumum',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 13),
             Row(
               children: [
                 Container(
-                  width: 14,
-                  height: 14,
+                  width: 12,
+                  height: 12,
                   decoration: BoxDecoration(
                     color: _teacherStatus == 'available'
                         ? Colors.green
@@ -2819,16 +3702,16 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  _statusText(_teacherStatus),
+                  'Durumum: ${_statusText(_teacherStatus)}',
                   style: const TextStyle(
                     color: Colors.white,
-                  fontSize: 17,
+                    fontSize: 17,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -2853,11 +3736,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 12),
             _headerActionButton(
               icon: Icons.event_available_rounded,
-              title: 'Çalışma Programınız',
-              subtitle: 'Kurumda bulunduğunuz gün ve saatleri düzenleyin',
+              title: 'Çalışma Programı',
+              subtitle: 'Kurumda bulunduğunuz saatleri düzenleyin',
               color: Colors.lightBlueAccent,
               onTap: _showAvailabilityDialog,
             ),
@@ -2961,7 +3844,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                               maxLines: 1,
                               style: const TextStyle(
                                 color: Colors.white,
-                              fontSize: 23,
+                                fontSize: 23,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
