@@ -5024,6 +5024,59 @@ exports.teacherCompleteQueue = onCall(
   }
 );
 
+exports.teacherAddExtraMinutes = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const queueId = cleanText(request.data?.queueId);
+    const minutes = Number(request.data?.minutes || 0);
+
+    if (!queueId || ![1, 3].includes(minutes)) {
+      throw new HttpsError("invalid-argument", "Geçersiz süre bilgisi.");
+    }
+
+    const queueRef = db.collection("queues").doc(queueId);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const queueDoc = await transaction.get(queueRef);
+
+      if (!queueDoc.exists) {
+        throw new HttpsError("not-found", "Sıra kaydı bulunamadı.");
+      }
+
+      const queueData = queueDoc.data() || {};
+      if (queueData.teacherId !== teacher.uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu sıraya süre ekleme yetkiniz yok."
+        );
+      }
+
+      if (queueData.status !== "in_progress") {
+        return { updated: false, status: cleanText(queueData.status) };
+      }
+
+      const currentExtra = Number(queueData.extraMinutes || 0);
+      transaction.update(queueRef, {
+        extraMinutes: currentExtra + minutes,
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      return {
+        updated: true,
+        extraMinutes: currentExtra + minutes,
+      };
+    });
+
+    return {
+      ok: true,
+      ...result,
+    };
+  }
+);
+
 exports.teacherCancelQueue = onCall(
   {
     region: REGION,

@@ -74,6 +74,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   String? _warnedQueueKey;
   bool _isTimeDialogOpen = false;
   int _elapsedSeconds = 0;
+  final Set<String> _queueActionIds = {};
   final Set<String> _transferringQueueIds = {};
   final Set<String> _appointmentActionIds = {};
   StreamSubscription<DocumentSnapshot>? _teacherSubscription;
@@ -251,8 +252,30 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
   String _friendlyCallableError(Object error, String fallback) {
     if (error is FirebaseFunctionsException) {
-      final message = error.message;
-      if (message != null && message.trim().isNotEmpty) return message;
+      final message = error.message?.trim();
+      final technicalMessages = {
+        'internal',
+        'unknown',
+        'deadline-exceeded',
+        'unavailable',
+      };
+
+      if (message != null &&
+          message.isNotEmpty &&
+          !technicalMessages.contains(message.toLowerCase())) {
+        return message;
+      }
+
+      switch (error.code) {
+        case 'permission-denied':
+          return 'Bu işlem için yetkiniz bulunmuyor.';
+        case 'not-found':
+          return 'Sıra kaydı artık bulunamadı.';
+        case 'failed-precondition':
+          return 'Bu işlem şu anda yapılamıyor. Listeyi kontrol edin.';
+        case 'invalid-argument':
+          return 'İşlem bilgisi geçersiz.';
+      }
     }
 
     return fallback;
@@ -1202,8 +1225,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () async {
-                          await _addExtraMinute(queueId, 1);
                           if (ctx.mounted) Navigator.pop(ctx);
+                          await _addExtraMinute(queueId, 1);
                         },
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
@@ -1216,8 +1239,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () async {
-                          await _addExtraMinute(queueId, 3);
                           if (ctx.mounted) Navigator.pop(ctx);
+                          await _addExtraMinute(queueId, 3);
                         },
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
@@ -1256,13 +1279,49 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 
   Future<void> _addExtraMinute(String queueId, int minute) async {
-    await _firestore.collection('queues').doc(queueId).update({
-      'extraMinutes': FieldValue.increment(minute),
-    });
+    if (_queueActionIds.contains(queueId)) return;
 
-    _activeTimerQueueId = null;
-    _activeTimerLimitMinutes = null;
-    _warnedQueueKey = null;
+    setState(() => _queueActionIds.add(queueId));
+
+    try {
+      final callable = _functions.httpsCallable('teacherAddExtraMinutes');
+      final response = await callable.call<Map<String, dynamic>>({
+        'queueId': queueId,
+        'minutes': minute,
+      });
+      final updated = response.data['updated'] == true;
+
+      _activeTimerQueueId = null;
+      _activeTimerLimitMinutes = null;
+      _warnedQueueKey = null;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            updated
+                ? '$minute dakika eklendi.'
+                : 'Bu soru artık aktif değil. Liste güncelleniyor.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _friendlyCallableError(
+              e,
+              'Süre eklenemedi. Lütfen listeyi kontrol edin.',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _queueActionIds.remove(queueId));
+      }
+    }
   }
 
   String _statusText(String status) {
@@ -2191,6 +2250,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 
   Future<void> _markAsSolved(String queueId) async {
+    if (_queueActionIds.contains(queueId)) return;
+
+    setState(() => _queueActionIds.add(queueId));
+
     try {
       _resetActiveQuestionTimer();
 
@@ -2210,13 +2273,30 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Soru çözüldü olarak işaretlendi')),
+        SnackBar(
+          content: Text(
+            completed
+                ? 'Soru çözüldü olarak işaretlendi.'
+                : 'Bu soru zaten tamamlanmış veya aktif değil.',
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Çözüldü işlemi başarısız: $e')),
+        SnackBar(
+          content: Text(
+            _friendlyCallableError(
+              e,
+              'Çözüldü işlemi yapılamadı. Listeyi kontrol edin.',
+            ),
+          ),
+        ),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _queueActionIds.remove(queueId));
+      }
     }
   }
 
@@ -2897,32 +2977,52 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               const SizedBox(height: 14),
               Row(
                 children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        final confirm = await _confirmAction(
-                          title: 'Soru çözüldü mü?',
-                          message:
-                              'Bu öğrencinin sorusunu çözüldü olarak işaretlemek istiyor musunuz?',
-                          confirmText: 'Çözüldü',
-                        );
+                  Builder(builder: (context) {
+                    final isQueueActionRunning =
+                        _queueActionIds.contains(doc.id);
+                    return Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: isQueueActionRunning
+                            ? null
+                            : () async {
+                                final confirm = await _confirmAction(
+                                  title: 'Soru çözüldü mü?',
+                                  message:
+                                      'Bu öğrencinin sorusunu çözüldü olarak işaretlemek istiyor musunuz?',
+                                  confirmText: 'Çözüldü',
+                                );
 
-                        if (confirm) {
-                          await _markAsSolved(doc.id);
-                        }
-                      },
-                      icon: const Icon(Icons.check, size: 18),
-                      label: const Text('Çözüldü'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(0, 40),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                                if (confirm) {
+                                  await _markAsSolved(doc.id);
+                                }
+                              },
+                        icon: isQueueActionRunning
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.check, size: 18),
+                        label: Text(
+                          isQueueActionRunning ? 'İşleniyor' : 'Çözüldü',
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor:
+                              Colors.green.withValues(alpha: 0.45),
+                          disabledForegroundColor: Colors.white70,
+                          minimumSize: const Size(0, 40),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
+                    );
+                  }),
                   const SizedBox(width: 8),
                   if (!isAppointmentQuestion) ...[
                     _compactQueueAction(
