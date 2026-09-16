@@ -242,14 +242,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     return !now.isBefore(start) && now.isBefore(end);
   }
 
-  int _remainingTransferEditMinutes(Map<String, dynamic> data) {
-    final editUntil = _timestampDate(data['transferEditUntil']);
-    if (editUntil == null) return 0;
-
-    final remaining = editUntil.difference(DateTime.now()).inMinutes;
-    return remaining < 0 ? 0 : remaining;
-  }
-
   String _friendlyCallableError(Object error, String fallback) {
     if (error is FirebaseFunctionsException) {
       final message = error.message?.trim();
@@ -457,6 +449,38 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     final m = seconds ~/ 60;
     final s = seconds % 60;
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  String _studentDisplayName(Map<String, dynamic> data) {
+    return (data['fullName'] ?? data['name'] ?? data['email'] ?? 'Öğrenci')
+        .toString();
+  }
+
+  String _studentClassInfo(Map<String, dynamic> data) {
+    final className = (data['className'] ?? '').toString().trim();
+    final branch = (data['branch'] ?? '').toString().trim();
+    final department = (data['department'] ?? '').toString().trim();
+    final classText = className.isEmpty
+        ? ''
+        : '$className${branch.isNotEmpty ? '-$branch' : ''}';
+
+    return [
+      classText,
+      department,
+    ].where((value) => value.isNotEmpty).join(' • ');
+  }
+
+  String _studentSearchIndex(Map<String, dynamic> data) {
+    return [
+      data['fullName'],
+      data['name'],
+      data['surname'],
+      data['username'],
+      data['email'],
+      data['className'],
+      data['branch'],
+      data['department'],
+    ].where((value) => value != null).join(' ').toLowerCase();
   }
 
   int _toInt(dynamic value, {int fallback = 0}) {
@@ -1818,8 +1842,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       onChanged: (value) {
                         setDialogState(() {
                           searchText = value;
-                          selectedStudentId = null;
-                          selectedStudentName = null;
                         });
                       },
                     ),
@@ -1887,20 +1909,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                   return false;
                                 }
 
-                                final name = (data['fullName'] ??
-                                        data['name'] ??
-                                        data['email'] ??
-                                        '')
-                                    .toString()
-                                    .toLowerCase();
-                                final username = (data['username'] ?? '')
-                                    .toString()
-                                    .toLowerCase();
                                 final query = searchText.toLowerCase().trim();
+                                final searchable = _studentSearchIndex(data);
 
                                 return query.isEmpty ||
-                                    name.contains(query) ||
-                                    username.contains(query);
+                                    searchable.contains(query);
                               }).toList();
 
                               final selectedStillVisible =
@@ -1934,30 +1947,40 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                   final data =
                                       doc.data() as Map<String, dynamic>;
 
-                                  final fullName = data['fullName'] ??
-                                      data['name'] ??
-                                      data['email'] ??
-                                      'Öğrenci';
-
-                                  final className = data['className'] ?? '';
-                                  final department = data['department'] ?? '';
+                                  final fullName = _studentDisplayName(data);
+                                  final classInfo = _studentClassInfo(data);
                                   final selected = selectedStudentId == doc.id;
 
                                   return ListTile(
-                                    leading: const CircleAvatar(
-                                      backgroundColor: Colors.green,
-                                      child: Icon(
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 4,
+                                    ),
+                                    leading: CircleAvatar(
+                                      backgroundColor:
+                                          Colors.greenAccent.withValues(
+                                        alpha: 0.18,
+                                      ),
+                                      child: const Icon(
                                         Icons.person,
-                                        color: Colors.white,
+                                        color: Colors.greenAccent,
                                       ),
                                     ),
                                     title: Text(
                                       fullName,
-                                      style:
-                                          const TextStyle(color: Colors.white),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
                                     subtitle: Text(
-                                      '$className • $department',
+                                      classInfo.isEmpty
+                                          ? 'Öğrenci bilgisi'
+                                          : classInfo,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                         color: Colors.white60,
                                         fontSize: 12,
@@ -3163,7 +3186,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
   Widget _appointmentCard({
     required QueryDocumentSnapshot doc,
-    bool transferredSummary = false,
   }) {
     final data = doc.data() as Map<String, dynamic>;
     final due = _isAppointmentDue(data);
@@ -3172,7 +3194,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     final subject = data['subject']?.toString() ?? 'Ders';
     final questionCount = _toInt(data['questionCount'], fallback: 1);
     final fromTeacher = data['transferredFromTeacherName']?.toString();
-    final editMinutes = _remainingTransferEditMinutes(data);
     final accent = due ? Colors.orangeAccent : Colors.greenAccent;
 
     return Container(
@@ -3243,15 +3264,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                           fontSize: 11.5,
                         ),
                       ),
-                    if (transferredSummary && editMinutes > 0)
-                      Text(
-                        'Düzenleme süresi: $editMinutes dk',
-                        style: const TextStyle(
-                          color: Colors.orangeAccent,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -3268,22 +3280,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
               ),
-            )
-          else if (transferredSummary)
-            Row(
-              children: [
-                Expanded(
-                  child: _appointmentActionButton(
-                    text: 'Düzenle',
-                    icon: Icons.swap_horiz_rounded,
-                    color: Colors.lightBlueAccent,
-                    onPressed: () => _showAppointmentTransferDialog(
-                      appointmentId: doc.id,
-                      allowSelfReturn: true,
-                    ),
-                  ),
-                ),
-              ],
             )
           else if (due)
             Row(
@@ -3400,64 +3396,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               ),
             ),
             ...appointments.take(8).map((doc) => _appointmentCard(doc: doc)),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildTransferredAppointmentSummaries() {
-    final teacherId = _auth.currentUser!.uid;
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('appointments')
-          .where('transferredFromTeacherId', isEqualTo: teacherId)
-          .where('status', isEqualTo: 'scheduled')
-          .where('transferEditUntil', isGreaterThan: Timestamp.now())
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          debugPrint('Devredilen planlı zümreler okunamadı: ${snapshot.error}');
-          return const SizedBox.shrink();
-        }
-
-        if (!snapshot.hasData) return const SizedBox.shrink();
-
-        final appointments = snapshot.data!.docs.toList()
-          ..sort((a, b) {
-            final aData = a.data() as Map<String, dynamic>;
-            final bData = b.data() as Map<String, dynamic>;
-            final aStart = _timestampDate(aData['scheduledStart']);
-            final bStart = _timestampDate(bData['scheduledStart']);
-            if (aStart == null && bStart == null) return 0;
-            if (aStart == null) return 1;
-            if (bStart == null) return -1;
-            return aStart.compareTo(bStart);
-          });
-
-        if (appointments.isEmpty) return const SizedBox.shrink();
-
-        return Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(18, 4, 18, 3),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Devredilen Planlı Zümre',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-            ...appointments.take(3).map((doc) => _appointmentCard(
-                  doc: doc,
-                  transferredSummary: true,
-                )),
           ],
         );
       },
@@ -3716,7 +3654,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         _buildStatusCard(),
         _buildActiveQuestion(),
         _buildTeacherAppointments(),
-        _buildTransferredAppointmentSummaries(),
         _buildWaitingQueueList(),
       ],
     );

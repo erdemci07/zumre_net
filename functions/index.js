@@ -14,6 +14,7 @@ const BULK_DELETE_LIMIT = 500;
 const BULK_DELETE_CHUNK_SIZE = 25;
 const AUTH_DELETE_RETRY_DELAYS_MS = [750, 1500, 3000];
 const APPOINTMENT_STATUS_SCHEDULED = "scheduled";
+const APPOINTMENT_STATUS_EXPIRED = "expired";
 const ACTIVE_APPOINTMENT_STATUSES = ["scheduled", "started"];
 const APPOINTMENT_STUDENT_TRANSITION_BUFFER_MINUTES = 2;
 const APPOINTMENT_PLANNED_CAPACITY_RATIO = 0.65;
@@ -917,6 +918,21 @@ function parseRequestedAppointmentStart(value) {
   return null;
 }
 
+function parseRequestedPlannedExamStart(data = {}) {
+  const dateKey = cleanText(data.dateKey);
+  const startTime = cleanText(data.startTime);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateKey) && /^\d{2}:\d{2}$/.test(startTime)) {
+    const minutes = timeToMinutes(startTime);
+    if (minutes >= 0) {
+      const date = new Date(`${dateKey}T${startTime}:00+03:00`);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+  }
+
+  return parseRequestedAppointmentStart(data.scheduledStart);
+}
+
 function parseDateKeyToIstanbulNoon(dateKey) {
   if (typeof dateKey !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     return null;
@@ -1067,6 +1083,53 @@ function plannedExamPrimaryFields(items) {
     scheduledStart: primary.scheduledStart,
     scheduledEnd: primary.scheduledEnd,
   };
+}
+
+function plannedExamItemsAfterCompletingActive(plannedExamData = {}) {
+  const items = plannedExamItems(plannedExamData);
+  const nextItems = [];
+  let completedCount = 0;
+
+  for (const item of items) {
+    if (item.status === PLANNED_EXAM_STATUS_ACTIVE) {
+      completedCount += 1;
+      continue;
+    }
+
+    nextItems.push(publicPlannedExamItem(item));
+  }
+
+  return {
+    completedCount,
+    nextItems,
+  };
+}
+
+async function completeActivePlannedExams(now = new Date(), adminUid = null) {
+  const plannedExamRef = db.collection("settings").doc("plannedExam");
+  const plannedExamDoc = await plannedExamRef.get();
+
+  if (!plannedExamDoc.exists) {
+    return { completedCount: 0 };
+  }
+
+  const { completedCount, nextItems } =
+    plannedExamItemsAfterCompletingActive(plannedExamDoc.data() || {});
+
+  if (completedCount === 0) {
+    return { completedCount: 0 };
+  }
+
+  await plannedExamRef.set({
+    ...plannedExamPrimaryFields(plannedExamItems({ items: nextItems })),
+    items: nextItems,
+    completedAt: fieldValue.serverTimestamp(),
+    manuallyEndedAt: fieldValue.serverTimestamp(),
+    completedBy: adminUid,
+    updatedAt: fieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return { completedCount };
 }
 
 function activePlannedExamWindow(plannedExamData = {}) {
@@ -1225,6 +1288,23 @@ function appointmentCanBecomeLive(appointmentData, now = new Date()) {
   }
 
   return { ok: true };
+}
+
+function appointmentShouldExpireScheduled(appointmentData, now = new Date()) {
+  if (!appointmentData || appointmentData.status !== APPOINTMENT_STATUS_SCHEDULED) {
+    return false;
+  }
+
+  const scheduledEnd = timestampToDate(appointmentData.scheduledEnd);
+  return !!scheduledEnd && scheduledEnd.getTime() <= now.getTime();
+}
+
+function expiredAppointmentUpdate() {
+  return {
+    status: APPOINTMENT_STATUS_EXPIRED,
+    expiredAt: fieldValue.serverTimestamp(),
+    updatedAt: fieldValue.serverTimestamp(),
+  };
 }
 
 function appointmentLinkedQueueId(appointmentId) {
@@ -1756,6 +1836,48 @@ async function loadFutureScheduledAppointmentDocs(now = new Date()) {
     .get();
 
   return snapshot.docs;
+}
+
+async function expireEndedScheduledAppointments(now = new Date()) {
+  const result = {
+    checkedCount: 0,
+    expiredCount: 0,
+  };
+
+  while (true) {
+    const snapshot = await db
+      .collection("appointments")
+      .where("status", "==", APPOINTMENT_STATUS_SCHEDULED)
+      .where("scheduledEnd", "<=", timestampFromDate(now))
+      .orderBy("scheduledEnd", "asc")
+      .limit(100)
+      .get();
+
+    if (snapshot.empty) break;
+
+    const batch = db.batch();
+    let batchSize = 0;
+
+    for (const appointmentDoc of snapshot.docs) {
+      result.checkedCount += 1;
+
+      if (!appointmentShouldExpireScheduled(appointmentDoc.data(), now)) {
+        continue;
+      }
+
+      batch.update(appointmentDoc.ref, expiredAppointmentUpdate());
+      batchSize += 1;
+      result.expiredCount += 1;
+    }
+
+    if (batchSize > 0) {
+      await batch.commit();
+    }
+
+    if (snapshot.size < 100) break;
+  }
+
+  return result;
 }
 
 async function findQueueActivityForStudentOnDate(studentId, dateKey) {
@@ -2853,13 +2975,21 @@ exports.setInstitutionMode = onCall(
           ...runtimeState,
           closedDate: null,
           examStartedAt: null,
+          examEndsAt: null,
+          plannedExamId: null,
           updatedAt: fieldValue.serverTimestamp(),
           updatedBy: adminUid,
         },
         { merge: true }
       );
 
-      return { ok: true, mode: "active" };
+      const plannedExamResult = await completeActivePlannedExams(now, adminUid);
+
+      return {
+        ok: true,
+        mode: "active",
+        completedPlannedExams: plannedExamResult.completedCount,
+      };
     }
 
     if (mode === "closed") {
@@ -3055,7 +3185,7 @@ exports.createPlannedExam = onCall(
     const requestedExamId = cleanText(request.data?.examId);
     const durationMinutes = plannedExamDurationMinutes(examType);
     const confirm = request.data?.confirm === true;
-    const scheduledStart = parseRequestedAppointmentStart(request.data?.scheduledStart);
+    const scheduledStart = parseRequestedPlannedExamStart(request.data || {});
 
     if (!durationMinutes) {
       throw new HttpsError("invalid-argument", "Deneme türü TYT veya AYT olmalıdır.");
@@ -5490,6 +5620,8 @@ exports.syncRuntimeSchedule = onSchedule(
     const now = new Date();
     const plannedExamRuntime = await applyPlannedExamRuntime(now);
     if (plannedExamRuntime?.applied) {
+      const expiredAppointmentsResult =
+        await expireEndedScheduledAppointments(now);
       try {
         const noShowResult = await reconcileNoShowsAtDayEnd(now);
         if (!noShowResult.skipped) {
@@ -5498,7 +5630,11 @@ exports.syncRuntimeSchedule = onSchedule(
       } catch (error) {
         console.error("Planlı zümre no-show doğrulaması tamamlanamadı.", error);
       }
-      console.log("Planlı deneme mevcut deneme moduna alındı.", plannedExamRuntime);
+      console.log("Planlı deneme mevcut deneme moduna alındı.", {
+        ...plannedExamRuntime,
+        expiredAppointmentsChecked: expiredAppointmentsResult.checkedCount,
+        expiredAppointmentsExpired: expiredAppointmentsResult.expiredCount,
+      });
       return;
     }
 
@@ -5529,6 +5665,7 @@ exports.syncRuntimeSchedule = onSchedule(
         forceClosed: runtimeState.institutionMode !== "active",
       }
     );
+    const expiredAppointmentsResult = await expireEndedScheduledAppointments(now);
     const teacherStatusResult = await syncTeacherStatuses(now);
     let noShowResult = { skipped: true };
     try {
@@ -5545,6 +5682,8 @@ exports.syncRuntimeSchedule = onSchedule(
       waitingQueuesDeleted: waitingCleanupResult.deletedCount,
       waitingCleanupSkippedBecauseOpen:
         waitingCleanupResult.skippedBecauseOpen,
+      expiredAppointmentsChecked: expiredAppointmentsResult.checkedCount,
+      expiredAppointmentsExpired: expiredAppointmentsResult.expiredCount,
       teacherStatusesChecked: teacherStatusResult.checkedCount,
       teacherStatusesUpdated: teacherStatusResult.updatedCount,
       noShowReconciliation: noShowResult,
@@ -5647,6 +5786,7 @@ if (process.env.NODE_ENV === "test") {
     appointmentLockId,
     appointmentOverlapsDocs,
     appointmentCanBecomeLive,
+    appointmentShouldExpireScheduled,
     appointmentLinkedQueueId,
     appointmentIsFutureScheduled,
     appointmentTransferEligibility,
@@ -5660,7 +5800,10 @@ if (process.env.NODE_ENV === "test") {
     findContainingZumreSlot,
     generateAppointmentStartOptions,
     noShowVerificationUpdate,
+    expiredAppointmentUpdate,
+    expireEndedScheduledAppointments,
     noShowReconciliationCanWriteMarker,
+    plannedExamItemsAfterCompletingActive,
     plannedExamConflictsWithAppointment,
     plannedExamDurationMinutes,
     plannedExamConflictDocs,

@@ -562,6 +562,143 @@ class _StatisticsPageState extends State<StatisticsPage> {
     }
   }
 
+  Future<TimeOfDay?> _showDigitalTimePicker({
+    required TimeOfDay initialTime,
+  }) async {
+    final hourController = TextEditingController(
+      text: initialTime.hour.toString().padLeft(2, '0'),
+    );
+    final minuteController = TextEditingController(
+      text: initialTime.minute.toString().padLeft(2, '0'),
+    );
+    String? errorText;
+
+    final result = await showDialog<TimeOfDay>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            void submit() {
+              final hour = int.tryParse(hourController.text.trim());
+              final minute = int.tryParse(minuteController.text.trim());
+
+              if (hour == null ||
+                  minute == null ||
+                  hour < 0 ||
+                  hour > 23 ||
+                  minute < 0 ||
+                  minute > 59) {
+                setDialogState(() {
+                  errorText = 'Geçerli bir saat girin.';
+                });
+                return;
+              }
+
+              Navigator.pop(ctx, TimeOfDay(hour: hour, minute: minute));
+            }
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF071A3A),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              title: const Text(
+                'Saat Gir',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: hourController,
+                          autofocus: true,
+                          textAlign: TextAlign.center,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(2),
+                          ],
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 30,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          decoration: const InputDecoration(
+                            hintText: '15',
+                            hintStyle: TextStyle(color: Colors.white30),
+                          ),
+                          onSubmitted: (_) => submit(),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 10),
+                        child: Text(
+                          ':',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 30,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: minuteController,
+                          textAlign: TextAlign.center,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(2),
+                          ],
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 30,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          decoration: const InputDecoration(
+                            hintText: '06',
+                            hintStyle: TextStyle(color: Colors.white30),
+                          ),
+                          onSubmitted: (_) => submit(),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (errorText != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      errorText!,
+                      style: const TextStyle(color: Colors.orangeAccent),
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('İptal'),
+                ),
+                ElevatedButton(
+                  onPressed: submit,
+                  child: const Text('Tamam'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    hourController.dispose();
+    minuteController.dispose();
+    return result;
+  }
+
   Future<void> _showExamModeDialog({
     String initialType = 'tyt',
     DateTime? initialStart,
@@ -660,12 +797,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         );
                         if (pickedDate == null) return;
                         if (!context.mounted) return;
-                        final pickedTime = await showTimePicker(
-                          context: context,
+                        final pickedTime = await _showDigitalTimePicker(
                           initialTime: TimeOfDay.fromDateTime(
                             scheduledDateTime ?? DateTime.now(),
                           ),
-                          initialEntryMode: TimePickerEntryMode.input,
                         );
                         if (pickedTime == null) return;
                         setDialogState(() {
@@ -853,6 +988,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
         'Deneme planlanıyor...',
         () => callable.call<Map<String, dynamic>>({
           'examType': examType,
+          'dateKey': _formatIsoDate(scheduledStart),
+          'startTime': _formatClock(scheduledStart),
           'scheduledStart': scheduledStart.toIso8601String(),
           if (examId != null) 'examId': examId,
         }),
@@ -875,6 +1012,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
           'Deneme planlanıyor...',
           () => callable.call<Map<String, dynamic>>({
             'examType': examType,
+            'dateKey': _formatIsoDate(scheduledStart),
+            'startTime': _formatClock(scheduledStart),
             'scheduledStart': scheduledStart.toIso8601String(),
             'confirm': true,
             if (examId != null) 'examId': examId,
@@ -1722,7 +1861,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                             _reportCard(
                               icon: Icons.groups_rounded,
                               title: 'Sınıf Takip Raporu',
-                              subtitle: 'Öğrenci bazlı zümre ve etüt özeti',
+                              subtitle: 'Öğrenci bazlı zümre ve etüt özetidir Whatsapp gruplarında paylaşmak içindir',
                               color: Colors.greenAccent,
                               compact: compact,
                               onTap: () => _requestClassReportPdf(
@@ -1736,7 +1875,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                               icon: Icons.timeline_rounded,
                               title: 'Sınıf Faaliyet Takip',
                               subtitle:
-                                  'Öğrenci faaliyetlerini tarih sırasıyla listeler',
+                                  'Öğrenci faaliyetlerini tarih sırasıyla listeler Rehber öğretmenler için uygundur',
                               color: Colors.orangeAccent,
                               compact: compact,
                               onTap: () => _requestClassReportPdf(

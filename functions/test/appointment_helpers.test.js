@@ -414,6 +414,77 @@ test("due appointment cannot use future transfer UI path", () => {
   );
 });
 
+test("scheduled appointment does not expire before scheduled end", () => {
+  const appointment = {
+    status: "scheduled",
+    scheduledEnd: fakeTimestamp(new Date("2099-09-15T16:40:00+03:00")),
+  };
+
+  assert.equal(
+    helpers.appointmentShouldExpireScheduled(
+      appointment,
+      new Date("2099-09-15T16:39:00+03:00")
+    ),
+    false
+  );
+});
+
+test("scheduled appointment expires after scheduled end", () => {
+  const appointment = {
+    status: "scheduled",
+    scheduledEnd: fakeTimestamp(new Date("2099-09-15T16:40:00+03:00")),
+  };
+
+  assert.equal(
+    helpers.appointmentShouldExpireScheduled(
+      appointment,
+      new Date("2099-09-15T16:40:00+03:00")
+    ),
+    true
+  );
+});
+
+test("expired appointment update is not no-show verification", () => {
+  const update = helpers.expiredAppointmentUpdate();
+
+  assert.equal(update.status, "expired");
+  assert.equal(Object.hasOwn(update, "noShowVerificationStatus"), false);
+  assert.equal(Object.hasOwn(update, "noShowVerifiedAt"), false);
+});
+
+test("started completed cancelled and no-show appointments do not expire", () => {
+  const now = new Date("2099-09-15T16:45:00+03:00");
+  const scheduledEnd = fakeTimestamp(new Date("2099-09-15T16:40:00+03:00"));
+
+  for (const status of ["started", "completed", "cancelled", "no_show"]) {
+    assert.equal(
+      helpers.appointmentShouldExpireScheduled({ status, scheduledEnd }, now),
+      false
+    );
+  }
+});
+
+test("adjacent slot cleanup expires only the ended scheduled appointment", () => {
+  const now = new Date("2099-09-15T16:40:00+03:00");
+  const endedSlotAppointment = {
+    status: "scheduled",
+    scheduledEnd: fakeTimestamp(new Date("2099-09-15T16:40:00+03:00")),
+  };
+  const nextSlotAppointment = {
+    status: "scheduled",
+    scheduledEnd: fakeTimestamp(new Date("2099-09-15T17:20:00+03:00")),
+  };
+
+  assert.equal(
+    helpers.appointmentShouldExpireScheduled(endedSlotAppointment, now),
+    true
+  );
+  assert.equal(
+    helpers.appointmentShouldExpireScheduled(nextSlotAppointment, now),
+    false
+  );
+});
+
 test("transfer edit window is capped at 15 minutes", () => {
   const appointment = {
     scheduledStart: fakeTimestamp(new Date("2099-09-15T16:30:00+03:00")),
@@ -630,6 +701,37 @@ test("planned exam conflict helper detects overlapping appointment interval", ()
   );
 });
 
+test("ending active institution exam clears active planned exam but keeps scheduled ones", () => {
+  const activeStart = fakeTimestamp(new Date("2099-09-15T10:00:00+03:00"));
+  const activeEnd = fakeTimestamp(new Date("2099-09-15T12:45:00+03:00"));
+  const futureStart = fakeTimestamp(new Date("2099-09-16T10:00:00+03:00"));
+  const futureEnd = fakeTimestamp(new Date("2099-09-16T13:00:00+03:00"));
+
+  const result = helpers.plannedExamItemsAfterCompletingActive({
+    items: [
+      {
+        id: "active-tyt",
+        status: "active",
+        examType: "tyt",
+        scheduledStart: activeStart,
+        scheduledEnd: activeEnd,
+      },
+      {
+        id: "future-ayt",
+        status: "scheduled",
+        examType: "ayt",
+        scheduledStart: futureStart,
+        scheduledEnd: futureEnd,
+      },
+    ],
+  });
+
+  assert.equal(result.completedCount, 1);
+  assert.equal(result.nextItems.length, 1);
+  assert.equal(result.nextItems[0].id, "future-ayt");
+  assert.equal(result.nextItems[0].status, "scheduled");
+});
+
 test("schedule conflict detects only future scheduled appointments invalidated by changed slot", () => {
   const oldScheduleData = {
     weeklySchedule: {
@@ -800,6 +902,12 @@ test("non-no-show appointment statuses are ignored by reconciliation", async () 
     }),
     fakeNoShowDoc("scheduled", {
       status: "scheduled",
+      noShowVerificationStatus: "pending",
+      studentId: "student-a",
+      dateKey: "2099-09-15",
+    }),
+    fakeNoShowDoc("expired", {
+      status: "expired",
       noShowVerificationStatus: "pending",
       studentId: "student-a",
       dateKey: "2099-09-15",
