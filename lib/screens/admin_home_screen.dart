@@ -387,6 +387,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return '$base $cancelledCount planlı zümre iptal edildi.';
   }
 
+  String _scheduleSavedMessage(dynamic data) {
+    return _messageWithCancelledCount('Saatler güncellendi.', data);
+  }
+
   Future<T?> _runInstitutionAction<T>(
     String loadingText,
     Future<T> Function() action,
@@ -2698,7 +2702,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     ButtonSegment(
                       value: 'exam',
                       icon: Icon(Icons.assignment_rounded),
-                      label: Text('Deneme'),
+                      label: FittedBox(child: Text('Deneme')),
                     ),
                   ],
                   selected: {mode},
@@ -3150,6 +3154,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
+        var isSaving = false;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Dialog(
@@ -3205,68 +3210,106 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         children: [
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: () => Navigator.pop(ctx),
+                              onPressed:
+                                  isSaving ? null : () => Navigator.pop(ctx),
                               child: const Text('Vazgeç'),
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: ElevatedButton(
-                              onPressed: () async {
-                                final validationError =
-                                    _validateWeeklySchedule();
-                                if (validationError != null) {
-                                  ScaffoldMessenger.of(this.context)
-                                      .showSnackBar(
-                                    SnackBar(content: Text(validationError)),
-                                  );
-                                  return;
-                                }
+                              onPressed: isSaving
+                                  ? null
+                                  : () async {
+                                      final validationError =
+                                          _validateWeeklySchedule();
+                                      if (validationError != null) {
+                                        ScaffoldMessenger.of(this.context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                              content: Text(validationError)),
+                                        );
+                                        return;
+                                      }
 
-                                final weeklySchedule =
-                                    _weeklyScheduleForFirestore();
-                                final callable = _functions
-                                    .httpsCallable('applyZumreScheduleChange');
-                                var response = await callable.call({
-                                  'weeklySchedule': weeklySchedule,
-                                });
-                                var data = Map<String, dynamic>.from(
-                                    response.data as Map);
+                                      final weeklySchedule =
+                                          _weeklyScheduleForFirestore();
+                                      setDialogState(() => isSaving = true);
 
-                                if (data['requiresConfirm'] == true) {
-                                  final conflicts =
-                                      _conflictsFromResponse(data);
-                                  final confirmed =
-                                      await _confirmAppointmentCancellations(
-                                    title: 'Planlı zümreler iptal edilecek',
-                                    count: data['conflictCount'] as int? ??
-                                        conflicts.length,
-                                    conflicts: conflicts,
-                                    reason:
-                                        'Program değişikliğiyle artık geçerli olmayan planlı zümreler iptal edilecek.',
-                                  );
-                                  if (!confirmed) return;
+                                      try {
+                                        final callable =
+                                            _functions.httpsCallable(
+                                          'applyZumreScheduleChange',
+                                        );
+                                        var response = await callable.call({
+                                          'weeklySchedule': weeklySchedule,
+                                        });
+                                        var data = Map<String, dynamic>.from(
+                                            response.data as Map);
 
-                                  response = await callable.call({
-                                    'weeklySchedule': weeklySchedule,
-                                    'confirm': true,
-                                  });
-                                  data = Map<String, dynamic>.from(
-                                      response.data as Map);
-                                }
+                                        if (data['requiresConfirm'] == true) {
+                                          setDialogState(
+                                              () => isSaving = false);
+                                          final conflicts =
+                                              _conflictsFromResponse(data);
+                                          final confirmed =
+                                              await _confirmAppointmentCancellations(
+                                            title:
+                                                'Planlı zümreler iptal edilecek',
+                                            count:
+                                                data['conflictCount'] as int? ??
+                                                    conflicts.length,
+                                            conflicts: conflicts,
+                                            reason:
+                                                'Program değişikliğiyle artık geçerli olmayan planlı zümreler iptal edilecek.',
+                                          );
+                                          if (!confirmed) return;
 
-                                if (!mounted) return;
-                                if (ctx.mounted) Navigator.pop(ctx);
+                                          if (!ctx.mounted) return;
+                                          setDialogState(() => isSaving = true);
+                                          response = await callable.call({
+                                            'weeklySchedule': weeklySchedule,
+                                            'confirm': true,
+                                          });
+                                          data = Map<String, dynamic>.from(
+                                              response.data as Map);
+                                        }
 
-                                ScaffoldMessenger.of(this.context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Saatler güncellendi. ${data['cancelledCount'] ?? 0} planlı zümre iptal edildi.',
-                                    ),
-                                  ),
-                                );
-                              },
-                              child: const Text('Kaydet'),
+                                        if (!mounted) return;
+                                        if (ctx.mounted) Navigator.pop(ctx);
+
+                                        ScaffoldMessenger.of(this.context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                                _scheduleSavedMessage(data)),
+                                          ),
+                                        );
+                                      } catch (error) {
+                                        if (ctx.mounted) {
+                                          setDialogState(
+                                              () => isSaving = false);
+                                        }
+                                        if (!mounted) return;
+                                        ScaffoldMessenger.of(this.context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Saatler güncellenemedi: ${_institutionActionErrorMessage(error)}',
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    },
+                              child: isSaving
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.2,
+                                      ),
+                                    )
+                                  : const Text('Kaydet'),
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -3313,8 +3356,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
       final rawDay = rawWeekly is Map ? rawWeekly[key] : null;
 
       if (rawDay is Map) {
+        final legacyClosed = rawDay['closed'] == true;
         result[key] = {
-          'closed': rawDay['closed'] == true,
+          'closed': legacyClosed,
+          'zumreClosed': legacyClosed || rawDay['zumreClosed'] == true,
+          'studyClosed': legacyClosed || rawDay['studyClosed'] == true,
           'zumreSlots': _slotListFromRaw(rawDay['zumreSlots']),
           'studySlots': _slotListFromRaw(rawDay['studySlots']),
         };
@@ -3322,6 +3368,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
         final isWeekendDay = key == 'saturday' || key == 'sunday';
         result[key] = {
           'closed': false,
+          'zumreClosed': false,
+          'studyClosed': false,
           'zumreSlots': List<Map<String, String>>.from(
             isWeekendDay ? weekendZumre : weekdayZumre,
           ),
@@ -3337,8 +3385,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
   Map<String, dynamic> _weeklyScheduleForFirestore() {
     return _weeklyScheduleDraft.map((key, value) {
+      final zumreClosed = value['zumreClosed'] == true;
+      final studyClosed = value['studyClosed'] == true;
       return MapEntry(key, {
-        'closed': value['closed'] == true,
+        'closed': zumreClosed && studyClosed,
+        'zumreClosed': zumreClosed,
+        'studyClosed': studyClosed,
         'zumreSlots': List<Map<String, String>>.from(value['zumreSlots']),
         'studySlots': List<Map<String, String>>.from(value['studySlots']),
       });
@@ -3379,15 +3431,68 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return null;
   }
 
+  Widget _scheduleClosedToggle({
+    required String label,
+    required bool value,
+    required Color color,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => onChanged(!value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: value
+              ? color.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: value ? color.withValues(alpha: 0.65) : Colors.white12,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              value
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              color: value ? color : Colors.white54,
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _dailyScheduleTile({
     required String dayKey,
     required String dayLabel,
     required StateSetter setDialogState,
   }) {
     final day = _weeklyScheduleDraft[dayKey]!;
-    final closed = day['closed'] == true;
+    final zumreClosed = day['zumreClosed'] == true || day['closed'] == true;
+    final studyClosed = day['studyClosed'] == true || day['closed'] == true;
     final zumreSlots = day['zumreSlots'] as List<Map<String, String>>;
     final studySlots = day['studySlots'] as List<Map<String, String>>;
+    final summaryParts = <String>[
+      zumreClosed ? 'Zümre kapalı' : '${zumreSlots.length} zümre',
+      studyClosed ? 'Etüt kapalı' : '${studySlots.length} etüt',
+    ];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -3411,36 +3516,52 @@ class _StatisticsPageState extends State<StatisticsPage> {
             ),
           ),
           subtitle: Text(
-            closed
-                ? 'Kurum kapalı'
-                : '${zumreSlots.length} zümre • ${studySlots.length} etüt',
+            summaryParts.join(' • '),
             style: TextStyle(
-              color: closed ? Colors.orangeAccent : Colors.white60,
+              color: (zumreClosed || studyClosed)
+                  ? Colors.orangeAccent
+                  : Colors.white60,
               fontSize: 12,
             ),
           ),
           children: [
-            CheckboxListTile(
-              value: closed,
-              onChanged: (value) {
-                setDialogState(() {
-                  day['closed'] = value == true;
-                });
-              },
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              activeColor: Colors.orangeAccent,
-              checkColor: Colors.black,
-              title: const Text(
-                'Kurum Kapalı',
-                style: TextStyle(color: Colors.white),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: _scheduleClosedToggle(
+                    label: 'Zümre Kapalı',
+                    value: zumreClosed,
+                    color: Colors.greenAccent,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        day['closed'] = false;
+                        day['zumreClosed'] = value;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _scheduleClosedToggle(
+                    label: 'Etüt Kapalı',
+                    value: studyClosed,
+                    color: Colors.cyanAccent,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        day['closed'] = false;
+                        day['studyClosed'] = value;
+                      });
+                    },
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 10),
             _scheduleSection(
               title: 'Zümre Saatleri',
               slots: zumreSlots,
               color: Colors.greenAccent,
-              enabled: !closed,
+              enabled: !zumreClosed,
               onAdd: () {
                 setDialogState(() {
                   zumreSlots.add({'start': '09:00', 'end': '09:40'});
@@ -3455,7 +3576,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               title: 'Etüt Saatleri',
               slots: studySlots,
               color: Colors.cyanAccent,
-              enabled: !closed,
+              enabled: !studyClosed,
               onAdd: () {
                 setDialogState(() {
                   studySlots.add({'start': '10:00', 'end': '10:45'});

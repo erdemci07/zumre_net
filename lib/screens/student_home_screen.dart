@@ -1456,12 +1456,16 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       builder: (context, constraints) {
         const crossAxisSpacing = 8.0;
         const mainAxisSpacing = 8.0;
+        const minItemHeight = 48.0;
         final availableWidth = constraints.maxWidth;
         final availableHeight = constraints.maxHeight;
         final itemWidth = (availableWidth - crossAxisSpacing) / 2;
-        final itemHeight = fillHeight && availableHeight.isFinite
+        final rawItemHeight = fillHeight && availableHeight.isFinite
             ? (availableHeight - (mainAxisSpacing * 3)) / 4
             : itemWidth / (availableWidth < 390 ? 2.5 : 2.35);
+        final shouldScroll = fillHeight && rawItemHeight < minItemHeight;
+        final itemHeight =
+            shouldScroll ? minItemHeight : rawItemHeight.clamp(1.0, 120.0);
         final aspectRatio = itemHeight > 0
             ? itemWidth / itemHeight
             : availableWidth < 390
@@ -1471,7 +1475,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         return GridView.count(
           shrinkWrap: !fillHeight,
           padding: EdgeInsets.zero,
-          physics: const NeverScrollableScrollPhysics(),
+          physics: shouldScroll
+              ? const ClampingScrollPhysics()
+              : const NeverScrollableScrollPhysics(),
           crossAxisCount: 2,
           crossAxisSpacing: crossAxisSpacing,
           mainAxisSpacing: mainAxisSpacing,
@@ -2747,8 +2753,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ...docs.take(5).map((doc) {
                   final data = doc.data();
                   final start = data['scheduledStart'];
-                  final teacher =
-                      data['teacherName']?.toString() ?? 'Öğretmen';
+                  final teacher = data['teacherName']?.toString() ?? 'Öğretmen';
                   final subject = data['subject']?.toString() ?? 'Ders';
 
                   return Container(
@@ -2979,104 +2984,222 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
         if (appointments.isEmpty) return const SizedBox.shrink();
 
-        final visibleAppointments = appointments.take(2).toList();
+        final first = appointments.first.data();
+        final count = appointments.length;
+        final subject = first['subject']?.toString() ?? 'Ders';
+        final teacher = first['teacherName']?.toString() ?? 'Öğretmen';
+        final start = first['scheduledStart'];
+        final summary = count == 1
+            ? '$subject • ${_formatAppointmentClock(start)}'
+            : '$count planlı zümre • sıradaki ${_formatAppointmentClock(start)}';
+
         return Padding(
           padding: const EdgeInsets.only(bottom: 7),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => _showUpcomingAppointmentsSheet(appointments),
+              child: Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(16),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                ),
+                child: Row(
                   children: [
                     Icon(
                       Icons.event_available_rounded,
                       color: Colors.amber.shade300,
-                      size: 16,
+                      size: 15,
                     ),
                     const SizedBox(width: 6),
                     const Text(
-                      'Planlı Zümre',
+                      'Planlı',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 12.5,
+                        fontSize: 11.5,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        count == 1 ? '$summary • $teacher' : summary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: Colors.white54,
+                      size: 18,
+                    ),
                   ],
                 ),
-                const SizedBox(height: 6),
-                ...visibleAppointments.map((doc) {
-                  final data = doc.data();
-                  final subject = data['subject']?.toString() ?? 'Ders';
-                  final teacher = data['teacherName']?.toString() ?? 'Öğretmen';
-                  final start = data['scheduledStart'];
-                  final questionCount = _toInt(
-                    data['questionCount'],
-                    fallback: 1,
-                  );
-                  final questionLabel =
-                      questionCount == 4 ? '4+ soru' : '$questionCount soru';
-                  final canCancel = _appointmentIsFuture(start);
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '$subject • $teacher',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                            ),
+  Future<void> _showUpcomingAppointmentsSheet(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> appointments,
+  ) {
+    return showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF171039),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      builder: (ctx) {
+        final maxHeight = MediaQuery.of(ctx).size.height * 0.70;
+
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.event_available_rounded,
+                        color: Colors.amber.shade300,
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Planlı Zümreler',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            '${_formatAppointmentDate(start)} '
-                            '${_formatAppointmentClock(start)} • $questionLabel',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 11,
+                      ),
+                      IconButton(
+                        tooltip: 'Kapat',
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: appointments.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final doc = appointments[index];
+                        final data = doc.data();
+                        final subject = data['subject']?.toString() ?? 'Ders';
+                        final teacher =
+                            data['teacherName']?.toString() ?? 'Öğretmen';
+                        final start = data['scheduledStart'];
+                        final questionCount = _toInt(
+                          data['questionCount'],
+                          fallback: 1,
+                        );
+                        final questionLabel = questionCount == 4
+                            ? '4+ soru'
+                            : '$questionCount soru';
+                        final canCancel = _appointmentIsFuture(start);
+
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
                             ),
                           ),
-                        ),
-                        if (canCancel) ...[
-                          const SizedBox(width: 4),
-                          SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: IconButton(
-                              tooltip: 'İptal Et',
-                              padding: EdgeInsets.zero,
-                              visualDensity: VisualDensity.compact,
-                              icon: const Icon(
-                                Icons.close_rounded,
-                                size: 17,
-                                color: Colors.orangeAccent,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      subject,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      teacher,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12.5,
+                                        height: 1.2,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      '${_formatAppointmentDate(start)} · '
+                                      '${_formatAppointmentClock(start)} · '
+                                      '$questionLabel',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              onPressed: () => _cancelAppointment(doc.id),
-                            ),
+                              if (canCancel) ...[
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  tooltip: 'İptal Et',
+                                  visualDensity: VisualDensity.compact,
+                                  icon: const Icon(
+                                    Icons.close_rounded,
+                                    color: Colors.orangeAccent,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.pop(ctx);
+                                    _cancelAppointment(doc.id);
+                                  },
+                                ),
+                              ],
+                            ],
                           ),
-                        ],
-                      ],
+                        );
+                      },
                     ),
-                  );
-                }),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
         );

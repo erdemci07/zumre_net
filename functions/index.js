@@ -139,8 +139,11 @@ function getDailySchedule(scheduleData, weekday) {
   const daily = weeklySchedule[dayKey];
 
   if (daily && typeof daily === "object") {
+    const legacyClosed = daily.closed === true;
     return {
-      closed: daily.closed === true,
+      closed: legacyClosed,
+      zumreClosed: legacyClosed || daily.zumreClosed === true,
+      studyClosed: legacyClosed || daily.studyClosed === true,
       zumreSlots: normalizeScheduleSlots(daily.zumreSlots),
       studySlots: normalizeScheduleSlots(daily.studySlots),
     };
@@ -149,6 +152,8 @@ function getDailySchedule(scheduleData, weekday) {
   const weekendDay = isWeekend(weekday);
   return {
     closed: false,
+    zumreClosed: false,
+    studyClosed: false,
     zumreSlots: normalizeScheduleSlots(
       weekendDay ? scheduleData.weekendSlots : scheduleData.weekdaySlots
     ),
@@ -162,12 +167,12 @@ function getDailySchedule(scheduleData, weekday) {
 
 function getStudySlots(scheduleData, weekday) {
   const daily = getDailySchedule(scheduleData, weekday);
-  return daily.closed ? [] : daily.studySlots;
+  return daily.studyClosed ? [] : daily.studySlots;
 }
 
 function getZumreSlots(scheduleData, weekday) {
   const daily = getDailySchedule(scheduleData, weekday);
-  return daily.closed ? [] : daily.zumreSlots;
+  return daily.zumreClosed ? [] : daily.zumreSlots;
 }
 
 function weekdayKeyFromDate(date) {
@@ -202,8 +207,11 @@ function normalizeWeeklySchedule(rawWeekly = {}) {
 
   for (const key of keys) {
     const day = rawWeekly[key] || {};
+    const legacyClosed = day.closed === true;
     result[key] = {
-      closed: day.closed === true,
+      closed: legacyClosed,
+      zumreClosed: legacyClosed || day.zumreClosed === true,
+      studyClosed: legacyClosed || day.studyClosed === true,
       zumreSlots: normalizeScheduleSlots(day.zumreSlots),
       studySlots: normalizeScheduleSlots(day.studySlots),
     };
@@ -232,7 +240,7 @@ function changedZumreDayKeys(oldScheduleData = {}, newWeeklySchedule = {}) {
   return keys.filter((key) => {
     const oldDay = getDailySchedule(oldScheduleData, weekdayShortFromKey(key));
     const newDay = nextSchedule.weeklySchedule[key] || {};
-    return oldDay.closed !== (newDay.closed === true) ||
+    return oldDay.zumreClosed !== (newDay.zumreClosed === true) ||
       slotsSignature(oldDay.zumreSlots) !== slotsSignature(newDay.zumreSlots);
   });
 }
@@ -396,8 +404,8 @@ function buildRuntimeScheduleState(scheduleData, now = new Date()) {
   const nowParts = getIstanbulDateParts(now);
   const currentMinutes = nowParts.hour * 60 + nowParts.minute;
   const dailySchedule = getDailySchedule(scheduleData, nowParts.weekday);
-  const zumreSlots = dailySchedule.closed ? [] : dailySchedule.zumreSlots;
-  const studySlots = dailySchedule.closed ? [] : dailySchedule.studySlots;
+  const zumreSlots = dailySchedule.zumreClosed ? [] : dailySchedule.zumreSlots;
+  const studySlots = dailySchedule.studyClosed ? [] : dailySchedule.studySlots;
   const isZumreOpen = isNowInSlots(currentMinutes, zumreSlots);
   const isStudyOpen = isNowInSlots(currentMinutes, studySlots);
 
@@ -411,6 +419,8 @@ function buildRuntimeScheduleState(scheduleData, now = new Date()) {
           ? "zumre"
           : "closed",
     dailyClosed: dailySchedule.closed,
+    zumreClosed: dailySchedule.zumreClosed,
+    studyClosed: dailySchedule.studyClosed,
   };
 }
 
