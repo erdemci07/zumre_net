@@ -11,6 +11,7 @@ on:
       - "pubspec.yaml"
       - "pubspec.lock"
       - "firebase.json"
+      - "firestore.rules"
       - ".firebaserc"
       - ".github/workflows/deploy-hosting.yml"
 
@@ -56,5 +57,5 @@ jobs:
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
 
-      - name: Deploy Firebase Hosting
-        run: firebase deploy --only hosting --project zumrenet-657e1 --non-interactive
+      - name: Deploy Firebase Hosting and Firestore Rules
+        run: firebase deploy --only hosting,firestore:rules --project zumrenet-657e1 --non-interactive
