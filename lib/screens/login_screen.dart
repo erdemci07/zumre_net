@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -203,30 +204,12 @@ Widget build(BuildContext context) {
                 children: [
                   Container(width: 1, height: 42, color: Colors.white70),
                   const SizedBox(width: 12),
-                  const Column(
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Berfin Güler',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 21,
-                          fontFamily: 'cursive',
-                          fontStyle: FontStyle.italic,
-                          fontWeight: FontWeight.w400,
-                          letterSpacing: .5,
-                        ),
-                      ),
-                      SizedBox(height: 1),
-                      Text(
-                        'tarafından geliştirildi',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: .2,
-                        ),
-                      ),
+                      Text('Berfin Güler',style:GoogleFonts.allura(color:Colors.white,fontSize:30,fontWeight:FontWeight.w500,height:.9)),
+                      const SizedBox(height: 3),
+                      const Text('tarafından geliştirildi',style:TextStyle(color:Colors.white70,fontSize:10.5,fontWeight:FontWeight.w500,letterSpacing:.2)),
                     ],
                   ),
                 ],
