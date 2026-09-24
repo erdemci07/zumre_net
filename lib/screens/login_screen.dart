@@ -207,7 +207,7 @@ Widget build(BuildContext context) {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Vedat Erdemci',
+                        'Berfin Güler',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 18,
