@@ -2477,10 +2477,14 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: data['ok'] == true
+                          onPressed: (data['validCount'] ?? 0) > 0
                               ? () => Navigator.pop(ctx, true)
                               : null,
-                          child: const Text('Sunucuya Aktar'),
+                          child: Text(
+                            (data['invalidCount'] ?? 0) > 0
+                                ? 'Geçerli Kayıtları Aktar'
+                                : 'Sunucuya Aktar',
+                          ),
                         ),
                       ),
                     ],
