@@ -3730,17 +3730,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: Colors.amber.withValues(alpha: 0.28)),
               ),
-              child: const Row(children: [
-                Icon(Icons.hourglass_top_rounded, color: Colors.amberAccent, size: 19),
-                SizedBox(width: 8),
-                Text('Onay Bekliyor', style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold)),
+              child: Row(children: [
+                Icon(appointment['status'] == 'Görüşmede' ? Icons.forum_rounded : appointment['status'] == 'Onaylandı' ? Icons.check_circle_rounded : Icons.hourglass_top_rounded, color: appointment['status'] == 'Görüşmede' ? Colors.orangeAccent : appointment['status'] == 'Onaylandı' ? Colors.lightGreenAccent : Colors.amberAccent, size: 19),
+                const SizedBox(width: 8),
+                Text(appointment['status'] ?? 'Onay Bekliyor', style: TextStyle(color: appointment['status'] == 'Görüşmede' ? Colors.orangeAccent : appointment['status'] == 'Onaylandı' ? Colors.lightGreenAccent : Colors.amberAccent, fontWeight: FontWeight.bold)),
               ]),
             ),
           ],
         ),
         actions: [
           TextButton.icon(
-            onPressed: () async {
+            onPressed: appointment['status'] == 'Görüşmede' ? null : () async {
               final cancel = await showDialog<bool>(
                 context: ctx,
                 builder: (confirmCtx) => AlertDialog(
@@ -3837,7 +3837,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               ),
             ),
             Icon(
-              _guidanceAppointment == null ? Icons.arrow_forward_ios_rounded : Icons.visibility_outlined,
+              _guidanceAppointment == null ? Icons.add_circle_outline_rounded : Icons.chevron_right_rounded,
               color: _guidanceAppointment == null ? Colors.white38 : Colors.cyanAccent,
               size: 18,
             ),
