@@ -536,6 +536,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     _listenStudentInfo();
     _findAndListenActiveQueue();
     _listenRuntimeScheduleState();
+    _listenGuidanceAppointment();
     _zumrePillTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _refreshZumrePillFromCache(),
@@ -668,6 +669,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   void _listenRuntimeScheduleState() {
     _runtimeStateSubscription?.cancel();
+    _guidanceAppointmentSubscription?.cancel();
     _runtimeStateSubscription = _firestore
         .collection('settings')
         .doc('runtimeState')
@@ -1901,12 +1903,71 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  void _listenGuidanceAppointment() {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    _guidanceAppointmentSubscription = _firestore
+        .collection('guidanceAppointments')
+        .where('studentId', isEqualTo: uid)
+        .snapshots()
+        .listen((snapshot) {
+      final active = snapshot.docs.where((doc) {
+        final status = doc.data()['status'];
+        return status != 'cancelled' && status != 'completed' && status != 'no_show';
+      }).toList();
+      active.sort((a, b) {
+        final at = a.data()['createdAt'] as Timestamp?;
+        final bt = b.data()['createdAt'] as Timestamp?;
+        return (bt?.millisecondsSinceEpoch ?? 0).compareTo(at?.millisecondsSinceEpoch ?? 0);
+      });
+      if (!mounted) return;
+      setState(() {
+        if (active.isEmpty) {
+          _guidanceAppointment = null;
+        } else {
+          final d = active.first.data();
+          _guidanceAppointment = {
+            'id': active.first.id,
+            'counselor': '${d['counselorName'] ?? 'Rehberlik Servisi'}',
+            'reason': '${d['reason'] ?? ''}',
+            'day': '${d['dayLabel'] ?? ''}',
+            'time': '${d['time'] ?? ''}',
+            'status': _guidanceStatusLabel('${d['status'] ?? 'pending'}'),
+          };
+        }
+      });
+    });
+  }
+
+  String _guidanceStatusLabel(String status) {
+    switch (status) {
+      case 'approved': return 'Onaylandı';
+      case 'in_progress': return 'Görüşmede';
+      case 'completed': return 'Tamamlandı';
+      case 'cancelled': return 'İptal Edildi';
+      case 'no_show': return 'Gelmedi';
+      default: return 'Onay Bekliyor';
+    }
+  }
+
   Future<void> _showGuidanceAppointmentDemo() async {
-    const counselors = [
-      'Ayşe Yılmaz',
-      'Mehmet Kaya',
-      'Zeynep Demir',
-    ];
+    final counselorSnapshot = await _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'guidance')
+        .get();
+    final counselors = counselorSnapshot.docs
+        .map((d) => {
+              'id': d.id,
+              'name': '${d.data()['fullName'] ?? d.data()['name'] ?? 'Rehberlik Servisi'}',
+            })
+        .toList();
+    if (!mounted) return;
+    if (counselors.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Şu anda kayıtlı rehberlikçi bulunmuyor.')),
+      );
+      return;
+    }
     const reasons = [
       'Akademik takip',
       'Sınav / hedef planlama',
@@ -1922,6 +1983,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     const times = ['10:20', '11:10', '13:40', '14:30', '15:20'];
 
     String? counselor;
+    String? counselorId;
     String? reason;
     String? day;
     String? time;
@@ -2001,10 +2063,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _planningSectionTitle('Rehberlikçi'),
-                          ...counselors.map((name) => Padding(
+                          ...counselors.map((item) { final name = item['name']!; return Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: InkWell(
-                                  onTap: () => setDialogState(() => counselor = name),
+                                  onTap: () => setDialogState(() { counselor = name; counselorId = item['id']; }),
                                   borderRadius: BorderRadius.circular(16),
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
@@ -2048,7 +2110,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                     ),
                                   ),
                                 ),
-                              )),
+                              ); }).toList(),
                           const SizedBox(height: 8),
                           _planningSectionTitle('Görüşme Konusu'),
                           Wrap(
@@ -2118,7 +2180,21 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     height: 52,
                     child: ElevatedButton.icon(
                       onPressed: ready
-                          ? () {
+                          ? () async {
+                              final uid = _auth.currentUser!.uid;
+                              await _firestore.collection('guidanceAppointments').add({
+                                'studentId': uid,
+                                'studentName': _studentName ?? 'Öğrenci',
+                                'counselorId': counselorId,
+                                'counselorName': counselor,
+                                'reason': reason,
+                                'dayLabel': day,
+                                'time': time,
+                                'status': 'pending',
+                                'createdAt': FieldValue.serverTimestamp(),
+                                'updatedAt': FieldValue.serverTimestamp(),
+                              });
+                              if (!mounted) return;
                               setState(() {
                                 _guidanceAppointment = {
                                   'counselor': counselor!,
@@ -3676,6 +3752,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ),
               );
               if (cancel == true && mounted) {
+                final id = appointment['id'];
+                if (id != null) {
+                  await _firestore.collection('guidanceAppointments').doc(id).update({
+                    'status': 'cancelled',
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  });
+                }
+                if (!mounted) return;
                 setState(() => _guidanceAppointment = null);
                 if (ctx.mounted) Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
