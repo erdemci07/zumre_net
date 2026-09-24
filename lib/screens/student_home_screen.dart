@@ -95,6 +95,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String? _selectedSubject;
 
   Map<String, String>? _guidanceAppointment;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _guidanceAppointmentSubscription;
 
   bool _isInStudySession = false;
   bool _isInQueue = false;
