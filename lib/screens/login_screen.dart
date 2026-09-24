@@ -193,11 +193,14 @@ Widget build(BuildContext context) {
           ],
         ),
       ),
-      child: Stack(
+      child: LayoutBuilder(builder:(context,constraints){
+        final keyboardOpen=MediaQuery.viewInsetsOf(context).bottom>0;
+        final compact=constraints.maxHeight<650 || constraints.maxWidth<390;
+        return Stack(
         children: [
           Positioned(
-            top: 22,
-            right: 22,
+            top: keyboardOpen ? 8 : (compact ? 14 : 22),
+            right: compact ? 14 : 22,
             child: IgnorePointer(
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -207,7 +210,7 @@ Widget build(BuildContext context) {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Berfin Güler',style:GoogleFonts.allura(color:Colors.white,fontSize:30,fontWeight:FontWeight.w500,height:.9)),
+                      AnimatedDefaultTextStyle(duration:const Duration(milliseconds:180),style:GoogleFonts.allura(color:Colors.white,fontSize:keyboardOpen?22:(compact?25:30),fontWeight:FontWeight.w500,height:.9),child:const Text('Berfin Güler')),
                       const SizedBox(height: 3),
                       const Text('tarafından geliştirildi',style:TextStyle(color:Colors.white70,fontSize:10.5,fontWeight:FontWeight.w500,letterSpacing:.2)),
                     ],
@@ -218,7 +221,7 @@ Widget build(BuildContext context) {
           ),
           Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(22, 82, 22, 22),
+          padding: EdgeInsets.fromLTRB(22, keyboardOpen ? 62 : 82, 22, 22),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 420),
             padding: const EdgeInsets.all(26),
@@ -382,7 +385,7 @@ AutofillGroup(
         ),
           ),
         ],
-      ),
+      );}),
     ),
   );
 }
