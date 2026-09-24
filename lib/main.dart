@@ -11,6 +11,7 @@ import 'package:zumre_net/auth/auth_service.dart';
 import 'package:zumre_net/screens/login_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:zumre_net/screens/study_guard_home_screen.dart';
+import 'package:zumre_net/screens/guidance_home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -53,6 +54,8 @@ class MyApp extends StatelessWidget {
       return const StudyGuardHomeScreen();
     } else if (role == 'student') {
       return const StudentHomeScreen();
+    } else if (role == 'guidance') {
+      return const GuidanceHomeScreen();
     }
 
     await FirebaseAuth.instance.signOut();
@@ -146,6 +149,7 @@ localizationsDelegates: const [
           '/student': (context) => const StudentHomeScreen(),
           '/teacher': (context) => const TeacherHomeScreen(),
           '/admin': (context) => const AdminHomeScreen(),
+          '/guidance': (context) => const GuidanceHomeScreen(),
         },
       ),
     );
