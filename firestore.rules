@@ -38,6 +38,10 @@ service cloud.firestore {
       return hasRole("studyGuard");
     }
 
+    function isGuidance() {
+      return hasRole("guidance");
+    }
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
@@ -133,6 +137,38 @@ service cloud.firestore {
             "breakUntil",
             "updatedAt"
           ]);
+    }
+
+    // =========================================================
+    // GUIDANCE APPOINTMENTS — REHBERLİK RANDEVULARI
+    // =========================================================
+
+    match /guidanceAppointments/{appointmentId} {
+      allow read: if isAdmin()
+        || (isStudent() && resource.data.studentId == request.auth.uid)
+        || (isGuidance() && resource.data.counselorId == request.auth.uid);
+
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == "pending";
+
+      allow update: if isStudent()
+        && resource.data.studentId == request.auth.uid
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.counselorId == resource.data.counselorId
+        && request.resource.data.status == "cancelled"
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["status", "updatedAt"]);
+
+      allow update: if isGuidance()
+        && resource.data.counselorId == request.auth.uid
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.counselorId == resource.data.counselorId
+        && request.resource.data.status in ["approved", "in_progress", "completed", "no_show"]
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["status", "updatedAt"]);
+
+      allow create, update, delete: if isAdmin();
     }
 
     // =========================================================
