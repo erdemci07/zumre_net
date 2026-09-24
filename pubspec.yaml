@@ -25,6 +25,7 @@ dependencies:
   flutter_local_notifications: ^17.0.0
   cupertino_icons: ^1.0.8
   http: ^1.2.2
+  google_fonts: ^6.3.2
 
   file_picker: ^8.1.2
 
