@@ -94,6 +94,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String? _studentName;
   String? _selectedSubject;
 
+  Map<String, String>? _guidanceAppointment;
+
   bool _isInStudySession = false;
   bool _isInQueue = false;
   bool _isZumreOpenNow = false;
@@ -2117,6 +2119,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     child: ElevatedButton.icon(
                       onPressed: ready
                           ? () {
+                              setState(() {
+                                _guidanceAppointment = {
+                                  'counselor': counselor!,
+                                  'reason': reason!,
+                                  'day': day!,
+                                  'time': time!,
+                                  'status': 'Onay Bekliyor',
+                                };
+                              });
                               Navigator.pop(ctx);
                               ScaffoldMessenger.of(this.context).showSnackBar(
                                 SnackBar(
@@ -3611,9 +3622,96 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  Future<void> _showGuidanceAppointmentDetails() async {
+    final appointment = _guidanceAppointment;
+    if (appointment == null) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF081D3A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Row(children: [
+          Icon(Icons.event_available_rounded, color: Colors.cyanAccent),
+          SizedBox(width: 10),
+          Expanded(child: Text('Rehberlik Randevusu', style: TextStyle(color: Colors.white))),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _guidanceDetailRow(Icons.person_rounded, 'Rehberlikçi', appointment['counselor']!),
+            _guidanceDetailRow(Icons.chat_bubble_outline_rounded, 'Görüşme konusu', appointment['reason']!),
+            _guidanceDetailRow(Icons.calendar_today_rounded, 'Tarih', appointment['day']!),
+            _guidanceDetailRow(Icons.schedule_rounded, 'Saat', appointment['time']!),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.28)),
+              ),
+              child: const Row(children: [
+                Icon(Icons.hourglass_top_rounded, color: Colors.amberAccent, size: 19),
+                SizedBox(width: 8),
+                Text('Onay Bekliyor', style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold)),
+              ]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              final cancel = await showDialog<bool>(
+                context: ctx,
+                builder: (confirmCtx) => AlertDialog(
+                  title: const Text('Randevu iptal edilsin mi?'),
+                  content: const Text('Oluşturduğunuz rehberlik randevu talebi iptal edilecektir.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(confirmCtx, false), child: const Text('Vazgeç')),
+                    TextButton(onPressed: () => Navigator.pop(confirmCtx, true), child: const Text('Randevuyu İptal Et')),
+                  ],
+                ),
+              );
+              if (cancel == true && mounted) {
+                setState(() => _guidanceAppointment = null);
+                if (ctx.mounted) Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Rehberlik randevunuz iptal edildi.')),
+                );
+              }
+            },
+            icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent),
+            label: const Text('İptal Et', style: TextStyle(color: Colors.redAccent)),
+          ),
+          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tamam')),
+        ],
+      ),
+    );
+  }
+
+  Widget _guidanceDetailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 13),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, color: Colors.cyanAccent, size: 19),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          const SizedBox(height: 2),
+          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+        ])),
+      ]),
+    );
+  }
+
   Widget _buildGuidanceAppointmentDemoCard() {
     return InkWell(
-      onTap: _showGuidanceAppointmentDemo,
+      onTap: _guidanceAppointment == null
+          ? _showGuidanceAppointmentDemo
+          : _showGuidanceAppointmentDetails,
       borderRadius: BorderRadius.circular(18),
       child: Container(
         width: double.infinity,
@@ -3630,27 +3728,34 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             color: Colors.cyanAccent.withValues(alpha: 0.28),
           ),
         ),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.forum_rounded, color: Colors.cyanAccent, size: 23),
-            SizedBox(width: 11),
+            const Icon(Icons.forum_rounded, color: Colors.cyanAccent, size: 23),
+            const SizedBox(width: 11),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Rehberlik Randevusu',
+                  const Text('Rehberlik Randevusu',
                       style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
                           fontSize: 14.5)),
-                  SizedBox(height: 2),
-                  Text('Rehberlikçini seç, uygun gün ve saati planla.',
-                      style: TextStyle(color: Colors.white60, fontSize: 11.5)),
+                  const SizedBox(height: 2),
+                  Text(
+                    _guidanceAppointment == null
+                        ? 'Rehberlikçini seç, uygun gün ve saati planla.'
+                        : '${_guidanceAppointment!['day']} • ${_guidanceAppointment!['time']} • ${_guidanceAppointment!['status']}',
+                    style: const TextStyle(color: Colors.white60, fontSize: 11.5),
+                  ),
                 ],
               ),
             ),
-            Icon(Icons.arrow_forward_ios_rounded,
-                color: Colors.white38, size: 16),
+            Icon(
+              _guidanceAppointment == null ? Icons.arrow_forward_ios_rounded : Icons.visibility_outlined,
+              color: _guidanceAppointment == null ? Colors.white38 : Colors.cyanAccent,
+              size: 18,
+            ),
           ],
         ),
       ),
