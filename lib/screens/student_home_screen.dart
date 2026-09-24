@@ -3561,6 +3561,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               _buildUpcomingAppointmentsSection(),
               SizedBox(height: compact ? 6 : 8),
               _buildGuidanceAppointmentDemoCard(),
+              _buildGuidanceTaskCard(),
               SizedBox(height: compact ? 6 : 8),
               if (_isInStudySession) ...[
                 Container(
@@ -3789,6 +3790,40 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
         ])),
       ]),
+    );
+  }
+
+  Widget _buildGuidanceTaskCard() {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore.collection('guidanceTasks').where('studentId', isEqualTo: uid).snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox.shrink();
+        final tasks = snapshot.data!.docs.where((d) => d.data()['active'] != false).toList();
+        if (tasks.isEmpty) return const SizedBox.shrink();
+        final d = tasks.first.data();
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            color: Colors.amber.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.amber.withValues(alpha: 0.28)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.assignment_turned_in_rounded, color: Colors.amberAccent, size: 22),
+            const SizedBox(width: 11),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${d['title'] ?? 'Rehberlik Takibi'}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13.5)),
+              const SizedBox(height: 2),
+              Text('${d['schedule'] ?? 'Haftalık'} • Rehberlikçi tarafından planlandı', style: const TextStyle(color: Colors.white60, fontSize: 11)),
+            ])),
+            const Icon(Icons.repeat_rounded, color: Colors.amberAccent, size: 19),
+          ]),
+        );
+      },
     );
   }
 
