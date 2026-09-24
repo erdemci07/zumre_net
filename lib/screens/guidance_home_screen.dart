@@ -1,51 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-class GuidanceHomeScreen extends StatefulWidget {
+class GuidanceHomeScreen extends StatelessWidget {
   const GuidanceHomeScreen({super.key});
-  @override State<GuidanceHomeScreen> createState() => _GuidanceHomeScreenState();
-}
-
-class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
-  String day = 'Bugün';
-  final items = <Map<String,String>>[
-    {'time':'09:40','student':'Ece Yılmaz','info':'8 • DERSLİK 7 • Sınav / hedef planlama','status':'Tamamlandı'},
-    {'time':'10:20','student':'Ahmet Demir','info':'7 • DERSLİK 6 • Akademik takip','status':'Görüşmede'},
-    {'time':'11:10','student':'Zeynep Kaya','info':'10 • DERSLİK 6 • Motivasyon','status':'Bekliyor'},
-    {'time':'13:40','student':'Ceren Aydın','info':'12 • DERSLİK 11 SAY • Ders çalışma düzeni','status':'Bekliyor'},
-    {'time':'14:30','student':'Mert Şahin','info':'11 • DERSLİK 5 SAY • Genel görüşme','status':'Bekliyor'},
-  ];
-  Color statusColor(String s) => s=='Tamamlandı' ? Colors.greenAccent : s=='Görüşmede' ? Colors.orangeAccent : s=='Gelmedi' ? Colors.redAccent : Colors.cyanAccent;
-  void setStatus(int i,String s){ setState(()=>items[i]['status']=s); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(items[i]['student']!+' • '+s))); }
-  @override Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF06142E),
-      appBar: AppBar(backgroundColor: const Color(0xFF071A3A), foregroundColor: Colors.white,
-        title: const Column(crossAxisAlignment: CrossAxisAlignment.start,children:[Text('Rehberlik',style:TextStyle(fontWeight:FontWeight.bold)),Text('Görüşme ve randevu yönetimi',style:TextStyle(fontSize:11,color:Colors.white60))]),
-        actions:[IconButton(onPressed:()=>FirebaseAuth.instance.signOut(),icon:const Icon(Icons.logout_rounded))]),
-      body: SafeArea(child: ListView(padding:const EdgeInsets.all(16),children:[
-        Container(padding:const EdgeInsets.all(18),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF123A61),Color(0xFF17234F)]),borderRadius:BorderRadius.circular(24),border:Border.all(color:Colors.white12)),
-          child:const Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('Bugünün Görüşmeleri',style:TextStyle(color:Colors.white,fontSize:21,fontWeight:FontWeight.bold)),SizedBox(height:7),Text('5 görüşme • 1 aktif • 3 bekliyor',style:TextStyle(color:Colors.white70)),SizedBox(height:12),Row(children:[Icon(Icons.schedule_rounded,color:Colors.orangeAccent,size:18),SizedBox(width:7),Expanded(child:Text('Aktif görüşme planlanan süreden 8 dk ileride.',style:TextStyle(color:Colors.orangeAccent,fontSize:12.5)))])])),
-        const SizedBox(height:14),
-        Row(children:['Bugün','Yarın','Haftalık'].map((d)=>Expanded(child:Padding(padding:const EdgeInsets.only(right:7),child:ChoiceChip(label:Center(child:Text(d)),selected:day==d,onSelected:(_)=>setState(()=>day=d))))).toList()),
-        const SizedBox(height:16),
-        Row(children:[const Expanded(child:Text('Randevu Akışı',style:TextStyle(color:Colors.white,fontSize:18,fontWeight:FontWeight.bold))),TextButton.icon(onPressed:()=>ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Öğrenci ekleme ekranı açıldı.'))),icon:const Icon(Icons.person_add_alt_1_rounded),label:const Text('Öğrenci Ekle'))]),
-        const SizedBox(height:6),
-        ...List.generate(items.length,(i){ final x=items[i]; final status=x['status']!; final color=statusColor(status); return Container(
-          margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:Colors.white.withValues(alpha:.06),borderRadius:BorderRadius.circular(19),border:Border.all(color:color.withValues(alpha:.28))),
-          child:Column(children:[Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
-            Container(width:58,padding:const EdgeInsets.symmetric(vertical:9),decoration:BoxDecoration(color:color.withValues(alpha:.12),borderRadius:BorderRadius.circular(13)),child:Text(x['time']!,textAlign:TextAlign.center,style:TextStyle(color:color,fontWeight:FontWeight.bold))),
-            const SizedBox(width:12),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(x['student']!,style:const TextStyle(color:Colors.white,fontWeight:FontWeight.bold,fontSize:15)),const SizedBox(height:3),Text(x['info']!,style:const TextStyle(color:Colors.white60,fontSize:12))])),
-            Container(padding:const EdgeInsets.symmetric(horizontal:9,vertical:5),decoration:BoxDecoration(color:color.withValues(alpha:.12),borderRadius:BorderRadius.circular(20)),child:Text(status,style:TextStyle(color:color,fontSize:11,fontWeight:FontWeight.bold)))
-          ]),
-          if(status!='Tamamlandı'&&status!='Gelmedi')...[const SizedBox(height:11),Row(children:[
-            if(status=='Bekliyor') Expanded(child:OutlinedButton(onPressed:()=>setStatus(i,'Görüşmede'),child:const Text('Görüşmeyi Başlat'))),
-            if(status=='Görüşmede') Expanded(child:ElevatedButton(onPressed:()=>setStatus(i,'Tamamlandı'),child:const Text('Görüşmeyi Tamamla'))),
-            const SizedBox(width:8),TextButton(onPressed:()=>setStatus(i,'Gelmedi'),child:const Text('Gelmedi'))
-          ])]])); }),
-        const SizedBox(height:8),
-        Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:Colors.cyanAccent.withValues(alpha:.07),borderRadius:BorderRadius.circular(18),border:Border.all(color:Colors.cyanAccent.withValues(alpha:.20))),child:const Row(children:[Icon(Icons.notifications_active_outlined,color:Colors.cyanAccent),SizedBox(width:10),Expanded(child:Text('Sıradaki öğrenciye görüşme yaklaşınca bildirim gönderilir; saat değişirse yeni saat öğrenciye yansıtılır.',style:TextStyle(color:Colors.white70,fontSize:12.5)))])),
-      ])),
-    );
+  Future<void> changeStatus(BuildContext context,String id,String status) async {
+    await FirebaseFirestore.instance.collection('guidanceAppointments').doc(id).update({'status':status,'updatedAt':FieldValue.serverTimestamp()});
+    if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(status=='approved'?'Randevu onaylandı.':status=='in_progress'?'Görüşme başlatıldı.':status=='completed'?'Görüşme tamamlandı.':'Randevu güncellendi.')));
   }
+  String label(String s)=>s=='approved'?'Onaylandı':s=='in_progress'?'Görüşmede':s=='completed'?'Tamamlandı':s=='no_show'?'Gelmedi':s=='cancelled'?'İptal':'Onay Bekliyor';
+  Color color(String s)=>s=='completed'?Colors.greenAccent:s=='in_progress'?Colors.orangeAccent:s=='no_show'||s=='cancelled'?Colors.redAccent:s=='approved'?Colors.lightGreenAccent:Colors.cyanAccent;
+  @override Widget build(BuildContext context){ final uid=FirebaseAuth.instance.currentUser!.uid; return Scaffold(
+    backgroundColor:const Color(0xFF06142E),
+    appBar:AppBar(backgroundColor:const Color(0xFF071A3A),foregroundColor:Colors.white,title:const Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('Rehberlik',style:TextStyle(fontWeight:FontWeight.bold)),Text('Görüşme ve randevu yönetimi',style:TextStyle(fontSize:11,color:Colors.white60))]),actions:[IconButton(onPressed:()=>FirebaseAuth.instance.signOut(),icon:const Icon(Icons.logout_rounded))]),
+    body:StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(stream:FirebaseFirestore.instance.collection('guidanceAppointments').where('counselorId',isEqualTo:uid).snapshots(),builder:(context,snap){
+      if(!snap.hasData)return const Center(child:CircularProgressIndicator());
+      final docs=snap.data!.docs.toList()..sort((a,b){final at=a.data()['createdAt'] as Timestamp?;final bt=b.data()['createdAt'] as Timestamp?;return (bt?.millisecondsSinceEpoch??0).compareTo(at?.millisecondsSinceEpoch??0);});
+      final active=docs.where((d)=>!['cancelled','completed','no_show'].contains(d.data()['status'])).length;
+      return ListView(padding:const EdgeInsets.all(16),children:[
+        Container(padding:const EdgeInsets.all(18),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF123A61),Color(0xFF17234F)]),borderRadius:BorderRadius.circular(24)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Randevularım',style:TextStyle(color:Colors.white,fontSize:21,fontWeight:FontWeight.bold)),const SizedBox(height:7),Text('${docs.length} kayıt • $active aktif',style:const TextStyle(color:Colors.white70)),const SizedBox(height:8),const Text('Yeni öğrenci talebi bu ekrana anlık düşer.',style:TextStyle(color:Colors.cyanAccent,fontSize:12))])),
+        const SizedBox(height:16),
+        if(docs.isEmpty) Container(padding:const EdgeInsets.all(28),decoration:BoxDecoration(color:Colors.white.withValues(alpha:.05),borderRadius:BorderRadius.circular(20)),child:const Column(children:[Icon(Icons.event_busy_rounded,color:Colors.white38,size:38),SizedBox(height:10),Text('Henüz randevu talebi yok',style:TextStyle(color:Colors.white70))])),
+        ...docs.map((doc){final x=doc.data();final s='${x['status']??'pending'}';final c=color(s);return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:Colors.white.withValues(alpha:.06),borderRadius:BorderRadius.circular(19),border:Border.all(color:c.withValues(alpha:.28))),child:Column(children:[
+          Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Container(width:58,padding:const EdgeInsets.symmetric(vertical:9),decoration:BoxDecoration(color:c.withValues(alpha:.12),borderRadius:BorderRadius.circular(13)),child:Text('${x['time']??''}',textAlign:TextAlign.center,style:TextStyle(color:c,fontWeight:FontWeight.bold))),const SizedBox(width:12),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('${x['studentName']??'Öğrenci'}',style:const TextStyle(color:Colors.white,fontWeight:FontWeight.bold,fontSize:15)),const SizedBox(height:3),Text('${x['dayLabel']??''} • ${x['reason']??''}',style:const TextStyle(color:Colors.white60,fontSize:12))])),Container(padding:const EdgeInsets.symmetric(horizontal:8,vertical:5),decoration:BoxDecoration(color:c.withValues(alpha:.12),borderRadius:BorderRadius.circular(20)),child:Text(label(s),style:TextStyle(color:c,fontSize:10,fontWeight:FontWeight.bold)))]),
+          if(!['completed','cancelled','no_show'].contains(s))...[const SizedBox(height:11),Row(children:[if(s=='pending')Expanded(child:ElevatedButton(onPressed:()=>changeStatus(context,doc.id,'approved'),child:const Text('Onayla'))),if(s=='approved')Expanded(child:ElevatedButton(onPressed:()=>changeStatus(context,doc.id,'in_progress'),child:const Text('Görüşmeyi Başlat'))),if(s=='in_progress')Expanded(child:ElevatedButton(onPressed:()=>changeStatus(context,doc.id,'completed'),child:const Text('Tamamla'))),const SizedBox(width:7),TextButton(onPressed:()=>changeStatus(context,doc.id,'no_show'),child:const Text('Gelmedi'))])]
+        ]));}).toList(),
+      ]);
+    }),
+  );}
 }
