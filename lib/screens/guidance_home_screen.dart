@@ -8,6 +8,7 @@ class GuidanceHomeScreen extends StatefulWidget {
 }
 class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
   final db=FirebaseFirestore.instance; final auth=FirebaseAuth.instance;
+  String flowFilter='today';
   String statusLabel(String s)=>s=='approved'?'Onaylandı':s=='in_progress'?'Görüşmede':s=='completed'?'Tamamlandı':s=='no_show'?'Gelmedi':s=='cancelled'?'İptal':'Onay Bekliyor';
   Color statusColor(String s)=>s=='completed'?Colors.green:s=='in_progress'?Colors.orange:s=='no_show'||s=='cancelled'?Colors.red:s=='approved'?Colors.teal:const Color(0xFF2675D8);
   Future<void> changeStatus(String id,String status)=>db.collection('guidanceAppointments').doc(id).update({'status':status,'updatedAt':FieldValue.serverTimestamp()});
@@ -94,13 +95,48 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
     }));
   }
 
+  Widget _flowFilterButton(String value,String label,int count){
+    final selected=flowFilter==value;
+    return InkWell(
+      borderRadius:BorderRadius.circular(15),
+      onTap:()=>setState(()=>flowFilter=value),
+      child:AnimatedContainer(
+        duration:const Duration(milliseconds:180),
+        padding:const EdgeInsets.symmetric(vertical:11,horizontal:6),
+        decoration:BoxDecoration(
+          color:selected?const Color(0xFFC75B82):Colors.white.withValues(alpha:.08),
+          borderRadius:BorderRadius.circular(15),
+          border:Border.all(color:selected?const Color(0xFFFFB1C8):Colors.white24),
+        ),
+        child:Row(mainAxisAlignment:MainAxisAlignment.center,children:[
+          Flexible(child:Text(label,overflow:TextOverflow.ellipsis,style:TextStyle(color:Colors.white,fontSize:12,fontWeight:selected?FontWeight.w800:FontWeight.w600))),
+          const SizedBox(width:5),
+          Container(padding:const EdgeInsets.symmetric(horizontal:6,vertical:2),decoration:BoxDecoration(color:Colors.white.withValues(alpha:selected?.22:.10),borderRadius:BorderRadius.circular(10)),child:Text('$count',style:const TextStyle(color:Colors.white,fontSize:10,fontWeight:FontWeight.w800))),
+        ]),
+      ),
+    );
+  }
+
   @override Widget build(BuildContext context){final uid=auth.currentUser!.uid;return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:db.collection('users').doc(uid).snapshots(),builder:(context,userSnap){final name='${userSnap.data?.data()?['fullName']??'Rehberlik Servisi'}';return Scaffold(
     backgroundColor:const Color(0xFF4A1830),appBar:AppBar(elevation:0,backgroundColor:const Color(0xFF6B2143),foregroundColor:Colors.white,title:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(name,style:const TextStyle(fontWeight:FontWeight.w800)),const Text('Rehberlik Servisi',style:TextStyle(fontSize:11,color:Colors.white60))]),actions:[IconButton(onPressed:()=>auth.signOut(),icon:const Icon(Icons.logout_rounded))]),
     floatingActionButton:FloatingActionButton.extended(onPressed:addStudent,icon:const Icon(Icons.person_add_alt_1_rounded),label:const Text('Öğrenci Ekle')),
-    body:StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(stream:db.collection('guidanceAppointments').where('counselorId',isEqualTo:uid).snapshots(),builder:(context,snap){if(!snap.hasData)return const Center(child:CircularProgressIndicator());final docs=snap.data!.docs.toList()..sort((a,b){final at=a.data()['createdAt'] as Timestamp?;final bt=b.data()['createdAt'] as Timestamp?;return(bt?.millisecondsSinceEpoch??0).compareTo(at?.millisecondsSinceEpoch??0);});final active=docs.where((d)=>!['completed','cancelled','no_show'].contains(d.data()['status'])).length;return ListView(padding:const EdgeInsets.all(16),children:[
+    body:StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(stream:db.collection('guidanceAppointments').where('counselorId',isEqualTo:uid).snapshots(),builder:(context,snap){if(!snap.hasData)return const Center(child:CircularProgressIndicator());final docs=snap.data!.docs.toList()..sort((a,b){final at=a.data()['createdAt'] as Timestamp?;final bt=b.data()['createdAt'] as Timestamp?;return(bt?.millisecondsSinceEpoch??0).compareTo(at?.millisecondsSinceEpoch??0);});final active=docs.where((d)=>!['completed','cancelled','no_show'].contains(d.data()['status'])).length;
+      final today=docs.where((d){final x=d.data();return x['dayLabel']=='Bugün'&&!['completed','cancelled','no_show'].contains(x['status']);}).toList();
+      final upcoming=docs.where((d){final x=d.data();return x['dayLabel']!='Bugün'&&!['completed','cancelled','no_show'].contains(x['status']);}).toList();
+      final finished=docs.where((d)=>['completed','cancelled','no_show'].contains(d.data()['status'])).toList();
+      final visible=flowFilter=='today'?today:flowFilter=='upcoming'?upcoming:finished;
+      return ListView(padding:const EdgeInsets.all(16),children:[
       Container(padding:const EdgeInsets.all(20),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF6A1B3D),Color(0xFFB54C72)]),borderRadius:BorderRadius.circular(26)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Bugünün Rehberlik Akışı',style:TextStyle(color:Colors.white,fontSize:22,fontWeight:FontWeight.w800)),const SizedBox(height:5),Text('${docs.length} kayıt • $active aktif görüşme/talep',style:const TextStyle(color:Colors.white70)),const SizedBox(height:14),OutlinedButton.icon(style:OutlinedButton.styleFrom(foregroundColor:Colors.white,side:const BorderSide(color:Colors.white54)),onPressed:addWeeklyTask,icon:const Icon(Icons.repeat_rounded),label:const Text('Haftalık Takip Ver'))])),
-      const SizedBox(height:16),if(docs.isEmpty)Container(padding:const EdgeInsets.all(28),decoration:BoxDecoration(color:Colors.white.withValues(alpha:.06),borderRadius:BorderRadius.circular(20)),child:const Center(child:Text('Henüz randevu veya görüşme yok.',style:TextStyle(color:Colors.white70)))),
-      ...docs.map((doc){final x=doc.data();final s='${x['status']??'pending'}';final col=statusColor(s);return Container(margin:const EdgeInsets.only(bottom:12),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF48152C),Color(0xFF70213F)]),borderRadius:BorderRadius.circular(20),border:Border.all(color:Colors.white12)),child:Padding(padding:const EdgeInsets.all(15),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      const SizedBox(height:14),
+      Row(children:[
+        Expanded(child:_flowFilterButton('today','Bugün',today.length)),
+        const SizedBox(width:7),
+        Expanded(child:_flowFilterButton('upcoming','Yaklaşan',upcoming.length)),
+        const SizedBox(width:7),
+        Expanded(child:_flowFilterButton('finished','Geçmiş',finished.length)),
+      ]),
+      const SizedBox(height:16),if(visible.isEmpty)Container(padding:const EdgeInsets.all(28),decoration:BoxDecoration(color:Colors.white.withValues(alpha:.06),borderRadius:BorderRadius.circular(20)),child:const Center(child:Text('Henüz randevu veya görüşme yok.',style:TextStyle(color:Colors.white70)))),
+      ...visible.map((doc){final x=doc.data();final s='${x['status']??'pending'}';final col=statusColor(s);return Container(margin:const EdgeInsets.only(bottom:12),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF48152C),Color(0xFF70213F)]),borderRadius:BorderRadius.circular(20),border:Border.all(color:Colors.white12)),child:Padding(padding:const EdgeInsets.all(15),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
         Row(children:[CircleAvatar(backgroundColor:col.withValues(alpha:.12),child:Icon(Icons.person_rounded,color:col)),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('${x['studentName']??'Öğrenci'}',style:const TextStyle(color:Colors.white,fontWeight:FontWeight.w800,fontSize:16)),Text('${x['dayLabel']??''} • ${x['time']??''} • ${x['reason']??''}',style:const TextStyle(color:Colors.white60,fontSize:12))])),Chip(label:Text(statusLabel(s)),backgroundColor:col.withValues(alpha:.10),labelStyle:TextStyle(color:col,fontWeight:FontWeight.w700))]),
         if(!['completed','cancelled','no_show'].contains(s))...[const Divider(height:22),Row(children:[if(s=='pending')Expanded(child:FilledButton(onPressed:()=>changeStatus(doc.id,'approved'),child:const Text('Onayla'))),if(s=='approved')Expanded(child:FilledButton(onPressed:()async{final planned='\${x['dayLabel']??''}';if(planned!='Bugün'){final ok=await showDialog<bool>(context:context,builder:(dctx)=>AlertDialog(title:const Text('Planlanan günden önce başlat'),content:Text('Bu görüşme \$planned için planlandı. Yine de şimdi başlatmak istiyor musunuz?'),actions:[TextButton(onPressed:()=>Navigator.pop(dctx,false),child:const Text('Vazgeç')),FilledButton(onPressed:()=>Navigator.pop(dctx,true),child:const Text('Evet, Başlat'))]));if(ok!=true)return;}await changeStatus(doc.id,'in_progress');},child:const Text('Görüşmeyi Başlat'))),if(s=='in_progress')Expanded(child:FilledButton(onPressed:()=>changeStatus(doc.id,'completed'),child:const Text('Görüşmeyi Tamamla'))),const SizedBox(width:8),OutlinedButton(onPressed:s=='in_progress'?null:()async{final ok=await showDialog<bool>(context:context,builder:(dctx)=>AlertDialog(title:const Text('Randevuyu iptal et'),content:const Text('Bu randevu iptal edilecek. Devam edilsin mi?'),actions:[TextButton(onPressed:()=>Navigator.pop(dctx,false),child:const Text('Vazgeç')),FilledButton(onPressed:()=>Navigator.pop(dctx,true),child:const Text('İptal Et'))]));if(ok==true)await changeStatus(doc.id,'cancelled');},child:const Text('İptal Et')),const SizedBox(width:8),OutlinedButton(onPressed:s=='in_progress'?null:()=>changeStatus(doc.id,'no_show'),child:const Text('Gelmedi'))])]
       ])));})
