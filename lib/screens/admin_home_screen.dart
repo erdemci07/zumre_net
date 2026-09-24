@@ -4122,7 +4122,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
       FirebaseFunctions.instanceFor(region: 'us-central1');
   static const int _bulkDeleteClientBatchSize = 50;
 
-  final List<String> _roles = ['admin', 'teacher', 'student', 'studyGuard'];
+  final List<String> _roles = ['admin', 'teacher', 'student', 'guidance', 'studyGuard'];
   String _roleLabel(String role) {
     switch (role.trim()) {
       case 'admin':
@@ -4131,6 +4131,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
         return 'Öğretmen';
       case 'student':
         return 'Öğrenci';
+      case 'guidance':
+        return 'Rehberlikçi';
       case 'studyGuard':
         return 'Etüt Görevlisi';
       default:
