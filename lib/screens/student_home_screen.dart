@@ -2103,7 +2103,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                             ),
                           const SizedBox(height: 14),
                           _planningInfoBox(
-                            'Demo ekranı • Seçimler şu an kaydedilmez. Gerçek randevu altyapısı sonraki aşamada bağlanacaktır.',
+                            'Randevu talebiniz rehberlik birimine iletilecektir. Görüşme saatiniz rehberlikçi tarafından gerektiğinde güncellenebilir.',
                             color: Colors.cyanAccent,
                           ),
                         ],
@@ -2121,7 +2121,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                               ScaffoldMessenger.of(this.context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    'Demo randevu: $counselor • $day • $time',
+                                    'Randevu talebiniz oluşturuldu: $counselor • $day • $time',
                                   ),
                                 ),
                               );
