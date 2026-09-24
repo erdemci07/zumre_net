@@ -192,9 +192,49 @@ Widget build(BuildContext context) {
           ],
         ),
       ),
-      child: Center(
+      child: Stack(
+        children: [
+          Positioned(
+            top: 22,
+            right: 22,
+            child: IgnorePointer(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(width: 1, height: 42, color: Colors.white70),
+                  const SizedBox(width: 12),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Vedat Erdemci',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontStyle: FontStyle.italic,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: .3,
+                        ),
+                      ),
+                      SizedBox(height: 1),
+                      Text(
+                        'tarafından geliştirildi',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: .2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(22),
+          padding: const EdgeInsets.fromLTRB(22, 82, 22, 22),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 420),
             padding: const EdgeInsets.all(26),
@@ -356,6 +396,9 @@ AutofillGroup(
             ),
           ),
         ),
+      ),
+          ),
+        ],
       ),
     ),
   );
