@@ -722,7 +722,7 @@ async function deleteWaitingZumreQueuesWhenClosed(
 // KULLANICI ŞİFRESİ GÜNCELLEME
 // ============================================================
 
-const USER_ROLES = ["admin", "teacher", "student", "studyGuard"];
+const USER_ROLES = ["admin", "teacher", "student", "guidance", "studyGuard"];
 const USER_EMAIL_DOMAIN = "@bilimkalesi.com";
 
 async function assertAdminCaller(request) {
