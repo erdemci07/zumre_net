@@ -2110,7 +2110,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                     ),
                                   ),
                                 ),
-                              ); }).toList(),
+                              ); }),
                           const SizedBox(height: 8),
                           _planningSectionTitle('Görüşme Konusu'),
                           Wrap(
