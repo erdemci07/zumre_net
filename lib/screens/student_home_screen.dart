@@ -1899,6 +1899,257 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  Future<void> _showGuidanceAppointmentDemo() async {
+    const counselors = [
+      'Ayşe Yılmaz',
+      'Mehmet Kaya',
+      'Zeynep Demir',
+    ];
+    const reasons = [
+      'Akademik takip',
+      'Sınav / hedef planlama',
+      'Ders çalışma düzeni',
+      'Motivasyon',
+      'Genel görüşme',
+    ];
+    const days = [
+      'Yarın • 26 Eyl',
+      'Pazartesi • 28 Eyl',
+      'Salı • 29 Eyl',
+    ];
+    const times = ['10:20', '11:10', '13:40', '14:30', '15:20'];
+
+    String? counselor;
+    String? reason;
+    String? day;
+    String? time;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final ready =
+              counselor != null && reason != null && day != null && time != null;
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 560, maxHeight: 720),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF081D3A), Color(0xFF123A61), Color(0xFF071A3A)],
+                ),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.30),
+                    blurRadius: 24,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.cyanAccent.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.forum_rounded,
+                            color: Colors.cyanAccent, size: 25),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Rehberlik Randevusu',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 21,
+                                    fontWeight: FontWeight.bold)),
+                            SizedBox(height: 3),
+                            Text('Görüşme için rehberlikçi, konu ve saat seçin.',
+                                style: TextStyle(
+                                    color: Colors.white60, fontSize: 12.5)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _planningSectionTitle('Rehberlikçi'),
+                          ...counselors.map((name) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: InkWell(
+                                  onTap: () => setDialogState(() => counselor = name),
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: counselor == name
+                                          ? Colors.cyanAccent.withValues(alpha: 0.12)
+                                          : Colors.white.withValues(alpha: 0.05),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: counselor == name
+                                            ? Colors.cyanAccent.withValues(alpha: 0.65)
+                                            : Colors.white12,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 18,
+                                          backgroundColor:
+                                              Colors.white.withValues(alpha: 0.10),
+                                          child: const Icon(Icons.person_rounded,
+                                              color: Colors.white70, size: 20),
+                                        ),
+                                        const SizedBox(width: 11),
+                                        Expanded(
+                                          child: Text(name,
+                                              style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600)),
+                                        ),
+                                        Icon(
+                                          counselor == name
+                                              ? Icons.check_circle_rounded
+                                              : Icons.chevron_right_rounded,
+                                          color: counselor == name
+                                              ? Colors.cyanAccent
+                                              : Colors.white38,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              )),
+                          const SizedBox(height: 8),
+                          _planningSectionTitle('Görüşme Konusu'),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: reasons
+                                .map((item) => _planningChoiceChip(
+                                      label: item,
+                                      selected: reason == item,
+                                      enabled: true,
+                                      onTap: () =>
+                                          setDialogState(() => reason = item),
+                                      color: Colors.cyanAccent,
+                                    ))
+                                .toList(),
+                          ),
+                          const SizedBox(height: 16),
+                          _planningSectionTitle('Tarih'),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: days
+                                .map((item) => _planningChoiceChip(
+                                      label: item,
+                                      selected: day == item,
+                                      enabled: true,
+                                      onTap: () => setDialogState(() {
+                                        day = item;
+                                        time = null;
+                                      }),
+                                      color: Colors.cyanAccent,
+                                    ))
+                                .toList(),
+                          ),
+                          const SizedBox(height: 16),
+                          _planningSectionTitle('Uygun Saatler'),
+                          if (day == null)
+                            _planningInfoBox('Önce bir tarih seçin.')
+                          else
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: times
+                                  .map((item) => _planningChoiceChip(
+                                        label: item,
+                                        selected: time == item,
+                                        enabled: true,
+                                        centered: true,
+                                        onTap: () =>
+                                            setDialogState(() => time = item),
+                                        color: Colors.cyanAccent,
+                                      ))
+                                  .toList(),
+                            ),
+                          const SizedBox(height: 14),
+                          _planningInfoBox(
+                            'Demo ekranı • Seçimler şu an kaydedilmez. Gerçek randevu altyapısı sonraki aşamada bağlanacaktır.',
+                            color: Colors.cyanAccent,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton.icon(
+                      onPressed: ready
+                          ? () {
+                              Navigator.pop(ctx);
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Demo randevu: $counselor • $day • $time',
+                                  ),
+                                ),
+                              );
+                            }
+                          : null,
+                      icon: const Icon(Icons.event_available_rounded),
+                      label: const Text('Randevu Talebi Oluştur',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00A6C7),
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor:
+                            Colors.white.withValues(alpha: 0.14),
+                        disabledForegroundColor: Colors.white54,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _showPlanAppointmentDialog() async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -3220,7 +3471,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               SizedBox(height: compact ? 8 : 10),
               _buildCooldownCard(),
               _buildUpcomingAppointmentsSection(),
-              SizedBox(height: compact ? 4 : 6),
+              SizedBox(height: compact ? 6 : 8),
+              _buildGuidanceAppointmentDemoCard(),
+              SizedBox(height: compact ? 6 : 8),
               if (_isInStudySession) ...[
                 Container(
                   width: double.infinity,
@@ -3354,6 +3607,52 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildGuidanceAppointmentDemoCard() {
+    return InkWell(
+      onTap: _showGuidanceAppointmentDemo,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              const Color(0xFF00A6C7).withValues(alpha: 0.18),
+              Colors.white.withValues(alpha: 0.05),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: Colors.cyanAccent.withValues(alpha: 0.28),
+          ),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.forum_rounded, color: Colors.cyanAccent, size: 23),
+            SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Rehberlik Randevusu',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14.5)),
+                  SizedBox(height: 2),
+                  Text('Rehberlikçini seç, uygun gün ve saati planla.',
+                      style: TextStyle(color: Colors.white60, fontSize: 11.5)),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded,
+                color: Colors.white38, size: 16),
+          ],
+        ),
       ),
     );
   }
