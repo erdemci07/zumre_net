@@ -172,6 +172,20 @@ service cloud.firestore {
     }
 
     // =========================================================
+    // GUIDANCE TASKS — HAFTALIK REHBERLİK TAKİPLERİ
+    // =========================================================
+    match /guidanceTasks/{taskId} {
+      allow read: if isAdmin()
+        || (isStudent() && resource.data.studentId == request.auth.uid)
+        || (isGuidance() && resource.data.counselorId == request.auth.uid);
+      allow create, update: if isGuidance()
+        && request.resource.data.counselorId == request.auth.uid;
+      allow delete: if isGuidance()
+        && resource.data.counselorId == request.auth.uid;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================================================
     // APPOINTMENTS — PLANLI ZÜMRE RANDEVULARI
     // =========================================================
 
