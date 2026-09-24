@@ -44,9 +44,9 @@ STUDENT_ALIASES = {
         "no",
     ],
     "password": ["sifre", "şifre", "password", "parola", "sifre*", "şifre*", "password*", "parola*"],
-    "className": ["sinif", "sınıf", "class", "sinifi"],
-    "branch": ["sube", "şube", "branch"],
-    "department": ["alan", "bolum", "bölüm", "program", "alan*", "bolum*", "bölüm*", "program*"],
+    "className": ["sinif", "sınıf", "class", "sinifi", "hazirlik", "hazırlık"],
+    "branch": ["sube", "şube", "branch", "bolum", "bölüm"],
+    "department": ["alan", "program", "alan*", "program*"],
     "studentNo": ["ogrenci no", "öğrenci no", "numara", "no", "ogrenci no*", "öğrenci no*", "numara*", "no*"],
     "phone": ["telefon", "telefon numarasi", "telefon numarası", "cep telefonu"],
 }
