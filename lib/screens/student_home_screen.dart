@@ -917,7 +917,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
       final data = doc.data();
       setState(() {
-        _studentName = data?['name'] ?? data?['email'] ?? 'Öğrenci';
+        final fullName = '${data?['fullName'] ?? ''}'.trim();
+        final name = '${data?['name'] ?? ''}'.trim();
+        final surname = '${data?['surname'] ?? ''}'.trim();
+        _studentName = fullName.isNotEmpty ? fullName : '$name $surname'.trim();
+        if (_studentName!.isEmpty) _studentName = data?['email'] ?? 'Öğrenci';
         _isInStudySession = data?['isInStudySession'] == true;
       });
 
