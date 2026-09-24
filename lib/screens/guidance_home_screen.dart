@@ -13,16 +13,65 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
   Future<void> changeStatus(String id,String status)=>db.collection('guidanceAppointments').doc(id).update({'status':status,'updatedAt':FieldValue.serverTimestamp()});
 
   Future<void> addStudent() async {
-    final students=await db.collection('users').where('role',isEqualTo:'student').get();
-    if(!mounted)return; String? studentId,studentName,reason; String day='Bugün'; String time='14:30';
-    const reasons=['Akademik takip','Ödev kontrolü','Sınav / hedef planlama','Ders çalışma düzeni','Motivasyon','Genel görüşme'];
-    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(
-      title:const Text('Öğrenci Ekle'),content:SizedBox(width:480,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
-        DropdownButtonFormField<String>(decoration:const InputDecoration(labelText:'Öğrenci'),items:students.docs.map((d){final x=d.data();final n='${x['fullName']??'${x['name']??''} ${x['surname']??''}'}';return DropdownMenuItem(value:d.id,child:Text(n));}).toList(),onChanged:(v){final d=students.docs.firstWhere((e)=>e.id==v).data();setD((){studentId=v;studentName='${d['fullName']??'${d['name']??''} ${d['surname']??''}'}';});}),
-        const SizedBox(height:10),DropdownButtonFormField<String>(decoration:const InputDecoration(labelText:'Görüşme / görev'),items:reasons.map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),onChanged:(v)=>setD(()=>reason=v)),
-        const SizedBox(height:10),TextFormField(initialValue:day,decoration:const InputDecoration(labelText:'Gün'),onChanged:(v)=>day=v),const SizedBox(height:10),TextFormField(initialValue:time,decoration:const InputDecoration(labelText:'Saat'),onChanged:(v)=>time=v),
-      ]))),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Vazgeç')),FilledButton(onPressed:studentId==null||reason==null?null:()async{final u=await db.collection('users').doc(auth.currentUser!.uid).get();await db.collection('guidanceAppointments').add({'studentId':studentId,'studentName':studentName,'counselorId':auth.currentUser!.uid,'counselorName':u.data()?['fullName']??'Rehberlik Servisi','reason':reason,'dayLabel':day,'time':time,'status':'approved','source':'guidance','createdAt':FieldValue.serverTimestamp(),'updatedAt':FieldValue.serverTimestamp()});if(ctx.mounted)Navigator.pop(ctx);},child:const Text('Ekle'))]
-    )));
+    final students = await db.collection('users').where('role', isEqualTo: 'student').get();
+    if (!mounted) return;
+    String query = '';
+    String? selectedId;
+    String? selectedName;
+    String reason = 'Akademik takip';
+    String day = 'Bugün';
+    String time = '14:30';
+    const reasons = ['Akademik takip','Ödev kontrolü','Sınav / hedef planlama','Ders çalışma düzeni','Motivasyon','Genel görüşme'];
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
+        final filtered = students.docs.where((d) {
+          final x=d.data();
+          final name='${x['fullName'] ?? '${x['name'] ?? ''} ${x['surname'] ?? ''}'}'.trim();
+          final cls='${x['className'] ?? ''} ${x['branch'] ?? ''}'.trim();
+          final q=query.toLowerCase();
+          return q.isEmpty || name.toLowerCase().contains(q) || cls.toLowerCase().contains(q);
+        }).toList();
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 720),
+            padding: const EdgeInsets.fromLTRB(18,18,18,14),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(begin:Alignment.topLeft,end:Alignment.bottomRight,colors:[Color(0xFF073D36),Color(0xFF07855F)]),
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: Column(children:[
+              Row(children:[
+                Container(padding:const EdgeInsets.all(11),decoration:BoxDecoration(color:Colors.greenAccent.withValues(alpha:.16),shape:BoxShape.circle),child:const Icon(Icons.person_add_alt_1_rounded,color:Colors.greenAccent,size:28)),
+                const SizedBox(width:12),
+                const Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('Öğrenci Ekle',style:TextStyle(color:Colors.white,fontSize:23,fontWeight:FontWeight.w800)),Text('Kayıtlı öğrencilerden birini seçin.',style:TextStyle(color:Colors.white70,fontSize:12))])),
+                IconButton(onPressed:()=>Navigator.pop(ctx),icon:const Icon(Icons.close_rounded,color:Colors.white70)),
+              ]),
+              const SizedBox(height:14),
+              TextField(onChanged:(v)=>setD(()=>query=v),style:const TextStyle(color:Colors.white),decoration:InputDecoration(hintText:'Öğrenci ara...',hintStyle:const TextStyle(color:Colors.white54),prefixIcon:const Icon(Icons.search_rounded,color:Colors.white70),filled:true,fillColor:Colors.white.withValues(alpha:.11),border:OutlineInputBorder(borderRadius:BorderRadius.circular(18),borderSide:BorderSide.none))),
+              const SizedBox(height:12),
+              Expanded(child:Container(decoration:BoxDecoration(color:Colors.white.withValues(alpha:.08),borderRadius:BorderRadius.circular(20),border:Border.all(color:Colors.white.withValues(alpha:.15))),child:ListView.separated(padding:const EdgeInsets.all(8),itemCount:filtered.length,separatorBuilder:(_,__)=>Divider(height:1,color:Colors.white.withValues(alpha:.10)),itemBuilder:(_,i){
+                final d=filtered[i]; final x=d.data(); final name='${x['fullName'] ?? '${x['name'] ?? ''} ${x['surname'] ?? ''}'}'.trim(); final cls=['${x['className']??''}','${x['branch']??''}'].where((e)=>e.isNotEmpty).join(' • '); final selected=selectedId==d.id;
+                return ListTile(onTap:()=>setD((){selectedId=d.id;selectedName=name;}),leading:CircleAvatar(backgroundColor:selected?Colors.greenAccent:Colors.white12,child:Icon(selected?Icons.check_rounded:Icons.person_rounded,color:selected?const Color(0xFF064A37):Colors.white)),title:Text(name,style:const TextStyle(color:Colors.white,fontWeight:FontWeight.w700)),subtitle:cls.isEmpty?null:Text(cls,style:const TextStyle(color:Colors.white60)),trailing:selected?const Icon(Icons.check_circle_rounded,color:Colors.greenAccent):null);
+              }))),
+              if(selectedId!=null)...[
+                const SizedBox(height:12),
+                Row(children:[
+                  Expanded(child:DropdownButtonFormField<String>(value:reason,dropdownColor:const Color(0xFF0A5948),style:const TextStyle(color:Colors.white),decoration:const InputDecoration(labelText:'Görüşme / görev',labelStyle:TextStyle(color:Colors.white70),enabledBorder:UnderlineInputBorder(borderSide:BorderSide(color:Colors.white38))),items:reasons.map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),onChanged:(v)=>setD(()=>reason=v??reason))),
+                ]),
+                const SizedBox(height:8),
+                Row(children:[Expanded(child:TextFormField(initialValue:day,style:const TextStyle(color:Colors.white),decoration:const InputDecoration(labelText:'Gün',labelStyle:TextStyle(color:Colors.white70)),onChanged:(v)=>day=v)),const SizedBox(width:10),Expanded(child:TextFormField(initialValue:time,style:const TextStyle(color:Colors.white),decoration:const InputDecoration(labelText:'Saat',labelStyle:TextStyle(color:Colors.white70)),onChanged:(v)=>time=v))]),
+              ],
+              const SizedBox(height:12),
+              SizedBox(width:double.infinity,height:50,child:FilledButton.icon(style:FilledButton.styleFrom(backgroundColor:Colors.greenAccent,foregroundColor:const Color(0xFF064A37),disabledBackgroundColor:Colors.white12),onPressed:selectedId==null?null:()async{final u=await db.collection('users').doc(auth.currentUser!.uid).get();await db.collection('guidanceAppointments').add({'studentId':selectedId,'studentName':selectedName,'counselorId':auth.currentUser!.uid,'counselorName':u.data()?['fullName']??'Rehberlik Servisi','reason':reason,'dayLabel':day,'time':time,'status':'approved','source':'guidance','createdAt':FieldValue.serverTimestamp(),'updatedAt':FieldValue.serverTimestamp()});if(ctx.mounted)Navigator.pop(ctx);},icon:const Icon(Icons.add_rounded),label:const Text('Görüşmeye Ekle',style:TextStyle(fontWeight:FontWeight.w800)))),
+            ]),
+          ),
+        );
+      }),
+    );
   }
 
   Future<void> addWeeklyTask() async {
