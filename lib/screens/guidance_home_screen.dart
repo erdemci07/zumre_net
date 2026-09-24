@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
 
 class GuidanceHomeScreen extends StatefulWidget {
   const GuidanceHomeScreen({super.key});
@@ -9,7 +10,7 @@ class GuidanceHomeScreen extends StatefulWidget {
 class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
   final db=FirebaseFirestore.instance; final auth=FirebaseAuth.instance;
   String flowFilter='today';
-  String statusLabel(String s)=>s=='approved'?'Onaylandı':s=='in_progress'?'Görüşmede':s=='completed'?'Tamamlandı':s=='no_show'?'Gelmedi':s=='cancelled'?'İptal':'Onay Bekliyor';
+  String statusLabel(String s)=>s=='approved'?'Onaylandı':s=='in_progress'?'Görüşmede':s=='completed'?'Tamamlandı':s=='no_show'?'Gelmedi':s=='cancelled'?'İptal Edildi':'Onay Bekliyor';
   Color statusColor(String s)=>s=='completed'?Colors.green:s=='in_progress'?Colors.orange:s=='no_show'||s=='cancelled'?Colors.red:s=='approved'?Colors.teal:const Color(0xFF2675D8);
   Future<void> changeStatus(String id,String status)=>db.collection('guidanceAppointments').doc(id).update({'status':status,'updatedAt':FieldValue.serverTimestamp()});
 
@@ -22,6 +23,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
     String reason = 'Akademik takip';
     String day = 'Bugün';
     String time = '14:30';
+    final timeController = TextEditingController(text: time);
+    const days = ['Bugün','Yarın','Pazartesi','Salı','Çarşamba','Perşembe','Cuma'];
     const reasons = ['Akademik takip','Ödev kontrolü','Sınav / hedef planlama','Ders çalışma düzeni','Motivasyon','Genel görüşme'];
 
     await showDialog(
@@ -64,7 +67,11 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   Expanded(child:DropdownButtonFormField<String>(value:reason,dropdownColor:const Color(0xFF681E40),style:const TextStyle(color:Colors.white),decoration:const InputDecoration(labelText:'Görüşme / görev',labelStyle:TextStyle(color:Colors.white70),enabledBorder:UnderlineInputBorder(borderSide:BorderSide(color:Colors.white38))),items:reasons.map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(),onChanged:(v)=>setD(()=>reason=v??reason))),
                 ]),
                 const SizedBox(height:8),
-                Row(children:[Expanded(child:TextFormField(initialValue:day,style:const TextStyle(color:Colors.white),decoration:const InputDecoration(labelText:'Gün',labelStyle:TextStyle(color:Colors.white70)),onChanged:(v)=>day=v)),const SizedBox(width:10),Expanded(child:TextFormField(initialValue:time,style:const TextStyle(color:Colors.white),decoration:const InputDecoration(labelText:'Saat',labelStyle:TextStyle(color:Colors.white70)),onChanged:(v)=>time=v))]),
+                const Align(alignment:Alignment.centerLeft,child:Text('Gün',style:TextStyle(color:Colors.white70,fontWeight:FontWeight.w700))),
+                const SizedBox(height:6),
+                SizedBox(height:42,child:ListView.separated(scrollDirection:Axis.horizontal,itemCount:days.length,separatorBuilder:(_,__)=>const SizedBox(width:7),itemBuilder:(_,i){final e=days[i];return ChoiceChip(label:Text(e),selected:day==e,onSelected:(_)=>setD(()=>day=e),selectedColor:const Color(0xFFFFB1C8),backgroundColor:Colors.white10,labelStyle:TextStyle(color:day==e?const Color(0xFF4A102B):Colors.white));})),
+                const SizedBox(height:8),
+                TextField(controller:timeController,keyboardType:TextInputType.number,inputFormatters:[_TimeTextFormatter()],style:const TextStyle(color:Colors.white),decoration:const InputDecoration(labelText:'Saat',hintText:'14:30',labelStyle:TextStyle(color:Colors.white70)),onChanged:(v)=>time=v),
               ],
               const SizedBox(height:12),
               SizedBox(width:double.infinity,height:50,child:FilledButton.icon(style:FilledButton.styleFrom(backgroundColor:Color(0xFFFFB1C8),foregroundColor:const Color(0xFF4A102B),disabledBackgroundColor:Colors.white12),onPressed:selectedId==null?null:()async{final u=await db.collection('users').doc(auth.currentUser!.uid).get();await db.collection('guidanceAppointments').add({'studentId':selectedId,'studentName':selectedName,'counselorId':auth.currentUser!.uid,'counselorName':u.data()?['fullName']??'Rehberlik Servisi','reason':reason,'dayLabel':day,'time':time,'status':'approved','source':'guidance','createdAt':FieldValue.serverTimestamp(),'updatedAt':FieldValue.serverTimestamp()});if(ctx.mounted)Navigator.pop(ctx);},icon:const Icon(Icons.add_rounded),label:const Text('Görüşmeye Ekle',style:TextStyle(fontWeight:FontWeight.w800)))),
@@ -83,12 +90,12 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
       return Dialog(insetPadding:const EdgeInsets.symmetric(horizontal:18,vertical:24),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(28)),child:Container(constraints:const BoxConstraints(maxWidth:520,maxHeight:700),padding:const EdgeInsets.all(18),decoration:BoxDecoration(gradient:const LinearGradient(begin:Alignment.topLeft,end:Alignment.bottomRight,colors:[Color(0xFF4A102B),Color(0xFF8B3155)]),borderRadius:BorderRadius.circular(28)),child:Column(children:[
         Row(children:[const Icon(Icons.repeat_rounded,color:Color(0xFFFFB1C8),size:30),const SizedBox(width:12),const Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('Haftalık Takip Ver',style:TextStyle(color:Colors.white,fontSize:22,fontWeight:FontWeight.w800)),Text('Öğrenci ve düzenli takip görevini seçin.',style:TextStyle(color:Colors.white70,fontSize:12))])),IconButton(onPressed:()=>Navigator.pop(ctx),icon:const Icon(Icons.close_rounded,color:Colors.white70))]),
         const SizedBox(height:12),TextField(onChanged:(v)=>setD(()=>query=v),style:const TextStyle(color:Colors.white),decoration:InputDecoration(hintText:'Öğrenci ara...',hintStyle:const TextStyle(color:Colors.white54),prefixIcon:const Icon(Icons.search_rounded,color:Colors.white70),filled:true,fillColor:Colors.white.withValues(alpha:.10),border:OutlineInputBorder(borderRadius:BorderRadius.circular(18),borderSide:BorderSide.none))),
-        const SizedBox(height:10),SizedBox(height:220,child:Container(decoration:BoxDecoration(color:Colors.white.withValues(alpha:.07),borderRadius:BorderRadius.circular(18)),child:ListView.builder(itemCount:filtered.length,itemBuilder:(_,i){final d=filtered[i],x=d.data();final n='${x['fullName']??'${x['name']??''} ${x['surname']??''}'}'.trim();final cls=['${x['className']??''}','${x['branch']??''}'].where((e)=>e.isNotEmpty).join(' • ');final sel=studentId==d.id;return ListTile(onTap:()=>setD((){studentId=d.id;studentName=n;}),leading:CircleAvatar(backgroundColor:sel?Color(0xFFFFB1C8):Colors.white12,child:Icon(sel?Icons.check:Icons.person,color:sel?const Color(0xFF4A102B):Colors.white)),title:Text(n,style:const TextStyle(color:Colors.white,fontWeight:FontWeight.w700)),subtitle:cls.isEmpty?null:Text(cls,style:const TextStyle(color:Colors.white60)),trailing:sel?const Icon(Icons.check_circle,color:Color(0xFFFFB1C8)):null);}))),
+        const SizedBox(height:10),SizedBox(height:190,child:Container(decoration:BoxDecoration(color:Colors.white.withValues(alpha:.07),borderRadius:BorderRadius.circular(18)),child:ListView.builder(itemCount:filtered.length,itemBuilder:(_,i){final d=filtered[i],x=d.data();final n='${x['fullName']??'${x['name']??''} ${x['surname']??''}'}'.trim();final cls=['${x['className']??''}','${x['branch']??''}'].where((e)=>e.isNotEmpty).join(' • ');final sel=studentId==d.id;return ListTile(onTap:()=>setD((){studentId=d.id;studentName=n;}),leading:CircleAvatar(backgroundColor:sel?Color(0xFFFFB1C8):Colors.white12,child:Icon(sel?Icons.check:Icons.person,color:sel?const Color(0xFF4A102B):Colors.white)),title:Text(n,style:const TextStyle(color:Colors.white,fontWeight:FontWeight.w700)),subtitle:cls.isEmpty?null:Text(cls,style:const TextStyle(color:Colors.white60)),trailing:sel?const Icon(Icons.check_circle,color:Color(0xFFFFB1C8)):null);}))),
         if(studentId!=null)...[
           const SizedBox(height:10),const Align(alignment:Alignment.centerLeft,child:Text('Görev',style:TextStyle(color:Colors.white70,fontWeight:FontWeight.w700))),
           const SizedBox(height:6),Wrap(spacing:7,runSpacing:7,children:['Haftalık Ödev Kontrolü','Akademik Takip','Hedef Kontrolü','Ders Programı Kontrolü'].map((e)=>ChoiceChip(label:Text(e),selected:title==e,onSelected:(_)=>setD(()=>title=e),selectedColor:const Color(0xFFFFB1C8),backgroundColor:Colors.white10,labelStyle:TextStyle(color:title==e?const Color(0xFF4A102B):Colors.white))).toList()),
           const SizedBox(height:12),const Align(alignment:Alignment.centerLeft,child:Text('Tekrar Günü',style:TextStyle(color:Colors.white70,fontWeight:FontWeight.w700))),
-          const SizedBox(height:6),Wrap(spacing:7,runSpacing:7,children:['Her Pazartesi','Her Salı','Her Çarşamba','Her Perşembe','Her Cuma','Her Cumartesi'].map((e)=>ChoiceChip(label:Text(e),selected:day==e,onSelected:(_)=>setD(()=>day=e),selectedColor:const Color(0xFFFFB1C8),backgroundColor:Colors.white10,labelStyle:TextStyle(color:day==e?const Color(0xFF4A102B):Colors.white))).toList())
+          const SizedBox(height:6),Wrap(spacing:7,runSpacing:7,children:['Her Pazartesi','Her Salı','Her Çarşamba','Her Perşembe','Her Cuma','Her Cumartesi','Her Pazar'].map((e)=>ChoiceChip(label:Text(e),selected:day==e,onSelected:(_)=>setD(()=>day=e),selectedColor:const Color(0xFFFFB1C8),backgroundColor:Colors.white10,labelStyle:TextStyle(color:day==e?const Color(0xFF4A102B):Colors.white))).toList())
         ],
         const SizedBox(height:12),SizedBox(width:double.infinity,height:50,child:FilledButton.icon(onPressed:studentId==null?null:()async{await db.collection('guidanceTasks').add({'studentId':studentId,'studentName':studentName,'counselorId':auth.currentUser!.uid,'title':title,'schedule':day,'active':true,'createdAt':FieldValue.serverTimestamp()});if(ctx.mounted)Navigator.pop(ctx);},icon:const Icon(Icons.repeat_rounded),label:const Text('Takibi Başlat')))
       ])));
@@ -142,4 +149,13 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
       ])));})
     ]);}),
   );});}
+}
+class _TimeTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    var digits = newValue.text.replaceAll(RegExp(r'\\D'), '');
+    if (digits.length > 4) digits = digits.substring(0, 4);
+    final text = digits.length > 2 ? '${digits.substring(0, 2)}:${digits.substring(2)}' : digits;
+    return TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+  }
 }
