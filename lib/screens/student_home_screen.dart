@@ -1981,9 +1981,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       'Genel görüşme',
     ];
     const days = [
-      'Yarın • 26 Eyl',
-      'Pazartesi • 28 Eyl',
-      'Salı • 29 Eyl',
+      'Pazartesi',
+      'Salı',
+      'Çarşamba',
+      'Perşembe',
+      'Cuma',
+      'Cumartesi',
     ];
     const times = ['10:20', '11:10', '13:40', '14:30', '15:20'];
 
@@ -2133,7 +2136,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 .toList(),
                           ),
                           const SizedBox(height: 16),
-                          _planningSectionTitle('Tarih'),
+                          _planningSectionTitle('Haftalık Gün'),
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
