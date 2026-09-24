@@ -10,9 +10,9 @@ class GuidanceHomeScreen extends StatelessWidget {
   }
   String label(String s)=>s=='approved'?'Onaylandı':s=='in_progress'?'Görüşmede':s=='completed'?'Tamamlandı':s=='no_show'?'Gelmedi':s=='cancelled'?'İptal':'Onay Bekliyor';
   Color color(String s)=>s=='completed'?Colors.greenAccent:s=='in_progress'?Colors.orangeAccent:s=='no_show'||s=='cancelled'?Colors.redAccent:s=='approved'?Colors.lightGreenAccent:Colors.cyanAccent;
-  @override Widget build(BuildContext context){ final uid=FirebaseAuth.instance.currentUser!.uid; return Scaffold(
+  @override Widget build(BuildContext context){ final uid=FirebaseAuth.instance.currentUser!.uid; return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),builder:(context,userSnap){ final user=userSnap.data?.data(); final counselorName='${user?['fullName'] ?? user?['name'] ?? 'Rehberlik Servisi'}'; return Scaffold(
     backgroundColor:const Color(0xFF06142E),
-    appBar:AppBar(backgroundColor:const Color(0xFF071A3A),foregroundColor:Colors.white,title:const Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('Rehberlik',style:TextStyle(fontWeight:FontWeight.bold)),Text('Görüşme ve randevu yönetimi',style:TextStyle(fontSize:11,color:Colors.white60))]),actions:[IconButton(onPressed:()=>FirebaseAuth.instance.signOut(),icon:const Icon(Icons.logout_rounded))]),
+    appBar:AppBar(backgroundColor:const Color(0xFF071A3A),foregroundColor:Colors.white,title:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(counselorName,style:const TextStyle(fontWeight:FontWeight.bold)),const Text('Rehberlik • Görüşme ve randevu yönetimi',style:TextStyle(fontSize:11,color:Colors.white60))]),actions:[IconButton(onPressed:()=>FirebaseAuth.instance.signOut(),icon:const Icon(Icons.logout_rounded))]),
     body:StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(stream:FirebaseFirestore.instance.collection('guidanceAppointments').where('counselorId',isEqualTo:uid).snapshots(),builder:(context,snap){
       if(!snap.hasData)return const Center(child:CircularProgressIndicator());
       final docs=snap.data!.docs.toList()..sort((a,b){final at=a.data()['createdAt'] as Timestamp?;final bt=b.data()['createdAt'] as Timestamp?;return (bt?.millisecondsSinceEpoch??0).compareTo(at?.millisecondsSinceEpoch??0);});
@@ -27,5 +27,5 @@ class GuidanceHomeScreen extends StatelessWidget {
         ]));}).toList(),
       ]);
     }),
-  );}
+  );});}
 }
