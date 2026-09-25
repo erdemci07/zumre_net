@@ -1533,9 +1533,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         final rawItemHeight = fillHeight && availableHeight.isFinite
             ? (availableHeight - totalVerticalSpacing) / rowCount
             : itemWidth / (availableWidth < 390 ? 2.5 : 2.35);
-        final itemHeight = fillHeight
-            ? rawItemHeight.clamp(36.0, 120.0)
-            : rawItemHeight.clamp(minItemHeight, 120.0);
+        final itemHeight = rawItemHeight.clamp(minItemHeight, 120.0);
         final aspectRatio = itemHeight > 0
             ? itemWidth / itemHeight
             : availableWidth < 390
@@ -3359,6 +3357,79 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  Widget _buildStudentAgendaCard() {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+    final dateKeys = _upcomingAppointmentDateKeys();
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore.collection('appointments').where('studentId', isEqualTo: uid).where('status', isEqualTo: 'scheduled').where('dateKey', whereIn: dateKeys).snapshots(),
+      builder: (context, appointmentSnapshot) {
+        final appointments = appointmentSnapshot.data?.docs.toList() ?? [];
+        appointments.sort((a, b) => _appointmentDateTimeInIstanbul(a.data()['scheduledStart']).compareTo(_appointmentDateTimeInIstanbul(b.data()['scheduledStart'])));
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _firestore.collection('guidanceTasks').where('studentId', isEqualTo: uid).snapshots(),
+          builder: (context, taskSnapshot) {
+            final tasks = (taskSnapshot.data?.docs ?? const []).where((doc) => doc.data()['active'] != false).toList();
+            final parts = <String>[];
+            if (appointments.isNotEmpty) parts.add('Planlı zümre ' + _formatAppointmentClock(appointments.first.data()['scheduledStart']));
+            if (_guidanceAppointment != null) parts.add('Rehberlik randevusu');
+            if (tasks.isNotEmpty) parts.add('Haftalık takip');
+            final hasAgenda = parts.isNotEmpty;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 7),
+              child: InkWell(
+                onTap: hasAgenda ? () => _showStudentAgendaSheet(appointments: appointments, tasks: tasks) : _showGuidanceAppointmentDemo,
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [const Color(0xFF00A6C7).withValues(alpha: 0.15), Colors.white.withValues(alpha: 0.05)]),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.24)),
+                  ),
+                  child: Row(children: [
+                    Icon(hasAgenda ? Icons.upcoming_rounded : Icons.forum_rounded, color: Colors.cyanAccent, size: 18),
+                    const SizedBox(width: 8),
+                    Text(hasAgenda ? 'Yaklaşanlar' : 'Rehberlik Randevusu', style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(hasAgenda ? parts.join(' • ') : 'Rehberlikçini seç, uygun gün ve saati planla.', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white60, fontSize: 10.5, fontWeight: FontWeight.w600))),
+                    Icon(hasAgenda ? Icons.keyboard_arrow_down_rounded : Icons.add_circle_outline_rounded, color: Colors.white54, size: 18),
+                  ]),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _showStudentAgendaSheet({required List<QueryDocumentSnapshot<Map<String, dynamic>>> appointments, required List<QueryDocumentSnapshot<Map<String, dynamic>>> tasks}) {
+    return showModalBottomSheet<void>(
+      context: context, backgroundColor: const Color(0xFF171039), isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+      builder: (ctx) => SafeArea(child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.72),
+        child: Padding(padding: const EdgeInsets.fromLTRB(18, 14, 18, 18), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [const Expanded(child: Text('Yaklaşanlar', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold))), IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close_rounded, color: Colors.white70))]),
+          Flexible(child: SingleChildScrollView(child: Column(children: [
+            if (appointments.isNotEmpty) _agendaActionTile(icon: Icons.event_available_rounded, color: Colors.amberAccent, title: appointments.length == 1 ? 'Planlı Zümre' : appointments.length.toString() + ' Planlı Zümre', subtitle: appointments.length == 1 ? (appointments.first.data()['subject']?.toString() ?? 'Ders') + ' • ' + _formatAppointmentDate(appointments.first.data()['scheduledStart']) + ' • ' + _formatAppointmentClock(appointments.first.data()['scheduledStart']) : 'Planlı zümrelerini görüntüle ve yönet.', onTap: () { Navigator.pop(ctx); _showUpcomingAppointmentsSheet(appointments); }),
+            _agendaActionTile(icon: Icons.forum_rounded, color: Colors.cyanAccent, title: 'Rehberlik Randevusu', subtitle: _guidanceAppointment == null ? 'Yeni rehberlik randevusu planla.' : (_guidanceAppointment!['day'] ?? '') + ' • ' + (_guidanceAppointment!['time'] ?? '') + ' • ' + (_guidanceAppointment!['status'] ?? ''), onTap: () { Navigator.pop(ctx); if (_guidanceAppointment == null) { _showGuidanceAppointmentDemo(); } else { _showGuidanceAppointmentDetails(); } }),
+            if (tasks.isNotEmpty) ...tasks.map((doc) { final data = doc.data(); return _agendaActionTile(icon: Icons.assignment_turned_in_rounded, color: Colors.amberAccent, title: data['title']?.toString() ?? 'Rehberlik Takibi', subtitle: (data['schedule']?.toString() ?? 'Haftalık') + ' • Rehberlikçi tarafından planlandı'); }),
+          ]))),
+        ]))),
+      )),
+    );
+  }
+
+  Widget _agendaActionTile({required IconData icon, required Color color, required String title, required String subtitle, VoidCallback? onTap}) {
+    return Padding(padding: const EdgeInsets.only(bottom: 9), child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(16), child: Container(
+      width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.07), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withValues(alpha: 0.12))),
+      child: Row(children: [Icon(icon, color: color, size: 21), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)), const SizedBox(height: 2), Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white60, fontSize: 11))])), if (onTap != null) const Icon(Icons.chevron_right_rounded, color: Colors.white38, size: 19)]),
+    )));
+  }
   Widget _buildUpcomingAppointmentsSection() {
     final userId = _auth.currentUser?.uid;
     if (userId == null) return const SizedBox.shrink();
@@ -3624,10 +3695,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               _buildWelcomeCard(),
               SizedBox(height: compact ? 8 : 10),
               _buildCooldownCard(),
-              _buildUpcomingAppointmentsSection(),
-              SizedBox(height: compact ? 6 : 8),
-              _buildGuidanceAppointmentDemoCard(),
-              _buildGuidanceTaskCard(),
+              _buildStudentAgendaCard(),
               SizedBox(height: compact ? 6 : 8),
               if (_isInStudySession) ...[
                 Container(
