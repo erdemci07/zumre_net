@@ -1651,14 +1651,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             : 'En uygun öğretmene yönlendir (önerilen)';
 
     return InkWell(
-      borderRadius: BorderRadius.circular(18)
+      borderRadius: BorderRadius.circular(18),
       onTap: canSelectTeacher ? _showTeacherPickerDialog : null,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(18)
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
         ),
         child: Row(
