@@ -3409,17 +3409,101 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return showModalBottomSheet<void>(
       context: context, backgroundColor: const Color(0xFF171039), isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
-      builder: (ctx) => SafeArea(child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.72),
-        child: Padding(padding: const EdgeInsets.fromLTRB(18, 14, 18, 18), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [const Expanded(child: Text('Yaklaşanlar', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold))), IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close_rounded, color: Colors.white70))]),
-          Flexible(child: SingleChildScrollView(child: Column(children: [
-            if (appointments.isNotEmpty) _agendaActionTile(icon: Icons.event_available_rounded, color: Colors.amberAccent, title: appointments.length == 1 ? 'Planlı Zümre' : appointments.length.toString() + ' Planlı Zümre', subtitle: appointments.length == 1 ? (appointments.first.data()['subject']?.toString() ?? 'Ders') + ' • ' + _formatAppointmentDate(appointments.first.data()['scheduledStart']) + ' • ' + _formatAppointmentClock(appointments.first.data()['scheduledStart']) : 'Planlı zümrelerini görüntüle ve yönet.', onTap: () { Navigator.pop(ctx); _showUpcomingAppointmentsSheet(appointments); }),
-            _agendaActionTile(icon: Icons.forum_rounded, color: Colors.cyanAccent, title: 'Rehberlik Randevusu', subtitle: _guidanceAppointment == null ? 'Yeni rehberlik randevusu planla.' : (_guidanceAppointment!['day'] ?? '') + ' • ' + (_guidanceAppointment!['time'] ?? '') + ' • ' + (_guidanceAppointment!['status'] ?? ''), onTap: () { Navigator.pop(ctx); if (_guidanceAppointment == null) { _showGuidanceAppointmentDemo(); } else { _showGuidanceAppointmentDetails(); } }),
-            if (tasks.isNotEmpty) ...tasks.map((doc) { final data = doc.data(); return _agendaActionTile(icon: Icons.assignment_turned_in_rounded, color: Colors.amberAccent, title: data['title']?.toString() ?? 'Rehberlik Takibi', subtitle: (data['schedule']?.toString() ?? 'Haftalık') + ' • Rehberlikçi tarafından planlandı'); }),
-          ]))),
-        ]))),
-      )),
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.72,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Yaklaşanlar',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        if (appointments.isNotEmpty)
+                          _agendaActionTile(
+                            icon: Icons.event_available_rounded,
+                            color: Colors.amberAccent,
+                            title: appointments.length == 1
+                                ? 'Planlı Zümre'
+                                : appointments.length.toString() + ' Planlı Zümre',
+                            subtitle: appointments.length == 1
+                                ? (appointments.first.data()['subject']?.toString() ?? 'Ders') +
+                                    ' • ' +
+                                    _formatAppointmentDate(appointments.first.data()['scheduledStart']) +
+                                    ' • ' +
+                                    _formatAppointmentClock(appointments.first.data()['scheduledStart'])
+                                : 'Planlı zümrelerini görüntüle ve yönet.',
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _showUpcomingAppointmentsSheet(appointments);
+                            },
+                          ),
+                        _agendaActionTile(
+                          icon: Icons.forum_rounded,
+                          color: Colors.cyanAccent,
+                          title: 'Rehberlik Randevusu',
+                          subtitle: _guidanceAppointment == null
+                              ? 'Yeni rehberlik randevusu planla.'
+                              : (_guidanceAppointment!['day'] ?? '') +
+                                  ' • ' +
+                                  (_guidanceAppointment!['time'] ?? '') +
+                                  ' • ' +
+                                  (_guidanceAppointment!['status'] ?? ''),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            if (_guidanceAppointment == null) {
+                              _showGuidanceAppointmentDemo();
+                            } else {
+                              _showGuidanceAppointmentDetails();
+                            }
+                          },
+                        ),
+                        if (tasks.isNotEmpty)
+                          ...tasks.map((doc) {
+                            final data = doc.data();
+                            return _agendaActionTile(
+                              icon: Icons.assignment_turned_in_rounded,
+                              color: Colors.amberAccent,
+                              title: data['title']?.toString() ?? 'Rehberlik Takibi',
+                              subtitle: (data['schedule']?.toString() ?? 'Haftalık') +
+                                  ' • Rehberlikçi tarafından planlandı',
+                            );
+                          }),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
