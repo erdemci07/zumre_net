@@ -1565,7 +1565,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(18),
@@ -1578,11 +1578,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             'Kaç soru çözdüreceksin?',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 3),
           Row(
             children: options.map((questionCount) {
               final selected = _selectedQuestionCount == questionCount;
@@ -1600,7 +1600,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 220),
-                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      padding: const EdgeInsets.symmetric(vertical: 4),
                       decoration: BoxDecoration(
                         color: selected
                             ? const Color(0xFF6C3DFF)
@@ -1618,7 +1618,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                            fontSize: 14,
                           ),
                         ),
                       ),
@@ -1628,12 +1628,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               );
             }).toList(),
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 3),
           Text(
             'Tahmini çözüm süresi: ~${_estimatedMinutesForQuestionCount(_selectedQuestionCount)} dk',
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 11.5,
+              fontSize: 10.5,
             ),
           ),
         ],
@@ -3615,12 +3615,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       builder: (context, constraints) {
         final compact = constraints.maxHeight < 900;
         return Padding(
-          padding: EdgeInsets.fromLTRB(18, compact ? 8 : 12, 18, 12),
+          padding: EdgeInsets.fromLTRB(18, compact ? 5 : 8, 18, 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildWelcomeCard(),
-              SizedBox(height: compact ? 8 : 10),
+              SizedBox(height: compact ? 5 : 7),
               _buildCooldownCard(),
               _buildUpcomingAppointmentsSection(),
               SizedBox(height: compact ? 4 : 6),
@@ -3653,13 +3653,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              SizedBox(height: compact ? 6 : 8),
+              SizedBox(height: compact ? 4 : 6),
               Expanded(child: _buildSubjectGrid(fillHeight: true)),
-              SizedBox(height: compact ? 8 : 10),
+              SizedBox(height: compact ? 5 : 7),
               _buildQuestionCountSelector(),
-              SizedBox(height: compact ? 8 : 9),
+              SizedBox(height: compact ? 5 : 7),
               _buildTeacherSelector(),
-              SizedBox(height: compact ? 8 : 10),
+              SizedBox(height: compact ? 5 : 7),
               _buildQueueActions(),
             ],
           ),
@@ -3704,10 +3704,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       'Merhaba 👋',
                       style: TextStyle(
                         color: Colors.white60,
-                        fontSize: 14,
+                        fontSize: 12.5,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Wrap(
                       spacing: 8,
                       runSpacing: 6,
@@ -3721,7 +3721,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                             maxLines: 1,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 20,
+                              fontSize: 19,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -3729,12 +3729,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                         _compactZumreInfoBadge(),
                       ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 3),
                     const Text(
                       'Dersini seç, sıranı al ve öğretmenine ulaş.',
                       style: TextStyle(
                         color: Colors.white60,
-                        fontSize: 12,
+                        fontSize: 11,
                       ),
                     ),
                   ],
