@@ -102,6 +102,47 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
     }));
   }
 
+  Future<void> manageWeeklyTasks() async {
+    final uid=auth.currentUser!.uid;
+    await showDialog(context:context,builder:(ctx)=>Dialog(
+      insetPadding:const EdgeInsets.symmetric(horizontal:18,vertical:24),
+      shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(24)),
+      child:Container(
+        constraints:const BoxConstraints(maxWidth:520,maxHeight:650),
+        padding:const EdgeInsets.all(18),
+        decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF4A102B),Color(0xFF8B3155)]),borderRadius:BorderRadius.circular(24)),
+        child:Column(children:[
+          Row(children:[const Expanded(child:Text('Haftalık Takipler',style:TextStyle(color:Colors.white,fontSize:21,fontWeight:FontWeight.w800))),IconButton(onPressed:()=>Navigator.pop(ctx),icon:const Icon(Icons.close,color:Colors.white70))]),
+          const SizedBox(height:8),
+          Expanded(child:StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
+            stream:db.collection('guidanceTasks').where('counselorId',isEqualTo:uid).snapshots(),
+            builder:(context,snap){
+              if(!snap.hasData)return const Center(child:CircularProgressIndicator());
+              final tasks=snap.data!.docs.where((d)=>d.data()['active']!=false).toList();
+              if(tasks.isEmpty)return const Center(child:Text('Aktif haftalık takip yok.',style:TextStyle(color:Colors.white70)));
+              return ListView.separated(itemCount:tasks.length,separatorBuilder:(_,__)=>const SizedBox(height:8),itemBuilder:(_,i){
+                final doc=tasks[i],x=doc.data();
+                return Container(padding:const EdgeInsets.all(12),decoration:BoxDecoration(color:Colors.white.withValues(alpha:.08),borderRadius:BorderRadius.circular(16)),child:Row(children:[
+                  const Icon(Icons.repeat_rounded,color:Color(0xFFFFB1C8)),const SizedBox(width:10),
+                  Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('${x['studentName']??'Öğrenci'}',style:const TextStyle(color:Colors.white,fontWeight:FontWeight.w800)),Text('${x['title']??''} • ${x['schedule']??''}',style:const TextStyle(color:Colors.white60,fontSize:12))])),
+                  PopupMenuButton<String>(iconColor:Colors.white70,onSelected:(v)async{
+                    if(v=='cancel'){await doc.reference.update({'active':false,'updatedAt':FieldValue.serverTimestamp()});}
+                    else {
+                      await doc.reference.update({'schedule':v,'updatedAt':FieldValue.serverTimestamp()});
+                    }
+                  },itemBuilder:(_)=>[
+                    ...['Her Pazartesi','Her Salı','Her Çarşamba','Her Perşembe','Her Cuma','Her Cumartesi','Her Pazar'].map((e)=>PopupMenuItem(value:e,child:Text(e))),
+                    const PopupMenuDivider(),const PopupMenuItem(value:'cancel',child:Text('Takibi İptal Et')),
+                  ])
+                ]));
+              });
+            },
+          ))
+        ])
+      )
+    ));
+  }
+
   Widget _flowFilterButton(String value,String label,int count){
     final selected=flowFilter==value;
     return InkWell(
@@ -133,7 +174,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
       final finished=docs.where((d)=>['completed','cancelled','no_show'].contains(d.data()['status'])).toList();
       final visible=flowFilter=='today'?today:flowFilter=='upcoming'?upcoming:finished;
       return ListView(padding:const EdgeInsets.all(16),children:[
-      Container(padding:const EdgeInsets.all(20),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF6A1B3D),Color(0xFFB54C72)]),borderRadius:BorderRadius.circular(26)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Bugünün Rehberlik Akışı',style:TextStyle(color:Colors.white,fontSize:22,fontWeight:FontWeight.w800)),const SizedBox(height:5),Text('${docs.length} kayıt • $active aktif görüşme/talep',style:const TextStyle(color:Colors.white70)),const SizedBox(height:14),OutlinedButton.icon(style:OutlinedButton.styleFrom(foregroundColor:Colors.white,side:const BorderSide(color:Colors.white54)),onPressed:addWeeklyTask,icon:const Icon(Icons.repeat_rounded),label:const Text('Haftalık Takip Ver'))])),
+      Container(padding:const EdgeInsets.all(20),decoration:BoxDecoration(gradient:const LinearGradient(colors:[Color(0xFF6A1B3D),Color(0xFFB54C72)]),borderRadius:BorderRadius.circular(26)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Bugünün Rehberlik Akışı',style:TextStyle(color:Colors.white,fontSize:22,fontWeight:FontWeight.w800)),const SizedBox(height:5),Text('${docs.length} kayıt • $active aktif görüşme/talep',style:const TextStyle(color:Colors.white70)),const SizedBox(height:14),Row(children:[Expanded(child:OutlinedButton.icon(style:OutlinedButton.styleFrom(foregroundColor:Colors.white,side:const BorderSide(color:Colors.white54)),onPressed:addWeeklyTask,icon:const Icon(Icons.repeat_rounded),label:const Text('Haftalık Takip Ver'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(style:OutlinedButton.styleFrom(foregroundColor:Colors.white,side:const BorderSide(color:Colors.white54)),onPressed:manageWeeklyTasks,icon:const Icon(Icons.manage_history_rounded),label:const Text('Takipleri Yönet')))])])),
       const SizedBox(height:14),
       Row(children:[
         Expanded(child:_flowFilterButton('today','Bugün',today.length)),
