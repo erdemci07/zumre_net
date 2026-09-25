@@ -114,7 +114,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   int? get _studentGrade {
     final value = _studentClassName?.trim();
     if (value == null || value.isEmpty) return null;
-    final match = RegExp(r'(^|\\D)(1[0-2]|[5-9])(?=\\D|$)').firstMatch(value);
+    final match = RegExp(r'(^|\D)(1[0-2]|[5-9])(?=\D|$)').firstMatch(value);
     return int.tryParse(match?.group(2) ?? '');
   }
 
