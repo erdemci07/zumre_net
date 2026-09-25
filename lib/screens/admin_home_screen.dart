@@ -4155,6 +4155,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
   int _bulkDeleteProcessed = 0;
   int _bulkDeleteTotal = 0;
   String _userSearchQuery = '';
+  String _userRoleFilter = 'all';
   final Set<String> _selectedUserIds = {};
 
   @override
@@ -4212,8 +4213,19 @@ class _UserManagementPageState extends State<UserManagementPage> {
               final searchable = normalizeForSearch(searchableRaw);
               final query = normalizeForSearch(_userSearchQuery);
 
-              return _userSearchQuery.isEmpty || searchable.contains(query);
+              final matchesSearch =
+                  _userSearchQuery.isEmpty || searchable.contains(query);
+              final matchesRole =
+                  _userRoleFilter == 'all' || data['role'] == _userRoleFilter;
+              return matchesSearch && matchesRole;
             }).toList();
+
+            final roleCounts = <String, int>{'all': allUsers.length};
+            for (final userDoc in allUsers) {
+              final userData = userDoc.data() as Map<String, dynamic>;
+              final userRole = (userData['role'] ?? '').toString();
+              roleCounts[userRole] = (roleCounts[userRole] ?? 0) + 1;
+            }
 
             final currentUid = FirebaseAuth.instance.currentUser?.uid;
             final selectableUids = users
@@ -4295,6 +4307,56 @@ class _UserManagementPageState extends State<UserManagementPage> {
                           _userSearchQuery = value.trim().toLowerCase();
                         });
                       },
+                    ),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  sliver: SliverToBoxAdapter(
+                    child: SizedBox(
+                      height: 42,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          ['all', 'Tümü'],
+                          ['student', 'Öğrenciler'],
+                          ['teacher', 'Öğretmenler'],
+                          ['guidance', 'Rehberlik'],
+                          ['studyGuard', 'Etüt'],
+                          ['admin', 'Yönetici'],
+                        ].map((item) {
+                          final key = item[0];
+                          final selected = _userRoleFilter == key;
+                          final count = roleCounts[key] ?? 0;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              selected: selected,
+                              onSelected: (_) => setState(() {
+                                _userRoleFilter = key;
+                                _selectedUserIds.clear();
+                              }),
+                              label: Text('${item[1]}  $count'),
+                              labelStyle: TextStyle(
+                                color: Colors.white,
+                                fontWeight: selected
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                              ),
+                              selectedColor: Colors.white.withValues(alpha: 0.22),
+                              backgroundColor: Colors.white.withValues(alpha: 0.08),
+                              side: BorderSide(
+                                color: Colors.white.withValues(
+                                  alpha: selected ? 0.38 : 0.14,
+                                ),
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
                     ),
                   ),
                 ),
@@ -4407,13 +4469,56 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                       ),
                                     ),
                                     const SizedBox(height: 5),
-                                    Text(
-                                      _roleLabel(role),
-                                      style: TextStyle(
-                                        color: roleColor,
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 12,
-                                      ),
+                                    Wrap(
+                                      spacing: 7,
+                                      runSpacing: 4,
+                                      crossAxisAlignment: WrapCrossAlignment.center,
+                                      children: [
+                                        Text(
+                                          _roleLabel(role),
+                                          style: TextStyle(
+                                            color: roleColor,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        if (role == 'student' &&
+                                            ((data['className'] ?? '').toString().isNotEmpty ||
+                                                (data['branch'] ?? '').toString().isNotEmpty ||
+                                                (data['department'] ?? '').toString().isNotEmpty))
+                                          Text(
+                                            [
+                                              data['className'],
+                                              data['branch'],
+                                              data['department'],
+                                            ]
+                                                .where((v) =>
+                                                    v != null &&
+                                                    v.toString().trim().isNotEmpty)
+                                                .map((v) => v.toString().trim())
+                                                .join(' • '),
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        if (role == 'teacher' &&
+                                            data['subjects'] is List &&
+                                            (data['subjects'] as List).isNotEmpty)
+                                          Text(
+                                            (data['subjects'] as List)
+                                                .map((v) => v.toString())
+                                                .join(' • '),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   ],
                                 ),
