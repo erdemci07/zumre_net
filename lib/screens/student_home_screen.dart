@@ -2300,7 +2300,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     var dateKeys = _planningDateKeys(questionCount: _selectedQuestionCount);
     String selectedDateKey = dateKeys.first;
-    String selectedSubject = _selectedSubject ?? _subjectOptions.first.name;
+    String selectedSubject = _selectedSubject ?? _visibleSubjectOptions.first.name;
     int selectedQuestionCount = _selectedQuestionCount;
     List<_AppointmentTeacherOption> teachers = [];
     String? availabilityMessage;
@@ -2551,7 +2551,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                             Wrap(
                               spacing: 8,
                               runSpacing: 8,
-                              children: _subjectOptions.map((subject) {
+                              children: _visibleSubjectOptions.map((subject) {
                                 return _planningChoiceChip(
                                   label: subject.name,
                                   selected: selectedSubject == subject.name,
