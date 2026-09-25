@@ -92,7 +92,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     _SubjectOption('FEN BİLİMLERİ', Icons.science, Color(0xFF00C878)),
     _SubjectOption('SOSYAL BİLGİLER', Icons.groups_2_rounded, Color(0xFFFFC107)),
     _SubjectOption('DKAB', Icons.auto_stories_rounded, Color.fromARGB(255, 139, 176, 39)),
-    _SubjectOption('İNGİLİZCE', Icons.language_rounded, Color(0xFF7C4DFF)),
+    _SubjectOption('İNGİLİZCE', Icons.translate_rounded, Color(0xFF40C4FF)),
   ];
 
   static const List<_SubjectOption> _lgsSubjects = [
@@ -101,7 +101,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     _SubjectOption('FEN BİLİMLERİ', Icons.science, Color(0xFF00C878)),
     _SubjectOption('T.C. İNKILAP TARİHİ', Icons.history_edu, Color(0xFFFFC107)),
     _SubjectOption('DKAB', Icons.auto_stories_rounded, Color.fromARGB(255, 139, 176, 39)),
-    _SubjectOption('İNGİLİZCE', Icons.language_rounded, Color(0xFF7C4DFF)),
+    _SubjectOption('İNGİLİZCE', Icons.translate_rounded, Color(0xFF40C4FF)),
   ];
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
