@@ -86,13 +86,46 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         'GEOMETRİ', Icons.square_foot, Color.fromARGB(255, 139, 176, 39)),
   ];
 
+  static const List<_SubjectOption> _middleSchoolSubjects = [
+    _SubjectOption('MATEMATİK', Icons.calculate, Color.fromARGB(162, 235, 39, 147)),
+    _SubjectOption('TÜRKÇE', Icons.menu_book, Color(0xFFE91E63)),
+    _SubjectOption('FEN BİLİMLERİ', Icons.science, Color(0xFF00C878)),
+    _SubjectOption('SOSYAL BİLGİLER', Icons.groups_2_rounded, Color(0xFFFFC107)),
+    _SubjectOption('DKAB', Icons.auto_stories_rounded, Color.fromARGB(255, 139, 176, 39)),
+  ];
+
+  static const List<_SubjectOption> _lgsSubjects = [
+    _SubjectOption('MATEMATİK', Icons.calculate, Color.fromARGB(162, 235, 39, 147)),
+    _SubjectOption('TÜRKÇE', Icons.menu_book, Color(0xFFE91E63)),
+    _SubjectOption('FEN BİLİMLERİ', Icons.science, Color(0xFF00C878)),
+    _SubjectOption('T.C. İNKILAP TARİHİ', Icons.history_edu, Color(0xFFFFC107)),
+    _SubjectOption('DKAB', Icons.auto_stories_rounded, Color.fromARGB(255, 139, 176, 39)),
+  ];
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseFunctions _functions =
       FirebaseFunctions.instanceFor(region: 'us-central1');
 
   String? _studentName;
+  String? _studentClassName;
   String? _selectedSubject;
+
+  int? get _studentGrade {
+    final value = _studentClassName?.trim();
+    if (value == null || value.isEmpty) return null;
+    final match = RegExp(r'(^|\\D)(1[0-2]|[5-9])(?=\\D|$)').firstMatch(value);
+    return int.tryParse(match?.group(2) ?? '');
+  }
+
+  List<_SubjectOption> get _visibleSubjectOptions {
+    final grade = _studentGrade;
+    if (grade == 8) return _lgsSubjects;
+    if (grade != null && grade >= 5 && grade <= 7) {
+      return _middleSchoolSubjects;
+    }
+    return _subjectOptions;
+  }
 
   Map<String, String>? _guidanceAppointment;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _guidanceAppointmentSubscription;
@@ -922,7 +955,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         final surname = '${data?['surname'] ?? ''}'.trim();
         _studentName = fullName.isNotEmpty ? fullName : '$name $surname'.trim();
         if (_studentName!.isEmpty) _studentName = data?['email'] ?? 'Öğrenci';
+        _studentClassName = data?['className']?.toString();
         _isInStudySession = data?['isInStudySession'] == true;
+
+        final visibleSubjects =
+            _visibleSubjectOptions.map((subject) => subject.name).toSet();
+        if (_selectedSubject != null &&
+            !visibleSubjects.contains(_selectedSubject)) {
+          _selectedSubject = null;
+          _selectedTeacherId = null;
+          _selectedTeacherName = null;
+        }
       });
 
       final cooldownTimestamp = data?['cooldownUntil'] as Timestamp?;
@@ -1466,11 +1509,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         const crossAxisSpacing = 8.0;
         const mainAxisSpacing = 8.0;
         const minItemHeight = 48.0;
+        const crossAxisCount = 2;
+        final subjects = _visibleSubjectOptions;
+        final rowCount = (subjects.length / crossAxisCount).ceil().clamp(1, 99);
         final availableWidth = constraints.maxWidth;
         final availableHeight = constraints.maxHeight;
-        final itemWidth = (availableWidth - crossAxisSpacing) / 2;
+        final itemWidth =
+            (availableWidth - (crossAxisSpacing * (crossAxisCount - 1))) /
+                crossAxisCount;
+        final totalVerticalSpacing = mainAxisSpacing * (rowCount - 1);
         final rawItemHeight = fillHeight && availableHeight.isFinite
-            ? (availableHeight - (mainAxisSpacing * 3)) / 4
+            ? (availableHeight - totalVerticalSpacing) / rowCount
             : itemWidth / (availableWidth < 390 ? 2.5 : 2.35);
         final shouldScroll = fillHeight && rawItemHeight < minItemHeight;
         final itemHeight =
@@ -1487,11 +1536,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           physics: shouldScroll
               ? const ClampingScrollPhysics()
               : const NeverScrollableScrollPhysics(),
-          crossAxisCount: 2,
+          crossAxisCount: crossAxisCount,
           crossAxisSpacing: crossAxisSpacing,
           mainAxisSpacing: mainAxisSpacing,
           childAspectRatio: aspectRatio,
-          children: _subjectOptions
+          children: subjects
               .map((subject) => _subjectCard(
                     subject.name,
                     subject.icon,
