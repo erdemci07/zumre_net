@@ -543,7 +543,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Planlı zümre iptal edildi.')),
       );
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      final message = _appointmentErrorMessage(
+        e,
+        'Planlı zümre şu anda iptal edilemedi.',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     } catch (e) {
+      debugPrint('Planlı zümre iptal hatası: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1523,9 +1533,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         final rawItemHeight = fillHeight && availableHeight.isFinite
             ? (availableHeight - totalVerticalSpacing) / rowCount
             : itemWidth / (availableWidth < 390 ? 2.5 : 2.35);
-        final shouldScroll = fillHeight && rawItemHeight < minItemHeight;
-        final itemHeight =
-            shouldScroll ? minItemHeight : rawItemHeight.clamp(1.0, 120.0);
+        final itemHeight = fillHeight
+            ? rawItemHeight.clamp(36.0, 120.0)
+            : rawItemHeight.clamp(minItemHeight, 120.0);
         final aspectRatio = itemHeight > 0
             ? itemWidth / itemHeight
             : availableWidth < 390
@@ -1535,9 +1545,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         return GridView.count(
           shrinkWrap: !fillHeight,
           padding: EdgeInsets.zero,
-          physics: shouldScroll
-              ? const ClampingScrollPhysics()
-              : const NeverScrollableScrollPhysics(),
+          physics: const NeverScrollableScrollPhysics(),
           crossAxisCount: crossAxisCount,
           crossAxisSpacing: crossAxisSpacing,
           mainAxisSpacing: mainAxisSpacing,
@@ -3607,7 +3615,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Widget _buildHomeView() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxHeight < 820;
+        final compact = constraints.maxHeight < 900;
         return Padding(
           padding: EdgeInsets.fromLTRB(18, compact ? 8 : 12, 18, 12),
           child: Column(
