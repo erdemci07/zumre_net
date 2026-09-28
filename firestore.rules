@@ -46,6 +46,109 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function userHasRole(userId, roleName) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.role
+          == roleName;
+    }
+
+    function isGuidanceAppointmentText(fieldName, maxLength) {
+      return request.resource.data[fieldName] is string
+        && request.resource.data[fieldName].size() > 0
+        && request.resource.data[fieldName].size() <= maxLength;
+    }
+
+    function hasValidGuidanceAppointmentCore() {
+      return request.resource.data.keys().hasAll([
+          "studentId", "studentName", "counselorId", "counselorName",
+          "reason", "dayLabel", "time", "status", "createdAt", "updatedAt"
+        ])
+        && isGuidanceAppointmentText("studentId", 128)
+        && isGuidanceAppointmentText("studentName", 120)
+        && isGuidanceAppointmentText("counselorId", 128)
+        && isGuidanceAppointmentText("counselorName", 120)
+        && isGuidanceAppointmentText("reason", 256)
+        && isGuidanceAppointmentText("dayLabel", 64)
+        && isGuidanceAppointmentText("time", 16)
+        && request.resource.data.status in [
+          "pending", "approved", "in_progress", "completed", "cancelled", "no_show"
+        ]
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp
+        && (!request.resource.data.keys().hasAny(["source"])
+          || (request.resource.data.source is string
+            && request.resource.data.source.size() > 0
+            && request.resource.data.source.size() <= 32))
+        && (!request.resource.data.keys().hasAny(["approvedAt"])
+          || request.resource.data.approvedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(["startedAt"])
+          || request.resource.data.startedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(["completedAt"])
+          || request.resource.data.completedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(["cancelledAt"])
+          || request.resource.data.cancelledAt is timestamp)
+        && (!request.resource.data.keys().hasAny(["noShowAt"])
+          || request.resource.data.noShowAt is timestamp);
+    }
+
+    function hasValidGuidanceAppointmentCreate() {
+      return hasValidGuidanceAppointmentCore()
+        && request.resource.data.keys().hasOnly([
+          "studentId", "studentName", "counselorId", "counselorName",
+          "reason", "dayLabel", "time", "status", "source", "createdAt",
+          "updatedAt", "approvedAt", "startedAt", "completedAt", "cancelledAt", "noShowAt"
+        ])
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && ((request.resource.data.status == "pending"
+            && !request.resource.data.keys().hasAny([
+              "approvedAt", "startedAt", "completedAt", "cancelledAt", "noShowAt"
+            ]))
+          || (request.resource.data.status == "approved"
+            && request.resource.data.keys().hasAll(["approvedAt"])
+            && request.resource.data.approvedAt == request.time
+            && !request.resource.data.keys().hasAny([
+              "startedAt", "completedAt", "cancelledAt", "noShowAt"
+            ])));
+    }
+
+    function isLegacyGuidancePending() {
+      return !resource.data.keys().hasAny(["status"]);
+    }
+
+    function isGuidanceStatusTransition(nextStatus) {
+      return (isLegacyGuidancePending() && nextStatus == "approved")
+        || (resource.data.status == "pending"
+          && nextStatus in ["approved", "cancelled", "no_show"])
+        || (resource.data.status == "approved"
+          && nextStatus in ["in_progress", "cancelled", "no_show"])
+        || (resource.data.status == "in_progress" && nextStatus == "completed");
+    }
+
+    function hasGuidanceStatusAudit(nextStatus) {
+      return request.resource.data.updatedAt == request.time
+        && ((nextStatus == "approved"
+            && request.resource.data.approvedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["status", "updatedAt", "approvedAt"]))
+          || (nextStatus == "in_progress"
+            && request.resource.data.startedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["status", "updatedAt", "startedAt"]))
+          || (nextStatus == "completed"
+            && request.resource.data.completedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["status", "updatedAt", "completedAt"]))
+          || (nextStatus == "cancelled"
+            && request.resource.data.cancelledAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["status", "updatedAt", "cancelledAt"]))
+          || (nextStatus == "no_show"
+            && request.resource.data.noShowAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["status", "updatedAt", "noShowAt"])));
+    }
+
     function runtimeState() {
       return get(
         /databases/$(database)/documents/settings/runtimeState
@@ -148,28 +251,29 @@ service cloud.firestore {
         || (isStudent() && resource.data.studentId == request.auth.uid)
         || (isGuidance() && resource.data.counselorId == request.auth.uid);
 
-      allow create: if (isStudent()
-        && request.resource.data.studentId == request.auth.uid
-        && request.resource.data.status == "pending")
+      allow create: if hasValidGuidanceAppointmentCreate()
+        && ((isStudent()
+          && request.resource.data.studentId == request.auth.uid
+          && userHasRole(request.resource.data.counselorId, "guidance")
+          && request.resource.data.status == "pending")
         || (isGuidance()
           && request.resource.data.counselorId == request.auth.uid
-          && request.resource.data.status == "approved");
+          && userHasRole(request.resource.data.studentId, "student")
+          && request.resource.data.status == "approved"));
 
       allow update: if isStudent()
         && resource.data.studentId == request.auth.uid
-        && request.resource.data.studentId == resource.data.studentId
-        && request.resource.data.counselorId == resource.data.counselorId
+        && hasValidGuidanceAppointmentCore()
         && request.resource.data.status == "cancelled"
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(["status", "updatedAt"]);
+        && (isLegacyGuidancePending()
+          || resource.data.status in ["pending", "approved"])
+        && hasGuidanceStatusAudit("cancelled");
 
       allow update: if isGuidance()
         && resource.data.counselorId == request.auth.uid
-        && request.resource.data.studentId == resource.data.studentId
-        && request.resource.data.counselorId == resource.data.counselorId
-        && request.resource.data.status in ["approved", "in_progress", "completed", "no_show"]
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(["status", "updatedAt"]);
+        && hasValidGuidanceAppointmentCore()
+        && isGuidanceStatusTransition(request.resource.data.status)
+        && hasGuidanceStatusAudit(request.resource.data.status);
 
       allow create, update, delete: if isAdmin();
     }
