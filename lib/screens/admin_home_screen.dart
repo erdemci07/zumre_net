@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import '../models/education_scope.dart';
+
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
 
@@ -4140,16 +4142,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
     }
   }
 
-  final List<String> _allSubjects = [
-    'MATEMATİK',
-    'FİZİK',
-    'KİMYA',
-    'BİYOLOJİ',
-    'TÜRKÇE',
-    'TARİH',
-    'COĞRAFYA',
-    'GEOMETRİ',
-  ];
   bool _isLoading = false;
   bool _isBulkDeleting = false;
   int _bulkDeleteProcessed = 0;
@@ -4504,6 +4496,21 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                             ),
                                           ),
                                         if (role == 'teacher' &&
+                                            teachingScopesFromData(data).isNotEmpty)
+                                          Text(
+                                            teachingScopesFromData(data)
+                                                .map((scope) =>
+                                                    '${scope['level']} • ${scope['subject']}')
+                                                .join('\n'),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          )
+                                        else if (role == 'teacher' &&
                                             data['subjects'] is List &&
                                             (data['subjects'] as List).isNotEmpty)
                                           Text(
@@ -4735,6 +4742,15 @@ class _UserManagementPageState extends State<UserManagementPage> {
         legacyBranch.isNotEmpty) {
       selectedSubjects.add(legacyBranch);
     }
+    final selectedEducationLevels = <String>{};
+    final selectedScopeSubjects = <String, String>{};
+    for (final scope in teachingScopesFromData(existingData ?? {})) {
+      final level = scope['level']!;
+      selectedEducationLevels.add(level);
+      selectedScopeSubjects[level] = scope['subject']!;
+    }
+    String? studentEducationLevel =
+        validEducationLevel(existingData?['educationLevel']);
     await showDialog(
       context: context,
       barrierDismissible: false,
@@ -4997,6 +5013,28 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                       onChanged: (val) =>
                                           studentNo = val.trim(),
                                     ),
+                                    const SizedBox(height: 8),
+                                    DropdownButtonFormField<String>(
+                                      initialValue: studentEducationLevel,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Eğitim Kademesi (opsiyonel)',
+                                      ),
+                                      items: [
+                                        const DropdownMenuItem<String>(
+                                          value: null,
+                                          child: Text('Sınıftan otomatik belirle'),
+                                        ),
+                                        ...educationLevels.map(
+                                          (level) => DropdownMenuItem(
+                                            value: level,
+                                            child: Text(level),
+                                          ),
+                                        ),
+                                      ],
+                                      onChanged: (value) => setStateDialog(
+                                        () => studentEducationLevel = value,
+                                      ),
+                                    ),
                                   ],
                                   if (role == 'teacher') ...[
                                     const SizedBox(height: 12),
@@ -5018,33 +5056,57 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                             ),
                                           ),
                                           const SizedBox(height: 8),
-                                          RadioGroup<String>(
-                                            groupValue:
-                                                selectedSubjects.isNotEmpty
-                                                    ? selectedSubjects.first
-                                                    : null,
-                                            onChanged: (value) {
-                                              if (value == null) return;
-                                              setStateDialog(() {
+                                          Wrap(
+                                            spacing: 8,
+                                            children: educationLevels.map((level) => FilterChip(
+                                              label: Text(level),
+                                              selected: selectedEducationLevels.contains(level),
+                                              onSelected: (selected) => setStateDialog(() {
+                                                if (selected) {
+                                                  selectedEducationLevels.add(level);
+                                                  selectedScopeSubjects.putIfAbsent(level, () =>
+                                                    (level == 'LGS' ? lgsSubjects : yksSubjects).first);
+                                                } else {
+                                                  selectedEducationLevels.remove(level);
+                                                  selectedScopeSubjects.remove(level);
+                                                }
                                                 selectedSubjects
                                                   ..clear()
-                                                  ..add(value);
-                                              });
-                                            },
-                                            child: Column(
-                                              children: _allSubjects.map(
-                                                (final subject) {
-                                                  return RadioListTile<String>(
-                                                    contentPadding:
-                                                        EdgeInsets.zero,
-                                                    dense: true,
-                                                    value: subject,
-                                                    title: Text(subject),
-                                                  );
-                                                },
-                                              ).toList(),
-                                            ),
+                                                  ..addAll(selectedScopeSubjects.values.toSet());
+                                              }),
+                                            )).toList(),
                                           ),
+                                          ...selectedEducationLevels.map((level) {
+                                            final subjects = level == 'LGS' ? lgsSubjects : yksSubjects;
+                                            return Padding(
+                                              padding: const EdgeInsets.only(top: 8),
+                                              child: DropdownButtonFormField<String>(
+                                                initialValue: selectedScopeSubjects[level],
+                                                decoration: InputDecoration(labelText: '$level Branşı'),
+                                                items: subjects.map((subject) => DropdownMenuItem(
+                                                  value: subject,
+                                                  child: Text(subject),
+                                                )).toList(),
+                                                onChanged: (subject) {
+                                                  if (subject == null) return;
+                                                  setStateDialog(() {
+                                                    selectedScopeSubjects[level] = subject;
+                                                    selectedSubjects
+                                                      ..clear()
+                                                      ..addAll(selectedScopeSubjects.values.toSet());
+                                                  });
+                                                },
+                                              ),
+                                            );
+                                          }),
+                                          if (selectedEducationLevels.isEmpty)
+                                            const Padding(
+                                              padding: EdgeInsets.only(top: 8),
+                                              child: Text(
+                                                'Eski öğretmen kayıtları kademesiz olarak çalışmaya devam eder.',
+                                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                                              ),
+                                            ),
                                         ],
                                       ),
                                     ),
@@ -5087,6 +5149,25 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                 onPressed: () async {
                                   if (!formKey.currentState!.validate()) return;
 
+                                  final teachingScopes = selectedEducationLevels
+                                      .map((level) => {
+                                            'level': level,
+                                            'subject': selectedScopeSubjects[level],
+                                          })
+                                      .where((scope) =>
+                                          scope['subject'] != null)
+                                      .toList();
+                                  if (!isEditing &&
+                                      role == 'teacher' &&
+                                      teachingScopes.isEmpty) {
+                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Öğretmen için en az bir kademe ve branş seçin.'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
                                   setStateDialog(() {
                                     isUserDialogSaving = true;
                                   });
@@ -5118,6 +5199,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         branch,
                                         department,
                                         studentNo,
+                                        educationLevel: studentEducationLevel,
+                                        educationLevels: selectedEducationLevels.toList(),
+                                        teachingScopes: teachingScopes,
                                       );
 
                                       if (newPassword.trim().isNotEmpty) {
@@ -5140,6 +5224,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         branch,
                                         department,
                                         studentNo,
+                                        educationLevel: studentEducationLevel,
+                                        educationLevels: selectedEducationLevels.toList(),
+                                        teachingScopes: teachingScopes,
                                       );
                                     }
                                     if (ctx.mounted) Navigator.pop(ctx);
@@ -5256,6 +5343,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String branch,
     String department,
     String studentNo,
+    {
+    String? educationLevel,
+    List<String> educationLevels = const [],
+    List<Map<String, String?>> teachingScopes = const [],
+    }
   ) async {
     final callable = _functions.httpsCallable('adminCreateUser');
 
@@ -5271,6 +5363,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
       'branch': branch,
       'department': department,
       'studentNo': studentNo,
+      if (educationLevel != null) 'educationLevel': educationLevel,
+      if (educationLevels.isNotEmpty) 'educationLevels': educationLevels,
+      if (teachingScopes.isNotEmpty) 'teachingScopes': teachingScopes,
       'password': password,
     });
   }
@@ -5288,6 +5383,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String branch,
     String department,
     String studentNo,
+    {
+    String? educationLevel,
+    List<String> educationLevels = const [],
+    List<Map<String, String?>> teachingScopes = const [],
+    }
   ) async {
     final callable = _functions.httpsCallable('adminUpdateUser');
 
@@ -5304,6 +5404,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
       'branch': branch,
       'department': department,
       'studentNo': studentNo,
+      if (educationLevel != null) 'educationLevel': educationLevel,
+      if (educationLevels.isNotEmpty) 'educationLevels': educationLevels,
+      if (teachingScopes.isNotEmpty) 'teachingScopes': teachingScopes,
     });
   }
 

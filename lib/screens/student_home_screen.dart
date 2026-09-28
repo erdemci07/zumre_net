@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
+import '../models/education_scope.dart';
 import '../utils/queue_priority.dart';
 
 class _TeacherChoice {
@@ -244,7 +245,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }).toList();
   }
 
-  bool _teacherMatchesSelectedSubject(Map<String, dynamic> data) {
+  bool _teacherMatchesSelectedSubject(
+    Map<String, dynamic> data,
+    String? educationLevel,
+  ) {
     final selectedSubject = _selectedSubject;
     if (selectedSubject == null || selectedSubject.trim().isEmpty) {
       return false;
@@ -252,8 +256,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     final normalizedSelected = _normalizeSubjectText(selectedSubject);
     return _teacherSubjects(data).any(
-      (subject) => _normalizeSubjectText(subject) == normalizedSelected,
-    );
+          (subject) => _normalizeSubjectText(subject) == normalizedSelected,
+        ) &&
+        teacherMatchesEducationScope(
+          data,
+          subject: selectedSubject,
+          educationLevel: educationLevel,
+        );
   }
 
   String _teacherDisplayName(Map<String, dynamic> data) {
@@ -263,6 +272,13 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   Future<List<_TeacherChoice>> _loadAvailableTeacherChoices() async {
+    final uid = _auth.currentUser?.uid;
+    final studentDoc = uid == null
+        ? null
+        : await _firestore.collection('users').doc(uid).get();
+    final level = studentDoc == null
+        ? null
+        : inferredStudentEducationLevel(studentDoc.data() ?? {});
     final snapshot = await _firestore
         .collection('users')
         .where('role', isEqualTo: 'teacher')
@@ -270,7 +286,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         .get();
 
     final teachers = snapshot.docs
-        .where((doc) => _teacherMatchesSelectedSubject(doc.data()))
+        .where((doc) => _teacherMatchesSelectedSubject(doc.data(), level))
         .map((doc) {
       final data = doc.data();
       return _TeacherChoice(

@@ -2,6 +2,12 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
+const {
+  educationLevel: validEducationLevel,
+  studentEducationLevel,
+  teachingScopes,
+  teacherMatchesEducationScope,
+} = require("./utils/education_scope");
 
 admin.initializeApp();
 
@@ -773,6 +779,15 @@ function cleanSubjects(value) {
     .filter((item, index, list) => item && list.indexOf(item) === index);
 }
 
+function cleanEducationLevels(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(validEducationLevel).filter(Boolean))];
+}
+
+function cleanTeachingScopes(value) {
+  return teachingScopes({ teachingScopes: value });
+}
+
 function normalizeSubjectText(value) {
   return cleanText(value)
     .toLocaleLowerCase("tr-TR")
@@ -812,6 +827,15 @@ function teacherHasSubject(teacherData, subject) {
   return teacherSubjects(teacherData).some(
     (teacherSubject) => normalizeSubjectText(teacherSubject) === normalizedSubject
   );
+}
+
+function teacherMatchesStudentScope(teacherData, studentData, subject) {
+  return teacherHasSubject(teacherData, subject) &&
+    teacherMatchesEducationScope(
+      teacherData,
+      studentEducationLevel(studentData),
+      subject
+    );
 }
 
 function normalizeQuestionCount(value) {
@@ -2142,6 +2166,9 @@ function validateUserPayload(data, options = {}) {
   const firstName = cleanText(data?.name);
   const surname = cleanText(data?.surname);
   const fullName = cleanText(data?.fullName || `${firstName} ${surname}`);
+  const educationLevels = cleanEducationLevels(data?.educationLevels);
+  const teachingScopesValue = cleanTeachingScopes(data?.teachingScopes);
+  const educationLevel = validEducationLevel(data?.educationLevel);
 
   if (!username) {
     throw new HttpsError(
@@ -2185,6 +2212,9 @@ function validateUserPayload(data, options = {}) {
     branch: cleanText(data?.branch),
     department: cleanText(data?.department),
     studentNo: cleanText(data?.studentNo),
+    educationLevel,
+    educationLevels,
+    teachingScopes: teachingScopesValue,
   };
 }
 
@@ -2213,6 +2243,7 @@ function buildUserDocument(payload, options = {}) {
       studentNo: payload.studentNo,
       isInStudySession: false,
       activeStudySessionId: null,
+      ...(payload.educationLevel ? { educationLevel: payload.educationLevel } : {}),
     });
   }
 
@@ -2222,6 +2253,12 @@ function buildUserDocument(payload, options = {}) {
       branch: payload.subjects[0] || "",
       teacherStatus: options.existingTeacherStatus || "absent",
       weeklyAvailability: options.existingWeeklyAvailability || {},
+      ...(payload.teachingScopes.length > 0 ? {
+        educationLevels: payload.educationLevels.length > 0
+          ? payload.educationLevels
+          : [...new Set(payload.teachingScopes.map((scope) => scope.level))],
+        teachingScopes: payload.teachingScopes,
+      } : {}),
     });
   }
 
@@ -2237,12 +2274,15 @@ function applyRoleCleanup(updateData, newRole) {
     updateData.activeStudySessionId = fieldValue.delete();
     updateData.manualAbsentDate = fieldValue.delete();
     updateData.breakUntil = fieldValue.delete();
+    updateData.educationLevel = fieldValue.delete();
   } else if (newRole === "student") {
     updateData.subjects = fieldValue.delete();
     updateData.teacherStatus = fieldValue.delete();
     updateData.weeklyAvailability = fieldValue.delete();
     updateData.manualAbsentDate = fieldValue.delete();
     updateData.breakUntil = fieldValue.delete();
+    updateData.educationLevels = fieldValue.delete();
+    updateData.teachingScopes = fieldValue.delete();
   } else {
     updateData.subjects = fieldValue.delete();
     updateData.teacherStatus = fieldValue.delete();
@@ -2255,6 +2295,9 @@ function applyRoleCleanup(updateData, newRole) {
     updateData.studentNo = fieldValue.delete();
     updateData.isInStudySession = fieldValue.delete();
     updateData.activeStudySessionId = fieldValue.delete();
+    updateData.educationLevel = fieldValue.delete();
+    updateData.educationLevels = fieldValue.delete();
+    updateData.teachingScopes = fieldValue.delete();
   }
 }
 
@@ -3657,7 +3700,7 @@ exports.getAppointmentAvailability = onCall(
       .filter((doc) => {
         if (teacherIdFilter && doc.id !== teacherIdFilter) return false;
         const data = doc.data();
-        if (!teacherHasSubject(data, subject)) return false;
+        if (!teacherMatchesStudentScope(data, student.data, subject)) return false;
         if (data.manualAbsentDate === dateKey) return false;
         return true;
       })
@@ -3899,7 +3942,7 @@ exports.createAppointment = onCall(
         );
       }
 
-      if (!teacherHasSubject(teacherData, subject)) {
+      if (!teacherMatchesStudentScope(teacherData, studentData, subject)) {
         throw new HttpsError(
           "failed-precondition",
           "Seçilen öğretmen bu ders için uygun değil."
@@ -4011,6 +4054,7 @@ exports.createAppointment = onCall(
         teacherId,
         teacherName,
         subject,
+        educationLevel: studentEducationLevel(studentData),
         questionCount,
         estimatedMinutes,
         dateKey,
@@ -4139,8 +4183,8 @@ exports.routeQueueRequest = onCall(
         );
       }
 
-      const candidateTeachers = teachersSnapshot.docs.filter(
-        (doc) => teacherHasSubject(doc.data(), subject)
+      const candidateTeachers = teachersSnapshot.docs.filter((doc) =>
+        teacherMatchesStudentScope(doc.data(), studentData, subject)
       );
 
       if (candidateTeachers.length === 0) {
@@ -4184,6 +4228,7 @@ exports.routeQueueRequest = onCall(
         studentId: student.uid,
         teacherId: selected.teacher.id,
         subject,
+        educationLevel: studentEducationLevel(studentData),
         status: "waiting",
         studentName:
           studentData.fullName ||
@@ -4294,10 +4339,11 @@ exports.routeQueueTransfer = onCall(
 
       const subject = cleanText(queueData.subject);
       const questionCount = normalizeQuestionCount(queueData.questionCount);
-      const candidateTeachers = teachersSnapshot.docs.filter(
-        (doc) =>
-          doc.id !== teacher.uid &&
-          teacherHasSubject(doc.data(), subject)
+      const queueLevel = validEducationLevel(queueData.educationLevel);
+      const candidateTeachers = teachersSnapshot.docs.filter((doc) =>
+        doc.id !== teacher.uid &&
+        teacherHasSubject(doc.data(), subject) &&
+        teacherMatchesEducationScope(doc.data(), queueLevel, subject)
       );
 
       if (candidateTeachers.length === 0) {
@@ -5813,5 +5859,8 @@ if (process.env.NODE_ENV === "test") {
     shouldRunNoShowReconciliation,
     verifiedNoShowHistoryEligible,
     verifiedNoShowPopupEligible,
+    studentEducationLevel,
+    teacherMatchesEducationScope,
+    teacherMatchesStudentScope,
   };
 }
