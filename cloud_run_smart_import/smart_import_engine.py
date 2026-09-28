@@ -48,6 +48,8 @@ STUDENT_ALIASES = {
     "branch": ["sube", "şube", "branch", "bolum", "bölüm"],
     "department": ["alan", "program", "alan*", "program*"],
     "studentNo": ["ogrenci no", "öğrenci no", "numara", "no", "ogrenci no*", "öğrenci no*", "numara*", "no*"],
+    "guardianName": ["veli", "veli adi", "veli adı", "veli ad soyad", "veli ad soyadı", "anne baba adi", "anne baba adı", "yakin adi", "yakın adı"],
+    "guardianPhone": ["veli telefon", "veli telefonu", "veli gsm", "veli cep", "guardian phone"],
     "phone": ["telefon", "telefon numarasi", "telefon numarası", "cep telefonu"],
 }
 
@@ -91,6 +93,19 @@ REQUIRED_FIELDS = {
 }
 
 
+FIELD_LABELS = {
+    "name": "Öğrenci adı",
+    "surname": "Öğrenci soyadı",
+    "username": "Kullanıcı adı",
+    "password": "Şifre",
+    "className": "Sınıf/şube",
+    "department": "Bölüm",
+    "subjects": "Branş",
+    "guardianName": "Veli adı soyadı",
+    "guardianPhone": "Veli telefon numarası",
+}
+
+
 IGNORED_HEADERS = [
     "email",
     "e posta",
@@ -131,6 +146,17 @@ def clean_cell(value: Any) -> str:
 
 def only_digits(value: Any) -> str:
     return re.sub(r"\D", "", clean_cell(value))
+
+
+def normalize_guardian_phone(value: Any) -> Optional[str]:
+    digits = only_digits(value)
+    if digits.startswith("0090"):
+        digits = digits[4:]
+    elif digits.startswith("90") and len(digits) == 12:
+        digits = digits[2:]
+    elif digits.startswith("0") and len(digits) == 11:
+        digits = digits[1:]
+    return digits if re.fullmatch(r"5\d{9}", digits) else None
 
 
 def make_email(username: str) -> str:
@@ -239,7 +265,7 @@ def best_field_for_header(header: Any, aliases: Dict[str, List[str]]) -> Optiona
     return None
 
 
-def detect_header_row(df: pd.DataFrame, file_type: str, max_scan_rows: int = 15) -> int:
+def detect_header_row(df: pd.DataFrame, file_type: str, max_scan_rows: int = 30) -> Tuple[int, int]:
     aliases = get_aliases(file_type)
 
     best_row_index = 0
@@ -267,13 +293,14 @@ def detect_header_row(df: pd.DataFrame, file_type: str, max_scan_rows: int = 15)
             best_score = score
             best_row_index = row_index
 
-    return best_row_index
+    return best_row_index, best_score
 
 
-def build_mapping(headers: List[Any], file_type: str) -> Tuple[Dict[str, int], List[Dict[str, Any]]]:
+def build_mapping(headers: List[Any], file_type: str) -> Tuple[Dict[str, int], List[Dict[str, Any]], List[Dict[str, Any]]]:
     aliases = get_aliases(file_type)
     mapping: Dict[str, int] = {}
     ignored_headers: List[Dict[str, Any]] = []
+    details: List[Dict[str, Any]] = []
 
     for index, header in enumerate(headers):
         normalized_header = normalize_text(header)
@@ -296,6 +323,7 @@ def build_mapping(headers: List[Any], file_type: str) -> Tuple[Dict[str, int], L
 
             if field not in mapping:
                 mapping[field] = index
+                details.append({"field": field, "header": clean_cell(header), "confidence": "EXACT" if score == 100 else "HIGH" if score >= 90 else "MEDIUM", "score": score})
             else:
                 ignored_headers.append({
                     "index": index,
@@ -310,7 +338,7 @@ def build_mapping(headers: List[Any], file_type: str) -> Tuple[Dict[str, int], L
                 "reason": "unknown_header",
             })
 
-    return mapping, ignored_headers
+    return mapping, ignored_headers, details
 
 
 def get_value(row: List[Any], mapping: Dict[str, int], field: str) -> str:
@@ -337,7 +365,13 @@ def validate_required(record: Dict[str, Any], file_type: str) -> List[str]:
     return missing
 
 
-def normalize_student(row: List[Any], mapping: Dict[str, int]) -> Tuple[Dict[str, Any], List[str], List[str]]:
+def format_validation_errors(fields: List[str]) -> List[str]:
+    return [f"{FIELD_LABELS.get(field, field)} bilgisi bulunamadı." for field in fields]
+
+
+def normalize_student(
+    row: List[Any], mapping: Dict[str, int], include_guardian: bool = False
+) -> Tuple[Dict[str, Any], List[str], List[str]]:
     warnings = []
 
     name = get_value(row, mapping, "name")
@@ -370,6 +404,9 @@ def normalize_student(row: List[Any], mapping: Dict[str, int]) -> Tuple[Dict[str
     department = get_value(row, mapping, "department")
     student_no = get_value(row, mapping, "studentNo")
     phone = only_digits(get_value(row, mapping, "phone"))
+    guardian_name = get_value(row, mapping, "guardianName") if include_guardian else ""
+    guardian_raw_phone = get_value(row, mapping, "guardianPhone") if include_guardian else ""
+    guardian_phone = normalize_guardian_phone(guardian_raw_phone) if guardian_raw_phone else ""
 
     record = {
         "role": "student",
@@ -387,7 +424,14 @@ def normalize_student(row: List[Any], mapping: Dict[str, int]) -> Tuple[Dict[str
         "phone": phone,
     }
 
+    if include_guardian:
+        record["guardianName"] = guardian_name
+        if guardian_phone:
+            record["guardianPhone"] = guardian_phone
+
     errors = validate_required(record, "student")
+    if guardian_raw_phone and not guardian_phone:
+        warnings.append("Veli telefon numarası geçersiz olduğu için aktarılmayacak.")
 
     return record, errors, warnings
 
@@ -458,7 +502,7 @@ def confidence_score(
     return max(0, min(100, score))
 
 
-def analyze_excel(file_path: str, file_type: str) -> Dict[str, Any]:
+def analyze_excel(file_path: str, file_type: str, overrides: Optional[Dict[str, int]] = None, include_guardian: bool = False) -> Dict[str, Any]:
     if file_type not in ["student", "teacher"]:
         raise ValueError("file_type student veya teacher olmalı.")
 
@@ -467,12 +511,47 @@ def analyze_excel(file_path: str, file_type: str) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Dosya bulunamadı: {file_path}")
 
-    df_raw = pd.read_excel(path, header=None, dtype=str)
-
-    header_row = detect_header_row(df_raw, file_type)
+    workbook = pd.ExcelFile(path)
+    candidates = []
+    for sheet_name in workbook.sheet_names:
+        candidate = pd.read_excel(path, sheet_name=sheet_name, header=None, dtype=str)
+        header_index, score = detect_header_row(candidate, file_type)
+        candidates.append((score, len(candidate), sheet_name, candidate, header_index))
+    _, _, sheet_name, df_raw, header_row = max(candidates, key=lambda item: (item[0], item[1]))
+    workbook.close()
     headers = df_raw.iloc[header_row].tolist()
 
-    mapping, ignored_headers = build_mapping(headers, file_type)
+    mapping, ignored_headers, mapping_details = build_mapping(headers, file_type)
+    for field, index in (overrides or {}).items():
+        if isinstance(index, int) and 0 <= index < len(headers):
+            mapping[field] = index
+            mapping_details = [item for item in mapping_details if item["field"] != field]
+            mapping_details.append({"field": field, "header": clean_cell(headers[index]), "confidence": "MANUAL", "score": 100})
+    # Legacy Edesis exports use ŞUBE as the only class/section column. Keep
+    # its value intact rather than fabricating a grade from it.
+    if file_type == "student" and "className" not in mapping and "branch" in mapping:
+        branch_index = mapping["branch"]
+        branch_detail = next(
+            (item for item in mapping_details if item["field"] == "branch"), None
+        )
+        mapping["className"] = branch_index
+        mapping_details = [item for item in mapping_details if item["field"] != "branch"]
+        mapping_details.append({
+            "field": "className",
+            "header": clean_cell(headers[branch_index]),
+            "confidence": branch_detail["confidence"] if branch_detail else "HIGH",
+            "score": branch_detail["score"] if branch_detail else 90,
+        })
+
+    # Guardian columns are intentionally not part of a student-only import.
+    # This makes the analysis payload itself safe to forward to /import.
+    if file_type == "student" and not include_guardian:
+        mapping.pop("guardianName", None)
+        mapping.pop("guardianPhone", None)
+        mapping_details = [
+            item for item in mapping_details
+            if item["field"] not in {"guardianName", "guardianPhone"}
+        ]
 
     data_df = df_raw.iloc[header_row + 1:].copy()
     data_df = data_df.dropna(how="all")
@@ -487,7 +566,9 @@ def analyze_excel(file_path: str, file_type: str) -> Dict[str, Any]:
         if file_type == "teacher":
             normalized, errors, warnings = normalize_teacher(row, mapping)
         else:
-            normalized, errors, warnings = normalize_student(row, mapping)
+            normalized, errors, warnings = normalize_student(
+                row, mapping, include_guardian=include_guardian
+            )
 
         if all(not clean_cell(v) for v in row):
             continue
@@ -497,7 +578,7 @@ def analyze_excel(file_path: str, file_type: str) -> Dict[str, Any]:
         if errors:
             invalid_rows.append({
                 "rowNumber": row_number,
-                "errors": errors,
+                "errors": format_validation_errors(errors),
                 "warnings": warnings,
                 "raw": [clean_cell(v) for v in row],
                 "normalized": normalized,
@@ -524,11 +605,19 @@ def analyze_excel(file_path: str, file_type: str) -> Dict[str, Any]:
         "type": file_type,
         "fileName": path.name,
         "headerRow": header_row + 1,
+        "sheetName": sheet_name,
+        "headers": [clean_cell(header) for header in headers],
+        "mappingDetails": mapping_details,
+        "guardianMode": include_guardian,
         "totalRows": len(valid_rows) + len(invalid_rows),
         "validCount": len(valid_rows),
         "invalidCount": len(invalid_rows),
+        "reviewCount": len({warning["rowNumber"] for warning in warnings_all}),
         "confidenceScore": score,
         "mapping": mapping,
+        "missingFields": [
+            field for field in REQUIRED_FIELDS[file_type] if field not in mapping
+        ],
         "ignoredHeaders": ignored_headers,
         "warnings": warnings_all,
         "preview": valid_rows[:10],

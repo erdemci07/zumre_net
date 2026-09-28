@@ -1863,7 +1863,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
                             _reportCard(
                               icon: Icons.groups_rounded,
                               title: 'Sınıf Takip Raporu',
-                              subtitle: 'Öğrenci bazlı zümre ve etüt özetidir Whatsapp gruplarında paylaşmak içindir',
+                              subtitle:
+                                  'Öğrenci bazlı zümre ve etüt özetidir Whatsapp gruplarında paylaşmak içindir',
                               color: Colors.greenAccent,
                               compact: compact,
                               onTap: () => _requestClassReportPdf(
@@ -2167,23 +2168,61 @@ class _StatisticsPageState extends State<StatisticsPage> {
           'fileBase64': fileBase64,
           'fileName': file.name,
           'type': type,
+          'includeGuardian': false,
         }),
       );
 
       if (response.statusCode != 200) {
         throw Exception('Smart Import analiz hatası: ${response.body}');
       }
-      final analyzeData = _parseUtf8JsonResponse(response);
+      var analyzeData = _parseUtf8JsonResponse(response);
 
       if (!mounted) return;
       _hideExcelLoadingDialog();
 
-      final confirm = await _showImportAnalysisDialog(
-        type: type,
-        data: analyzeData,
-      );
+      var includeGuardian = false;
+      var mappingOverrides = <String, int>{};
 
-      if (confirm != true) return;
+      while (mounted) {
+        final selection = await _showImportAnalysisDialog(
+          type: type,
+          data: analyzeData,
+          includeGuardian: includeGuardian,
+          mappingOverrides: mappingOverrides,
+        );
+
+        if (selection == null) return;
+
+        includeGuardian = selection['includeGuardian'] == true;
+        mappingOverrides = Map<String, int>.from(
+          selection['mappingOverrides'] ?? const <String, int>{},
+        );
+
+        if (selection['action'] == 'import') break;
+
+        _showExcelLoadingDialog();
+        final reanalyzeResponse = await http.post(
+          Uri.parse('$smartImportBaseUrl/analyze'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
+          body: jsonEncode({
+            'fileBase64': fileBase64,
+            'fileName': file.name,
+            'type': type,
+            'includeGuardian': includeGuardian,
+            'mappingOverrides': mappingOverrides,
+          }),
+        );
+        if (reanalyzeResponse.statusCode != 200) {
+          throw Exception(
+              'Smart Import analiz hatası: ${reanalyzeResponse.body}');
+        }
+        analyzeData = _parseUtf8JsonResponse(reanalyzeResponse);
+        if (!mounted) return;
+        _hideExcelLoadingDialog();
+      }
 
       final validRows = List.from(analyzeData['validRows'] ?? []);
 
@@ -2206,6 +2245,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
         body: jsonEncode({
           'type': analyzeData['type'],
           'validRows': validRows,
+          'includeGuardian': includeGuardian,
         }),
       );
 
@@ -2315,16 +2355,38 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
-  Future<bool?> _showImportAnalysisDialog({
+  Future<Map<String, dynamic>?> _showImportAnalysisDialog({
     required String type,
     required Map<String, dynamic> data,
+    required bool includeGuardian,
+    required Map<String, int> mappingOverrides,
   }) {
     final preview = List.from(data['preview'] ?? []);
     final ignored = List.from(data['ignoredHeaders'] ?? []);
     final missing = List.from(data['missingFields'] ?? []);
     final invalidPreview = List.from(data['invalidPreview'] ?? []);
+    final headers = List.from(data['headers'] ?? []);
+    final mappingDetails = List.from(data['mappingDetails'] ?? []);
+    final currentMapping = Map<String, dynamic>.from(data['mapping'] ?? {});
+    final manualFields = <String>{
+      ...missing.map((field) => field.toString()),
+      ...mappingDetails
+          .map((item) => Map<String, dynamic>.from(item))
+          .where((item) => item['confidence'] == 'MEDIUM')
+          .map((item) => item['field'].toString()),
+    };
 
-    return showDialog<bool>(
+    if (type == 'student' && includeGuardian) {
+      for (final field in const ['guardianName', 'guardianPhone']) {
+        if (!mappingDetails.any(
+          (item) => Map<String, dynamic>.from(item)['field'] == field,
+        )) {
+          manualFields.add(field);
+        }
+      }
+    }
+
+    return showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
@@ -2367,7 +2429,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         ),
                       ),
                       IconButton(
-                        onPressed: () => Navigator.pop(ctx, false),
+                        onPressed: () => Navigator.pop(ctx),
                         icon: const Icon(
                           Icons.close_rounded,
                           color: Colors.white70,
@@ -2376,7 +2438,53 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  if (type == 'student') ...[
+                    const SizedBox(height: 14),
+                    const Text(
+                      'İçe Aktarma Türü',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    RadioGroup<bool>(
+                      groupValue: includeGuardian,
+                      onChanged: (value) => Navigator.pop(ctx, {
+                        'action': 'reanalyze',
+                        'includeGuardian': value == true,
+                        'mappingOverrides': mappingOverrides,
+                      }),
+                      child: const Column(
+                        children: [
+                          RadioListTile<bool>(
+                            value: false,
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            activeColor: Colors.orangeAccent,
+                            title: Text(
+                              'Sadece Öğrenciler',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                          RadioListTile<bool>(
+                            value: true,
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            activeColor: Colors.orangeAccent,
+                            title: Text(
+                              'Öğrenciler + Veli Bilgileri',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   _analysisLine('Dosya', '${data['fileName']}'),
+                  _analysisLine('Sayfa', '${data['sheetName'] ?? '-'}'),
+                  _analysisLine('Başlık satırı', '${data['headerRow'] ?? '-'}'),
+                  _analysisLine(
+                      'Kontrol gerekli', '${data['reviewCount'] ?? 0}'),
                   _analysisLine('Toplam satır', '${data['totalRows'] ?? 0}'),
                   _analysisLine('Geçerli kayıt', '${data['validCount'] ?? 0}'),
                   _analysisLine('Hatalı kayıt', '${data['invalidCount'] ?? 0}'),
@@ -2399,6 +2507,79 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       style: const TextStyle(color: Colors.white70),
                     ),
                   ],
+                  if (mappingDetails.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Eşleştirilen Alanlar',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    ...mappingDetails.map((item) {
+                      final detail = Map<String, dynamic>.from(item);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          '✓ ${_smartImportFieldLabel(detail['field'].toString())} ← ${detail['header']} — ${_smartImportConfidenceLabel(detail['confidence'].toString())}',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                      );
+                    }),
+                  ],
+                  if (manualFields.isNotEmpty && headers.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Kontrol edilmesi gereken eşleştirmeler',
+                      style: TextStyle(
+                        color: Colors.orangeAccent,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ...manualFields.map((field) {
+                      final mappedIndex = currentMapping[field];
+                      final selectedIndex = mappingOverrides[field] ??
+                          (mappedIndex is num ? mappedIndex.toInt() : null);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: DropdownButtonFormField<int>(
+                          initialValue: selectedIndex,
+                          isExpanded: true,
+                          dropdownColor: const Color(0xFF10264C),
+                          decoration: InputDecoration(
+                            labelText: _smartImportFieldLabel(field),
+                            labelStyle: const TextStyle(color: Colors.white70),
+                            enabledBorder: const OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.white38),
+                            ),
+                          ),
+                          style: const TextStyle(color: Colors.white),
+                          items: headers.asMap().entries.map((entry) {
+                            return DropdownMenuItem<int>(
+                              value: entry.key,
+                              child: Text(
+                                '${entry.value} (Sütun ${entry.key + 1})',
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+                            final nextOverrides = Map<String, int>.from(
+                              mappingOverrides,
+                            );
+                            nextOverrides[field] = value;
+                            Navigator.pop(ctx, {
+                              'action': 'reanalyze',
+                              'includeGuardian': includeGuardian,
+                              'mappingOverrides': nextOverrides,
+                            });
+                          },
+                        ),
+                      );
+                    }),
+                  ],
                   if (missing.isNotEmpty) ...[
                     const SizedBox(height: 14),
                     const Text(
@@ -2410,7 +2591,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      missing.join(', '),
+                      missing
+                          .map((field) =>
+                              _smartImportFieldLabel(field.toString()))
+                          .join(', '),
                       style: const TextStyle(color: Colors.white70),
                     ),
                   ],
@@ -2468,7 +2652,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     children: [
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: () => Navigator.pop(ctx, false),
+                          onPressed: () => Navigator.pop(ctx),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.white,
                             side: const BorderSide(color: Colors.white38),
@@ -2480,7 +2664,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       Expanded(
                         child: ElevatedButton(
                           onPressed: (data['validCount'] ?? 0) > 0
-                              ? () => Navigator.pop(ctx, true)
+                              ? () => Navigator.pop(ctx, {
+                                    'action': 'import',
+                                    'includeGuardian': includeGuardian,
+                                    'mappingOverrides': mappingOverrides,
+                                  })
                               : null,
                           child: Text(
                             (data['invalidCount'] ?? 0) > 0
@@ -2498,6 +2686,38 @@ class _StatisticsPageState extends State<StatisticsPage> {
         );
       },
     );
+  }
+
+  String _smartImportFieldLabel(String field) {
+    const labels = {
+      'name': 'Öğrenci Adı',
+      'surname': 'Öğrenci Soyadı',
+      'fullName': 'Öğrenci Adı Soyadı',
+      'username': 'Kullanıcı Adı',
+      'password': 'Şifre',
+      'className': 'Sınıf / Şube',
+      'branch': 'Şube',
+      'department': 'Bölüm',
+      'studentNo': 'Öğrenci Numarası',
+      'phone': 'Telefon Numarası',
+      'subjects': 'Branş',
+      'guardianName': 'Veli Adı Soyadı',
+      'guardianPhone': 'Veli Telefon Numarası',
+    };
+    return labels[field] ?? 'Eşleştirilmemiş Alan';
+  }
+
+  String _smartImportConfidenceLabel(String confidence) {
+    switch (confidence) {
+      case 'EXACT':
+        return 'Kesin';
+      case 'HIGH':
+        return 'Yüksek güven';
+      case 'MANUAL':
+        return 'Manuel seçildi';
+      default:
+        return 'Kontrol gerekli';
+    }
   }
 
   Widget _analysisLine(String title, String value) {
@@ -4124,7 +4344,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
       FirebaseFunctions.instanceFor(region: 'us-central1');
   static const int _bulkDeleteClientBatchSize = 50;
 
-  final List<String> _roles = ['admin', 'teacher', 'student', 'guidance', 'studyGuard'];
+  final List<String> _roles = [
+    'admin',
+    'teacher',
+    'student',
+    'guidance',
+    'studyGuard'
+  ];
   String _roleLabel(String role) {
     switch (role.trim()) {
       case 'admin':
@@ -4335,8 +4561,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     ? FontWeight.w800
                                     : FontWeight.w600,
                               ),
-                              selectedColor: Colors.white.withValues(alpha: 0.22),
-                              backgroundColor: Colors.white.withValues(alpha: 0.08),
+                              selectedColor:
+                                  Colors.white.withValues(alpha: 0.22),
+                              backgroundColor:
+                                  Colors.white.withValues(alpha: 0.08),
                               side: BorderSide(
                                 color: Colors.white.withValues(
                                   alpha: selected ? 0.38 : 0.14,
@@ -4464,7 +4692,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     Wrap(
                                       spacing: 7,
                                       runSpacing: 4,
-                                      crossAxisAlignment: WrapCrossAlignment.center,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
                                       children: [
                                         Text(
                                           _roleLabel(role),
@@ -4476,8 +4705,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         ),
                                         if (role == 'student' &&
                                             ((data['className'] ?? '').toString().isNotEmpty ||
-                                                (data['branch'] ?? '').toString().isNotEmpty ||
-                                                (data['department'] ?? '').toString().isNotEmpty))
+                                                (data['branch'] ?? '')
+                                                    .toString()
+                                                    .isNotEmpty ||
+                                                (data['department'] ?? '')
+                                                    .toString()
+                                                    .isNotEmpty))
                                           Text(
                                             [
                                               data['className'],
@@ -4486,7 +4719,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                             ]
                                                 .where((v) =>
                                                     v != null &&
-                                                    v.toString().trim().isNotEmpty)
+                                                    v
+                                                        .toString()
+                                                        .trim()
+                                                        .isNotEmpty)
                                                 .map((v) => v.toString().trim())
                                                 .join(' • '),
                                             style: const TextStyle(
@@ -4496,7 +4732,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                             ),
                                           ),
                                         if (role == 'teacher' &&
-                                            teachingScopesFromData(data).isNotEmpty)
+                                            teachingScopesFromData(data)
+                                                .isNotEmpty)
                                           Text(
                                             teachingScopesFromData(data)
                                                 .map((scope) =>
@@ -4512,7 +4749,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                           )
                                         else if (role == 'teacher' &&
                                             data['subjects'] is List &&
-                                            (data['subjects'] as List).isNotEmpty)
+                                            (data['subjects'] as List)
+                                                .isNotEmpty)
                                           Text(
                                             (data['subjects'] as List)
                                                 .map((v) => v.toString())
@@ -4701,6 +4939,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String branch = existingData?['branch']?.toString() ?? '';
     String department = existingData?['department']?.toString() ?? '';
     String studentNo = existingData?['studentNo']?.toString() ?? '';
+    String guardianName = existingData?['guardianName']?.toString() ?? '';
+    String guardianPhone = existingData?['guardianPhone']?.toString() ?? '';
     String username = existingData?['username']?.toString() ?? '';
 
     String role = existingData?['role']?.toString().trim() ?? 'student';
@@ -5014,15 +5254,34 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                           studentNo = val.trim(),
                                     ),
                                     const SizedBox(height: 8),
+                                    TextFormField(
+                                      initialValue: guardianName,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Veli Adı Soyadı'),
+                                      onChanged: (val) =>
+                                          guardianName = val.trim(),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      initialValue: guardianPhone,
+                                      keyboardType: TextInputType.phone,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Veli Telefon Numarası'),
+                                      onChanged: (val) =>
+                                          guardianPhone = val.trim(),
+                                    ),
+                                    const SizedBox(height: 8),
                                     DropdownButtonFormField<String>(
                                       initialValue: studentEducationLevel,
                                       decoration: const InputDecoration(
-                                        labelText: 'Eğitim Kademesi (opsiyonel)',
+                                        labelText:
+                                            'Eğitim Kademesi (opsiyonel)',
                                       ),
                                       items: [
                                         const DropdownMenuItem<String>(
                                           value: null,
-                                          child: Text('Sınıftan otomatik belirle'),
+                                          child:
+                                              Text('Sınıftan otomatik belirle'),
                                         ),
                                         ...educationLevels.map(
                                           (level) => DropdownMenuItem(
@@ -5058,42 +5317,73 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                           const SizedBox(height: 8),
                                           Wrap(
                                             spacing: 8,
-                                            children: educationLevels.map((level) => FilterChip(
-                                              label: Text(level),
-                                              selected: selectedEducationLevels.contains(level),
-                                              onSelected: (selected) => setStateDialog(() {
-                                                if (selected) {
-                                                  selectedEducationLevels.add(level);
-                                                  selectedScopeSubjects.putIfAbsent(level, () =>
-                                                    (level == 'LGS' ? lgsSubjects : yksSubjects).first);
-                                                } else {
-                                                  selectedEducationLevels.remove(level);
-                                                  selectedScopeSubjects.remove(level);
-                                                }
-                                                selectedSubjects
-                                                  ..clear()
-                                                  ..addAll(selectedScopeSubjects.values.toSet());
-                                              }),
-                                            )).toList(),
+                                            children: educationLevels
+                                                .map((level) => FilterChip(
+                                                      label: Text(level),
+                                                      selected:
+                                                          selectedEducationLevels
+                                                              .contains(level),
+                                                      onSelected: (selected) =>
+                                                          setStateDialog(() {
+                                                        if (selected) {
+                                                          selectedEducationLevels
+                                                              .add(level);
+                                                          selectedScopeSubjects.putIfAbsent(
+                                                              level,
+                                                              () => (level ==
+                                                                          'LGS'
+                                                                      ? lgsSubjects
+                                                                      : yksSubjects)
+                                                                  .first);
+                                                        } else {
+                                                          selectedEducationLevels
+                                                              .remove(level);
+                                                          selectedScopeSubjects
+                                                              .remove(level);
+                                                        }
+                                                        selectedSubjects
+                                                          ..clear()
+                                                          ..addAll(
+                                                              selectedScopeSubjects
+                                                                  .values
+                                                                  .toSet());
+                                                      }),
+                                                    ))
+                                                .toList(),
                                           ),
-                                          ...selectedEducationLevels.map((level) {
-                                            final subjects = level == 'LGS' ? lgsSubjects : yksSubjects;
+                                          ...selectedEducationLevels
+                                              .map((level) {
+                                            final subjects = level == 'LGS'
+                                                ? lgsSubjects
+                                                : yksSubjects;
                                             return Padding(
-                                              padding: const EdgeInsets.only(top: 8),
-                                              child: DropdownButtonFormField<String>(
-                                                initialValue: selectedScopeSubjects[level],
-                                                decoration: InputDecoration(labelText: '$level Branşı'),
-                                                items: subjects.map((subject) => DropdownMenuItem(
-                                                  value: subject,
-                                                  child: Text(subject),
-                                                )).toList(),
+                                              padding:
+                                                  const EdgeInsets.only(top: 8),
+                                              child: DropdownButtonFormField<
+                                                  String>(
+                                                initialValue:
+                                                    selectedScopeSubjects[
+                                                        level],
+                                                decoration: InputDecoration(
+                                                    labelText: '$level Branşı'),
+                                                items: subjects
+                                                    .map((subject) =>
+                                                        DropdownMenuItem(
+                                                          value: subject,
+                                                          child: Text(subject),
+                                                        ))
+                                                    .toList(),
                                                 onChanged: (subject) {
                                                   if (subject == null) return;
                                                   setStateDialog(() {
-                                                    selectedScopeSubjects[level] = subject;
+                                                    selectedScopeSubjects[
+                                                        level] = subject;
                                                     selectedSubjects
                                                       ..clear()
-                                                      ..addAll(selectedScopeSubjects.values.toSet());
+                                                      ..addAll(
+                                                          selectedScopeSubjects
+                                                              .values
+                                                              .toSet());
                                                   });
                                                 },
                                               ),
@@ -5104,7 +5394,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                               padding: EdgeInsets.only(top: 8),
                                               child: Text(
                                                 'Eski öğretmen kayıtları kademesiz olarak çalışmaya devam eder.',
-                                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                                                style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey),
                                               ),
                                             ),
                                         ],
@@ -5152,17 +5444,20 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                   final teachingScopes = selectedEducationLevels
                                       .map((level) => {
                                             'level': level,
-                                            'subject': selectedScopeSubjects[level],
+                                            'subject':
+                                                selectedScopeSubjects[level],
                                           })
-                                      .where((scope) =>
-                                          scope['subject'] != null)
+                                      .where(
+                                          (scope) => scope['subject'] != null)
                                       .toList();
                                   if (!isEditing &&
                                       role == 'teacher' &&
                                       teachingScopes.isEmpty) {
-                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
                                       const SnackBar(
-                                        content: Text('Öğretmen için en az bir kademe ve branş seçin.'),
+                                        content: Text(
+                                            'Öğretmen için en az bir kademe ve branş seçin.'),
                                       ),
                                     );
                                     return;
@@ -5200,8 +5495,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         department,
                                         studentNo,
                                         educationLevel: studentEducationLevel,
-                                        educationLevels: selectedEducationLevels.toList(),
+                                        educationLevels:
+                                            selectedEducationLevels.toList(),
                                         teachingScopes: teachingScopes,
+                                        guardianName: guardianName,
+                                        guardianPhone: guardianPhone,
                                       );
 
                                       if (newPassword.trim().isNotEmpty) {
@@ -5225,8 +5523,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         department,
                                         studentNo,
                                         educationLevel: studentEducationLevel,
-                                        educationLevels: selectedEducationLevels.toList(),
+                                        educationLevels:
+                                            selectedEducationLevels.toList(),
                                         teachingScopes: teachingScopes,
+                                        guardianName: guardianName,
+                                        guardianPhone: guardianPhone,
                                       );
                                     }
                                     if (ctx.mounted) Navigator.pop(ctx);
@@ -5342,13 +5643,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String className,
     String branch,
     String department,
-    String studentNo,
-    {
+    String studentNo, {
     String? educationLevel,
     List<String> educationLevels = const [],
     List<Map<String, String?>> teachingScopes = const [],
-    }
-  ) async {
+    String guardianName = '',
+    String guardianPhone = '',
+  }) async {
     final callable = _functions.httpsCallable('adminCreateUser');
 
     await callable.call({
@@ -5366,6 +5667,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
       if (educationLevel != null) 'educationLevel': educationLevel,
       if (educationLevels.isNotEmpty) 'educationLevels': educationLevels,
       if (teachingScopes.isNotEmpty) 'teachingScopes': teachingScopes,
+      'guardianName': guardianName,
+      'guardianPhone': guardianPhone,
       'password': password,
     });
   }
@@ -5382,13 +5685,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String className,
     String branch,
     String department,
-    String studentNo,
-    {
+    String studentNo, {
     String? educationLevel,
     List<String> educationLevels = const [],
     List<Map<String, String?>> teachingScopes = const [],
-    }
-  ) async {
+    String guardianName = '',
+    String guardianPhone = '',
+  }) async {
     final callable = _functions.httpsCallable('adminUpdateUser');
 
     await callable.call({
@@ -5407,6 +5710,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
       if (educationLevel != null) 'educationLevel': educationLevel,
       if (educationLevels.isNotEmpty) 'educationLevels': educationLevels,
       if (teachingScopes.isNotEmpty) 'teachingScopes': teachingScopes,
+      'guardianName': guardianName,
+      'guardianPhone': guardianPhone,
     });
   }
 

@@ -55,6 +55,8 @@ async function importUsers({ validRows, type }) {
         userData.branch = user.branch;
         userData.studentNo = user.studentNo || "";
         userData.department = user.department || "";
+        userData.guardianName = user.guardianName || "";
+        userData.guardianPhone = user.guardianPhone || "";
       }
 
       if (type === "teacher") {

@@ -769,6 +769,18 @@ function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function normalizeGuardianPhone(value) {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("0090")) digits = digits.slice(4);
+  else if (digits.startsWith("90") && digits.length === 12) digits = digits.slice(2);
+  else if (digits.startsWith("0") && digits.length === 11) digits = digits.slice(1);
+  if (!/^5\d{9}$/.test(digits)) {
+    throw new HttpsError("invalid-argument", "Veli telefonu 10 haneli GSM numarası olmalıdır. Örnek: 5551234567");
+  }
+  return digits;
+}
+
 function cleanSubjects(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -2166,6 +2178,8 @@ function validateUserPayload(data, options = {}) {
   const firstName = cleanText(data?.name);
   const surname = cleanText(data?.surname);
   const fullName = cleanText(data?.fullName || `${firstName} ${surname}`);
+  const guardianName = cleanText(data?.guardianName);
+  const guardianPhone = data?.guardianPhone ? normalizeGuardianPhone(data.guardianPhone) : "";
   const educationLevels = cleanEducationLevels(data?.educationLevels);
   const teachingScopesValue = cleanTeachingScopes(data?.teachingScopes);
   const educationLevel = validEducationLevel(data?.educationLevel);
@@ -2212,6 +2226,8 @@ function validateUserPayload(data, options = {}) {
     branch: cleanText(data?.branch),
     department: cleanText(data?.department),
     studentNo: cleanText(data?.studentNo),
+    guardianName,
+    guardianPhone,
     educationLevel,
     educationLevels,
     teachingScopes: teachingScopesValue,
@@ -2241,6 +2257,8 @@ function buildUserDocument(payload, options = {}) {
       branch: payload.branch,
       department: payload.department,
       studentNo: payload.studentNo,
+      guardianName: payload.guardianName,
+      guardianPhone: payload.guardianPhone,
       isInStudySession: false,
       activeStudySessionId: null,
       ...(payload.educationLevel ? { educationLevel: payload.educationLevel } : {}),

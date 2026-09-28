@@ -30,11 +30,14 @@ class AnalyzeRequest(BaseModel):
     fileBase64: str
     fileName: str
     type: str
+    mappingOverrides: dict = {}
+    includeGuardian: bool = False
 
 
 class ImportRequest(BaseModel):
     type: str
     validRows: list
+    includeGuardian: bool = False
 
 
 def require_admin(authorization: Optional[str] = Header(default=None)) -> str:
@@ -81,7 +84,7 @@ def analyze_file(request: AnalyzeRequest, _admin_uid: str = Depends(require_admi
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
-        return analyze_excel(tmp_path, request.type)
+        return analyze_excel(tmp_path, request.type, request.mappingOverrides, request.includeGuardian)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -153,6 +156,11 @@ def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin
                     "department": row.get("department", ""),
                     "studentNo": row.get("studentNo", ""),
                 })
+                if request.includeGuardian:
+                    if "guardianName" in row:
+                        user_data["guardianName"] = row["guardianName"]
+                    if "guardianPhone" in row:
+                        user_data["guardianPhone"] = row["guardianPhone"]
 
             doc_ref = db.collection("users").document(uid)
             existing_doc = doc_ref.get()
