@@ -38,16 +38,11 @@ STUDENT_ALIASES = {
         "tc kimlik",
         "tc numarasi",
         "tc numarası",
-        "ogrenci no",
-        "öğrenci no",
-        "numara",
-        "no",
     ],
     "password": ["sifre", "şifre", "password", "parola", "sifre*", "şifre*", "password*", "parola*"],
-    "className": ["sinif", "sınıf", "class", "sinifi", "hazirlik", "hazırlık"],
-    "branch": ["sube", "şube", "branch", "bolum", "bölüm"],
-    "department": ["alan", "program", "alan*", "program*"],
-    "studentNo": ["ogrenci no", "öğrenci no", "numara", "no", "ogrenci no*", "öğrenci no*", "numara*", "no*"],
+    "className": ["sinif", "sınıf", "class", "sinifi", "sinif seviyesi", "sınıf seviyesi", "hazirlik", "hazırlık"],
+    "branch": ["sube", "şube", "branch", "sinif sube", "sınıf şube", "sinif şube", "sınıf sube", "derslik"],
+    "department": ["bolum", "bölüm", "alan", "alan bolum", "alan bölüm", "alan/bolum", "alan/bölüm", "program", "alan*", "program*"],
     "guardianName": ["veli", "veli adi", "veli adı", "veli ad soyad", "veli ad soyadı", "anne baba adi", "anne baba adı", "yakin adi", "yakın adı"],
     "guardianPhone": ["veli telefon", "veli telefonu", "veli gsm", "veli cep", "guardian phone"],
 }
@@ -217,6 +212,8 @@ def merge_student_import_fields(
 
     return {
         "className": class_name,
+        "branch": clean_cell(incoming.get("branch")) or clean_cell(existing.get("branch")),
+        "department": clean_cell(incoming.get("department")) or clean_cell(existing.get("department")),
         "educationLevel": education_level,
     }
 
@@ -496,7 +493,6 @@ def normalize_student(
             warnings.append("Şube sınıf alanından otomatik ayrıldı.")
 
     department = get_value(row, mapping, "department")
-    student_no = get_value(row, mapping, "studentNo")
     guardian_name = get_value(row, mapping, "guardianName") if include_guardian else ""
     guardian_raw_phone = get_value(row, mapping, "guardianPhone") if include_guardian else ""
     guardian_phone = normalize_guardian_phone(guardian_raw_phone) if guardian_raw_phone else ""
@@ -513,7 +509,6 @@ def normalize_student(
         "className": class_name,
         "branch": branch,
         "department": department,
-        "studentNo": student_no,
     }
 
     education_level = infer_student_education_level(class_name, department)

@@ -2699,7 +2699,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
       'className': 'Sınıf / Şube',
       'branch': 'Şube',
       'department': 'Bölüm',
-      'studentNo': 'Öğrenci Numarası',
       'phone': 'Telefon Numarası',
       'subjects': 'Branş',
       'guardianName': 'Veli Adı Soyadı',
@@ -4945,7 +4944,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String className = existingData?['className']?.toString() ?? '';
     String branch = existingData?['branch']?.toString() ?? '';
     String department = existingData?['department']?.toString() ?? '';
-    String studentNo = existingData?['studentNo']?.toString() ?? '';
     String guardianName = existingData?['guardianName']?.toString() ?? '';
     String guardianPhone = existingData?['guardianPhone']?.toString() ?? '';
     String username = existingData?['username']?.toString() ?? '';
@@ -5254,14 +5252,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     ),
                                     const SizedBox(height: 8),
                                     TextFormField(
-                                      initialValue: studentNo,
-                                      decoration: const InputDecoration(
-                                          labelText: 'Öğrenci No'),
-                                      onChanged: (val) =>
-                                          studentNo = val.trim(),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    TextFormField(
                                       initialValue: guardianName,
                                       decoration: const InputDecoration(
                                           labelText: 'Veli Adı Soyadı'),
@@ -5500,7 +5490,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         className,
                                         branch,
                                         department,
-                                        studentNo,
                                         educationLevel: studentEducationLevel,
                                         educationLevels:
                                             selectedEducationLevels.toList(),
@@ -5528,7 +5517,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         className,
                                         branch,
                                         department,
-                                        studentNo,
                                         educationLevel: studentEducationLevel,
                                         educationLevels:
                                             selectedEducationLevels.toList(),
@@ -5649,8 +5637,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String username,
     String className,
     String branch,
-    String department,
-    String studentNo, {
+    String department, {
     String? educationLevel,
     List<String> educationLevels = const [],
     List<Map<String, String?>> teachingScopes = const [],
@@ -5670,7 +5657,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
       'className': className,
       'branch': branch,
       'department': department,
-      'studentNo': studentNo,
       if (educationLevel != null) 'educationLevel': educationLevel,
       if (educationLevels.isNotEmpty) 'educationLevels': educationLevels,
       if (teachingScopes.isNotEmpty) 'teachingScopes': teachingScopes,
@@ -5691,8 +5677,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String username,
     String className,
     String branch,
-    String department,
-    String studentNo, {
+    String department, {
     String? educationLevel,
     List<String> educationLevels = const [],
     List<Map<String, String?>> teachingScopes = const [],
@@ -5713,7 +5698,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
       'className': className,
       'branch': branch,
       'department': department,
-      'studentNo': studentNo,
       if (educationLevel != null) 'educationLevel': educationLevel,
       if (educationLevels.isNotEmpty) 'educationLevels': educationLevels,
       if (teachingScopes.isNotEmpty) 'teachingScopes': teachingScopes,

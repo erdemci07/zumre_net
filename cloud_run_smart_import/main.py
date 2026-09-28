@@ -156,9 +156,8 @@ def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin
                 student_fields = merge_student_import_fields(existing_data, row)
                 user_data.update({
                     "className": student_fields["className"],
-                    "branch": row.get("branch", ""),
-                    "department": row.get("department", ""),
-                    "studentNo": row.get("studentNo", ""),
+                    "branch": student_fields["branch"],
+                    "department": student_fields["department"],
                 })
                 if student_fields["educationLevel"]:
                     user_data["educationLevel"] = student_fields["educationLevel"]

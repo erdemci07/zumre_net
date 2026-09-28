@@ -36,6 +36,19 @@ class SmartImportEngineTest(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(handle.name) and os.unlink(handle.name))
         return handle.name
 
+    def _workbook_with_columns(self, headers, row):
+        handle = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        handle.close()
+        with pd.ExcelWriter(handle.name) as writer:
+            pd.DataFrame([["Not", "yardımcı sayfa"]]).to_excel(
+                writer, sheet_name="Notlar", header=False, index=False
+            )
+            pd.DataFrame([["Öğrenci aktarımı"], headers, row]).to_excel(
+                writer, sheet_name="Öğrenciler", header=False, index=False
+            )
+        self.addCleanup(lambda: os.path.exists(handle.name) and os.unlink(handle.name))
+        return handle.name
+
     def test_student_only_chooses_data_sheet_and_omits_guardians(self):
         result = analyze_excel(self._workbook(), "student", include_guardian=False)
 
@@ -73,12 +86,56 @@ class SmartImportEngineTest(unittest.TestCase):
 
     def test_existing_richer_student_class_and_level_are_not_overwritten(self):
         merged = merge_student_import_fields(
-            {"className": "10-DERSLİK 6", "educationLevel": "YKS"},
-            {"className": "DERSLİK 6", "department": "SAYISAL"},
+            {
+                "className": "8",
+                "branch": "",
+                "department": "",
+                "educationLevel": "LGS",
+            },
+            {
+                "className": "DERSLİK 9",
+                "branch": "DERSLİK 9",
+                "department": "LGS",
+            },
         )
 
-        self.assertEqual(merged["className"], "10-DERSLİK 6")
-        self.assertEqual(merged["educationLevel"], "YKS")
+        self.assertEqual(merged["className"], "8")
+        self.assertEqual(merged["branch"], "DERSLİK 9")
+        self.assertEqual(merged["department"], "LGS")
+        self.assertEqual(merged["educationLevel"], "LGS")
+
+    def test_separate_sinif_sube_and_bolum_columns_stay_separate(self):
+        result = analyze_excel(
+            self._workbook_with_columns(
+                [
+                    "AD",
+                    "SOYAD",
+                    "KULLANICI ADI",
+                    "ŞİFRE",
+                    "SINIF",
+                    "ŞUBE",
+                    "BÖLÜM",
+                    "ÖĞRENCİ NO",
+                ],
+                [
+                    "Ayşe",
+                    "Yılmaz",
+                    "ayse.yilmaz",
+                    "123456",
+                    "8",
+                    "DERSLİK 9",
+                    "LGS",
+                    "70004",
+                ],
+            ),
+            "student",
+        )
+
+        row = result["validRows"][0]
+        self.assertEqual(row["className"], "8")
+        self.assertEqual(row["branch"], "DERSLİK 9")
+        self.assertEqual(row["department"], "LGS")
+        self.assertNotIn("studentNo", row)
 
     def test_guardian_mode_normalizes_phone_without_blocking_bad_phone(self):
         result = analyze_excel(
