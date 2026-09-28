@@ -4352,6 +4352,67 @@ class _TimeTextInputFormatter extends TextInputFormatter {
   }
 }
 
+class _StudentFieldOptions {
+  const _StudentFieldOptions({
+    required this.classNames,
+    required this.branches,
+    required this.departments,
+  });
+
+  final List<String> classNames;
+  final List<String> branches;
+  final List<String> departments;
+}
+
+String _autocompleteSearchKey(String value) => value
+    .trim()
+    .replaceAll('İ', 'I')
+    .toLowerCase()
+    .replaceAll('ı', 'i')
+    .replaceAll('ğ', 'g')
+    .replaceAll('ü', 'u')
+    .replaceAll('ş', 's')
+    .replaceAll('ö', 'o')
+    .replaceAll('ç', 'c');
+
+class _EditableAutocompleteField extends StatelessWidget {
+  const _EditableAutocompleteField({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String value;
+  final List<String> options;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Autocomplete<String>(
+      initialValue: TextEditingValue(text: value),
+      optionsBuilder: (textEditingValue) {
+        final query = _autocompleteSearchKey(textEditingValue.text);
+        if (query.isEmpty) return options;
+        return options.where(
+          (option) => _autocompleteSearchKey(option).contains(query),
+        );
+      },
+      onSelected: onChanged,
+      fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+        return TextFormField(
+          controller: controller,
+          focusNode: focusNode,
+          decoration: InputDecoration(labelText: label),
+          textCapitalization: TextCapitalization.words,
+          onChanged: onChanged,
+        );
+      },
+    );
+  }
+}
+
 class _UserManagementPageState extends State<UserManagementPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseFunctions _functions =
@@ -4389,6 +4450,48 @@ class _UserManagementPageState extends State<UserManagementPage> {
   String _userSearchQuery = '';
   String _userRoleFilter = 'all';
   final Set<String> _selectedUserIds = {};
+
+  Future<_StudentFieldOptions> _loadStudentFieldOptions() async {
+    try {
+      final snapshot = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'student')
+          .get();
+      final classNames = <String, String>{};
+      final branches = <String, String>{};
+      final departments = <String, String>{};
+
+      void addValue(Map<String, String> values, Object? value) {
+        final text = value?.toString().trim() ?? '';
+        if (text.isEmpty) return;
+        values.putIfAbsent(_autocompleteSearchKey(text), () => text);
+      }
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        addValue(classNames, data['className']);
+        addValue(branches, data['branch']);
+        addValue(departments, data['department']);
+      }
+
+      List<String> sortedValues(Map<String, String> values) {
+        final result = values.values.toList()..sort();
+        return result;
+      }
+
+      return _StudentFieldOptions(
+        classNames: sortedValues(classNames),
+        branches: sortedValues(branches),
+        departments: sortedValues(departments),
+      );
+    } catch (_) {
+      return const _StudentFieldOptions(
+        classNames: [],
+        branches: [],
+        departments: [],
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4927,6 +5030,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String? editingUid,
     Map<String, dynamic>? existingData,
   }) async {
+    final studentFieldOptions = await _loadStudentFieldOptions();
+    if (!mounted) return;
     final isEditing = editingUid != null;
     final formKey = GlobalKey<FormState>();
     const String domain = '@bilimkalesi.com';
@@ -5228,25 +5333,25 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                   ),
                                   if (role == 'student') ...[
                                     const SizedBox(height: 8),
-                                    TextFormField(
-                                      initialValue: className,
-                                      decoration: const InputDecoration(
-                                          labelText: 'Sınıf'),
+                                    _EditableAutocompleteField(
+                                      label: 'Sınıf',
+                                      value: className,
+                                      options: studentFieldOptions.classNames,
                                       onChanged: (val) =>
                                           className = val.trim(),
                                     ),
                                     const SizedBox(height: 8),
-                                    TextFormField(
-                                      initialValue: branch,
-                                      decoration: const InputDecoration(
-                                          labelText: 'Şube'),
+                                    _EditableAutocompleteField(
+                                      label: 'Şube',
+                                      value: branch,
+                                      options: studentFieldOptions.branches,
                                       onChanged: (val) => branch = val.trim(),
                                     ),
                                     const SizedBox(height: 8),
-                                    TextFormField(
-                                      initialValue: department,
-                                      decoration: const InputDecoration(
-                                          labelText: 'Alan / Bölüm'),
+                                    _EditableAutocompleteField(
+                                      label: 'Alan / Bölüm',
+                                      value: department,
+                                      options: studentFieldOptions.departments,
                                       onChanged: (val) =>
                                           department = val.trim(),
                                     ),
