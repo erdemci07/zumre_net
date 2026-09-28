@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 
+import '../utils/class_name_display.dart';
+
 const _guidanceTerminalStatuses = {'completed', 'cancelled', 'no_show'};
 
 String _guidanceStatus(String? value) =>
@@ -143,7 +145,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                 Container(
                     padding: const EdgeInsets.all(11),
                     decoration: BoxDecoration(
-                        color: Color(0xFFFFB1C8).withValues(alpha: .16),
+                        color: const Color(0xFFFFB1C8).withValues(alpha: .16),
                         shape: BoxShape.circle),
                     child: const Icon(Icons.person_add_alt_1_rounded,
                         color: Color(0xFFFFB1C8), size: 28)),
@@ -199,10 +201,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                             final name =
                                 '${x['fullName'] ?? '${x['name'] ?? ''} ${x['surname'] ?? ''}'}'
                                     .trim();
-                            final cls = [
-                              '${x['className'] ?? ''}',
-                              '${x['branch'] ?? ''}'
-                            ].where((e) => e.isNotEmpty).join(' • ');
+                            final cls = formatStudentClassDisplay(
+                              className: x['className'],
+                              branch: x['branch'],
+                            );
                             final selected = selectedId == d.id;
                             return ListTile(
                                 onTap: () => setD(() {
@@ -211,7 +213,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                     }),
                                 leading: CircleAvatar(
                                     backgroundColor: selected
-                                        ? Color(0xFFFFB1C8)
+                                        ? const Color(0xFFFFB1C8)
                                         : Colors.white12,
                                     child: Icon(
                                         selected
@@ -239,7 +241,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                 Row(children: [
                   Expanded(
                       child: DropdownButtonFormField<String>(
-                          value: reason,
+                          initialValue: reason,
                           dropdownColor: const Color(0xFF681E40),
                           style: const TextStyle(color: Colors.white),
                           decoration: const InputDecoration(
@@ -299,7 +301,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   height: 50,
                   child: FilledButton.icon(
                       style: FilledButton.styleFrom(
-                          backgroundColor: Color(0xFFFFB1C8),
+                          backgroundColor: const Color(0xFFFFB1C8),
                           foregroundColor: const Color(0xFF4A102B),
                           disabledBackgroundColor: Colors.white12),
                       onPressed: selectedId == null || isSubmitting
@@ -449,10 +451,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                       final n =
                                           '${x['fullName'] ?? '${x['name'] ?? ''} ${x['surname'] ?? ''}'}'
                                               .trim();
-                                      final cls = [
-                                        '${x['className'] ?? ''}',
-                                        '${x['branch'] ?? ''}'
-                                      ].where((e) => e.isNotEmpty).join(' • ');
+                                      final cls = formatStudentClassDisplay(
+                                        className: x['className'],
+                                        branch: x['branch'],
+                                      );
                                       final sel = studentId == d.id;
                                       return ListTile(
                                           onTap: () => setD(() {
@@ -461,7 +463,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                               }),
                                           leading: CircleAvatar(
                                               backgroundColor: sel
-                                                  ? Color(0xFFFFB1C8)
+                                                  ? const Color(0xFFFFB1C8)
                                                   : Colors.white12,
                                               child: Icon(
                                                   sel
@@ -610,15 +612,17 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                         .where('counselorId', isEqualTo: uid)
                         .snapshots(),
                     builder: (context, snap) {
-                      if (!snap.hasData)
+                      if (!snap.hasData) {
                         return const Center(child: CircularProgressIndicator());
+                      }
                       final tasks = snap.data!.docs
                           .where((d) => d.data()['active'] != false)
                           .toList();
-                      if (tasks.isEmpty)
+                      if (tasks.isEmpty) {
                         return const Center(
                             child: Text('Aktif haftalık takip yok.',
                                 style: TextStyle(color: Colors.white70)));
+                      }
                       return ListView.separated(
                           itemCount: tasks.length,
                           separatorBuilder: (_, __) =>
@@ -767,8 +771,9 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                     .where('counselorId', isEqualTo: uid)
                     .snapshots(),
                 builder: (context, snap) {
-                  if (!snap.hasData)
+                  if (!snap.hasData) {
                     return const Center(child: CircularProgressIndicator());
+                  }
                   final docs = snap.data!.docs.toList()
                     ..sort((a, b) {
                       final at = a.data()['createdAt'] as Timestamp?;
@@ -1002,9 +1007,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                                                       child: const Text(
                                                                           'İptal Et'))
                                                                 ]));
-                                                    if (ok == true)
+                                                    if (ok == true) {
                                                       await changeStatus(doc.id,
                                                           s, 'cancelled');
+                                                    }
                                                   },
                                             child: const Text('İptal Et')),
                                         const SizedBox(width: 8),

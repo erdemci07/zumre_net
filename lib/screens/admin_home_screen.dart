@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/education_scope.dart';
+import '../utils/class_name_display.dart';
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -319,11 +320,11 @@ class _ReportClassOption {
   final String branch;
   final String department;
 
-  String get displayName => [
-        className,
-        if (branch.isNotEmpty) branch,
-        if (department.isNotEmpty) department,
-      ].join('-');
+  String get displayName => formatStudentClassDisplay(
+        className: className,
+        branch: branch,
+        department: department,
+      );
 
   String get key => '$className|$branch|$department';
 }
@@ -2619,7 +2620,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Text(
                           type == 'student'
-                              ? '${row['fullName']} • ${row['className']}-${row['branch']} • ${row['department'] ?? ''} • ${row['username']}'
+                              ? _smartImportStudentPreviewLine(row)
                               : '${row['fullName']} • ${(row['subjects'] is List && row['subjects'].isNotEmpty) ? row['subjects'].join(', ') : 'Branş yok'} • ${row['username']}',
                           style: const TextStyle(color: Colors.white70),
                         ),
@@ -2718,6 +2719,20 @@ class _StatisticsPageState extends State<StatisticsPage> {
       default:
         return 'Kontrol gerekli';
     }
+  }
+
+  String _smartImportStudentPreviewLine(Map<String, dynamic> row) {
+    final values = [
+      row['fullName']?.toString().trim() ?? '',
+      formatStudentClassDisplay(
+        className: row['className'],
+        branch: row['branch'],
+        department: row['department'],
+      ),
+      row['username']?.toString().trim() ?? '',
+    ].where((value) => value.isNotEmpty);
+
+    return values.join(' • ');
   }
 
   Widget _analysisLine(String title, String value) {
@@ -4712,19 +4727,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                                     .toString()
                                                     .isNotEmpty))
                                           Text(
-                                            [
-                                              data['className'],
-                                              data['branch'],
-                                              data['department'],
-                                            ]
-                                                .where((v) =>
-                                                    v != null &&
-                                                    v
-                                                        .toString()
-                                                        .trim()
-                                                        .isNotEmpty)
-                                                .map((v) => v.toString().trim())
-                                                .join(' • '),
+                                            formatStudentClassDisplay(
+                                              className: data['className'],
+                                              branch: data['branch'],
+                                              department: data['department'],
+                                            ),
                                             style: const TextStyle(
                                               color: Colors.white70,
                                               fontSize: 12,

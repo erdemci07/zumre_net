@@ -50,7 +50,6 @@ STUDENT_ALIASES = {
     "studentNo": ["ogrenci no", "öğrenci no", "numara", "no", "ogrenci no*", "öğrenci no*", "numara*", "no*"],
     "guardianName": ["veli", "veli adi", "veli adı", "veli ad soyad", "veli ad soyadı", "anne baba adi", "anne baba adı", "yakin adi", "yakın adı"],
     "guardianPhone": ["veli telefon", "veli telefonu", "veli gsm", "veli cep", "guardian phone"],
-    "phone": ["telefon", "telefon numarasi", "telefon numarası", "cep telefonu"],
 }
 
 TEACHER_ALIASES = {
@@ -106,6 +105,22 @@ FIELD_LABELS = {
 }
 
 
+VALID_EDUCATION_LEVELS = {"LGS", "YKS"}
+YKS_DEPARTMENT_TOKENS = {
+    "yks",
+    "lise",
+    "say",
+    "sayisal",
+    "ea",
+    "esit agirlik",
+    "esitagirlik",
+    "sozel",
+    "tyt",
+    "ayt",
+    "mezun",
+}
+
+
 IGNORED_HEADERS = [
     "email",
     "e posta",
@@ -142,6 +157,68 @@ def clean_cell(value: Any) -> str:
         text = text[:-2]
 
     return text.strip()
+
+
+def valid_education_level(value: Any) -> Optional[str]:
+    level = clean_cell(value).upper()
+    return level if level in VALID_EDUCATION_LEVELS else None
+
+
+def class_name_education_level(value: Any) -> Optional[str]:
+    class_name = clean_cell(value).upper()
+    if re.match(r"^(5|6|7|8)-", class_name):
+        return "LGS"
+    if re.match(r"^(9|10|11|12)-", class_name) or re.match(r"^MEZUN(?:-|$)", class_name):
+        return "YKS"
+    return None
+
+
+def infer_student_education_level(class_name: Any, department: Any = "") -> Optional[str]:
+    from_class_name = class_name_education_level(class_name)
+    if from_class_name:
+        return from_class_name
+
+    department_key = normalize_text(department)
+    if department_key in {"lgs", "ortaokul"}:
+        return "LGS"
+    if department_key in YKS_DEPARTMENT_TOKENS:
+        return "YKS"
+    return None
+
+
+def class_name_information_quality(value: Any) -> int:
+    class_name = clean_cell(value)
+    if not class_name:
+        return 0
+    if class_name_education_level(class_name):
+        return 3
+    if normalize_text(class_name).startswith("derslik"):
+        return 1
+    return 2
+
+
+def merge_student_import_fields(
+    existing: Dict[str, Any], incoming: Dict[str, Any]
+) -> Dict[str, Any]:
+    existing_class_name = clean_cell(existing.get("className"))
+    incoming_class_name = clean_cell(incoming.get("className"))
+    if (
+        existing_class_name
+        and class_name_information_quality(existing_class_name)
+        > class_name_information_quality(incoming_class_name)
+    ):
+        class_name = existing_class_name
+    else:
+        class_name = incoming_class_name or existing_class_name
+
+    existing_level = valid_education_level(existing.get("educationLevel"))
+    incoming_level = valid_education_level(incoming.get("educationLevel"))
+    education_level = existing_level or incoming_level
+
+    return {
+        "className": class_name,
+        "educationLevel": education_level,
+    }
 
 
 def only_digits(value: Any) -> str:
@@ -185,7 +262,15 @@ def normalize_password(value: Any) -> str:
 
 
 def split_class_branch(value: str) -> Tuple[str, str]:
-    text = clean_cell(value).upper()
+    source_value = clean_cell(value)
+    if (
+        re.match(r"^(5|6|7|8|9|10|11|12)-", source_value.upper())
+        or re.match(r"^MEZUN(?:-|$)", source_value.upper())
+        or source_value.upper().startswith("DERSLİK-")
+    ):
+        return source_value, ""
+
+    text = source_value.upper()
     text = text.replace("_", " ")
     text = text.replace("-", " ")
     text = text.replace("/", " ")
@@ -391,19 +476,27 @@ def normalize_student(
 
     class_name = get_value(row, mapping, "className")
     branch = get_value(row, mapping, "branch")
+    is_legacy_branch_fallback = (
+        mapping.get("className") is not None
+        and mapping.get("className") == mapping.get("branch")
+    )
 
-    parsed_class, parsed_branch = split_class_branch(class_name)
+    if is_legacy_branch_fallback:
+        # A legacy ŞUBE column is the canonical class value as-is. It must not
+        # be split or reused as a second branch value.
+        branch = ""
+    else:
+        parsed_class, parsed_branch = split_class_branch(class_name)
 
-    if parsed_class:
-        class_name = parsed_class
+        if parsed_class:
+            class_name = parsed_class
 
-    if not branch and parsed_branch:
-        branch = parsed_branch
-        warnings.append("Şube sınıf alanından otomatik ayrıldı.")
+        if not branch and parsed_branch:
+            branch = parsed_branch
+            warnings.append("Şube sınıf alanından otomatik ayrıldı.")
 
     department = get_value(row, mapping, "department")
     student_no = get_value(row, mapping, "studentNo")
-    phone = only_digits(get_value(row, mapping, "phone"))
     guardian_name = get_value(row, mapping, "guardianName") if include_guardian else ""
     guardian_raw_phone = get_value(row, mapping, "guardianPhone") if include_guardian else ""
     guardian_phone = normalize_guardian_phone(guardian_raw_phone) if guardian_raw_phone else ""
@@ -421,8 +514,11 @@ def normalize_student(
         "branch": branch,
         "department": department,
         "studentNo": student_no,
-        "phone": phone,
     }
+
+    education_level = infer_student_education_level(class_name, department)
+    if education_level:
+        record["educationLevel"] = education_level
 
     if include_guardian:
         record["guardianName"] = guardian_name

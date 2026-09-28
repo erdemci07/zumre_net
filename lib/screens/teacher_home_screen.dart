@@ -6,6 +6,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/services.dart';
 
 import '../utils/queue_priority.dart';
+import '../utils/class_name_display.dart';
 
 class TeacherHomeScreen extends StatefulWidget {
   const TeacherHomeScreen({super.key});
@@ -457,17 +458,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 
   String _studentClassInfo(Map<String, dynamic> data) {
-    final className = (data['className'] ?? '').toString().trim();
-    final branch = (data['branch'] ?? '').toString().trim();
-    final department = (data['department'] ?? '').toString().trim();
-    final classText = className.isEmpty
-        ? ''
-        : '$className${branch.isNotEmpty ? '-$branch' : ''}';
-
-    return [
-      classText,
-      department,
-    ].where((value) => value.isNotEmpty).join(' • ');
+    return formatStudentClassDisplay(
+      className: data['className'],
+      branch: data['branch'],
+      department: data['department'],
+    );
   }
 
   String _studentSearchIndex(Map<String, dynamic> data) {

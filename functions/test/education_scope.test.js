@@ -4,13 +4,34 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { __appointmentTest: helpers } = require("../index.js");
 
-test("education scope keeps LGS and YKS mathematics teacher pools separate", () => {
+test("production className prefixes keep LGS and YKS mathematics pools separate", () => {
   const lgsTeacher = {
     subjects: ["MATEMATİK"],
     teachingScopes: [{ level: "LGS", subject: "MATEMATİK" }],
   };
-  assert.equal(helpers.teacherMatchesStudentScope(lgsTeacher, { className: "8/A" }, "MATEMATİK"), true);
-  assert.equal(helpers.teacherMatchesStudentScope(lgsTeacher, { className: "11-A" }, "MATEMATİK"), false);
+  const yksTeacher = {
+    subjects: ["MATEMATİK"],
+    teachingScopes: [{ level: "YKS", subject: "MATEMATİK" }],
+  };
+
+  for (const className of ["6-DERSLİK 6", "8-DERSLİK 9"]) {
+    const student = { className };
+    assert.equal(helpers.studentEducationLevel(student), "LGS");
+    assert.equal(helpers.teacherMatchesStudentScope(lgsTeacher, student, "MATEMATİK"), true);
+    assert.equal(helpers.teacherMatchesStudentScope(yksTeacher, student, "MATEMATİK"), false);
+  }
+
+  for (const className of ["10-DERSLİK 6", "11-DERSLİK 4 SAY", "12-DERSLİK 13 EA", "MEZUN-DERSLİK 10"]) {
+    const student = { className };
+    assert.equal(helpers.studentEducationLevel(student), "YKS");
+    assert.equal(helpers.teacherMatchesStudentScope(lgsTeacher, student, "MATEMATİK"), false);
+    assert.equal(helpers.teacherMatchesStudentScope(yksTeacher, student, "MATEMATİK"), true);
+  }
+
+  const unknownLevelStudent = { className: "DERSLİK-16-SÖZEL" };
+  assert.equal(helpers.studentEducationLevel(unknownLevelStudent), null);
+  assert.equal(helpers.teacherMatchesStudentScope(lgsTeacher, unknownLevelStudent, "MATEMATİK"), false);
+  assert.equal(helpers.teacherMatchesStudentScope(yksTeacher, unknownLevelStudent, "MATEMATİK"), false);
 });
 
 test("dual-scope and legacy teachers remain available as intended", () => {

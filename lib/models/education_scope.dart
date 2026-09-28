@@ -40,10 +40,13 @@ String? inferredStudentEducationLevel(Map<String, dynamic> data) {
   final explicit = validEducationLevel(data['educationLevel']);
   if (explicit != null) return explicit;
 
-  final className = data['className']?.toString().trim() ?? '';
-  final match = RegExp(r'(^|\D)(8|9|10|11|12)(\D|$)').firstMatch(className);
-  if (match == null) return null;
-  return match.group(2) == '8' ? 'LGS' : 'YKS';
+  final className = data['className']?.toString().trim().toUpperCase() ?? '';
+  if (RegExp(r'^(5|6|7|8)-').hasMatch(className)) return 'LGS';
+  if (RegExp(r'^(9|10|11|12)-').hasMatch(className) ||
+      RegExp(r'^MEZUN(?:-|$)').hasMatch(className)) {
+    return 'YKS';
+  }
+  return null;
 }
 
 List<Map<String, String>> teachingScopesFromData(Map<String, dynamic> data) {
@@ -69,7 +72,8 @@ bool teacherMatchesEducationScope(
   String? educationLevel,
 }) {
   final scopes = teachingScopesFromData(teacher);
-  if (scopes.isEmpty || educationLevel == null) return true;
+  if (scopes.isEmpty) return true;
+  if (educationLevel == null) return false;
   return scopes.any(
     (scope) =>
         scope['level'] == educationLevel &&

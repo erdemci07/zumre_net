@@ -23,9 +23,12 @@ function educationLevel(value) {
 function studentEducationLevel(student = {}) {
   const explicit = educationLevel(student.educationLevel);
   if (explicit) return explicit;
-  const match = cleanText(student.className).match(/(^|\D)(8|9|10|11|12)(\D|$)/);
-  if (!match) return null;
-  return match[2] === "8" ? "LGS" : "YKS";
+  const className = cleanText(student.className).toLocaleUpperCase("tr-TR");
+  if (/^(5|6|7|8)-/.test(className)) return "LGS";
+  if (/^(9|10|11|12)-/.test(className) || /^MEZUN(?:-|$)/.test(className)) {
+    return "YKS";
+  }
+  return null;
 }
 
 function teachingScopes(teacher = {}) {
@@ -45,7 +48,8 @@ function teachingScopes(teacher = {}) {
 
 function teacherMatchesEducationScope(teacher, level, subject) {
   const scopes = teachingScopes(teacher);
-  if (!level || scopes.length === 0) return true;
+  if (scopes.length === 0) return true;
+  if (!level) return false;
   return scopes.some((scope) =>
     scope.level === level && normalizeSubject(scope.subject) === normalizeSubject(subject)
   );

@@ -9,7 +9,7 @@ import firebase_admin
 from firebase_admin import auth, firestore
 from fastapi.middleware.cors import CORSMiddleware
 
-from smart_import_engine import analyze_excel
+from smart_import_engine import analyze_excel, merge_student_import_fields
 
 app = FastAPI()
 app.add_middleware(
@@ -137,6 +137,10 @@ def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin
                 uid = user.uid
                 created += 1
 
+            doc_ref = db.collection("users").document(uid)
+            existing_doc = doc_ref.get()
+            existing_data = existing_doc.to_dict() or {}
+
             user_data = {
                 "uid": uid,
                 "role": request.type,
@@ -146,28 +150,28 @@ def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin
                 "name": row.get("name", ""),
                 "surname": row.get("surname", ""),
                 "fullName": row.get("fullName", ""),
-                "phone": row.get("phone", ""),
                 "updatedAt": firestore.SERVER_TIMESTAMP,
             }
             if request.type == "student":
+                student_fields = merge_student_import_fields(existing_data, row)
                 user_data.update({
-                    "className": row.get("className", ""),
+                    "className": student_fields["className"],
                     "branch": row.get("branch", ""),
                     "department": row.get("department", ""),
                     "studentNo": row.get("studentNo", ""),
                 })
+                if student_fields["educationLevel"]:
+                    user_data["educationLevel"] = student_fields["educationLevel"]
                 if request.includeGuardian:
                     if "guardianName" in row:
                         user_data["guardianName"] = row["guardianName"]
                     if "guardianPhone" in row:
                         user_data["guardianPhone"] = row["guardianPhone"]
 
-            doc_ref = db.collection("users").document(uid)
-            existing_doc = doc_ref.get()
-
             if request.type == "teacher":
                 user_data.update({
                     "subjects": row.get("subjects", []),
+                    "phone": row.get("phone", ""),
                 })
 
                 if not existing_doc.exists:
