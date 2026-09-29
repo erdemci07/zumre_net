@@ -2186,21 +2186,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       'Motivasyon',
       'Genel görüşme',
     ];
-    const days = [
-      'Pazartesi',
-      'Salı',
-      'Çarşamba',
-      'Perşembe',
-      'Cuma',
-      'Cumartesi',
-    ];
-    const times = ['10:20', '11:10', '13:40', '14:30', '15:20'];
+    final dateKeys = _upcomingAppointmentDateKeys();
 
     String? counselor;
     String? counselorId;
     String? reason;
-    String? day;
-    String? time;
+    String? selectedDateKey;
     bool isCreatingRequest = false;
 
     await showDialog<void>(
@@ -2208,10 +2199,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) {
-          final ready = counselor != null &&
-              reason != null &&
-              day != null &&
-              time != null;
+          final ready =
+              counselor != null && reason != null && selectedDateKey != null;
           return Dialog(
             backgroundColor: Colors.transparent,
             insetPadding:
@@ -2267,7 +2256,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                     fontWeight: FontWeight.bold)),
                             SizedBox(height: 3),
                             Text(
-                                'Görüşme için rehberlikçi, konu ve saat seçin.',
+                                'Görüşme için rehberlikçi, konu ve tarih seçin.',
                                 style: TextStyle(
                                     color: Colors.white60, fontSize: 12.5)),
                           ],
@@ -2360,46 +2349,26 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 .toList(),
                           ),
                           const SizedBox(height: 16),
-                          _planningSectionTitle('Haftalık Gün'),
+                          _planningSectionTitle('Tarih'),
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
-                            children: days
-                                .map((item) => _planningChoiceChip(
-                                      label: item,
-                                      selected: day == item,
+                            children: dateKeys
+                                .map((dateKey) => _planningChoiceChip(
+                                      label: _formatPlanningDay(dateKey),
+                                      selected: selectedDateKey == dateKey,
                                       enabled: true,
-                                      onTap: () => setDialogState(() {
-                                        day = item;
-                                        time = null;
-                                      }),
+                                      onTap: () => setDialogState(
+                                          () => selectedDateKey = dateKey),
                                       color: Colors.cyanAccent,
                                     ))
                                 .toList(),
                           ),
-                          const SizedBox(height: 16),
-                          _planningSectionTitle('Uygun Saatler'),
-                          if (day == null)
-                            _planningInfoBox('Önce bir tarih seçin.')
-                          else
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: times
-                                  .map((item) => _planningChoiceChip(
-                                        label: item,
-                                        selected: time == item,
-                                        enabled: true,
-                                        centered: true,
-                                        onTap: () =>
-                                            setDialogState(() => time = item),
-                                        color: Colors.cyanAccent,
-                                      ))
-                                  .toList(),
-                            ),
                           const SizedBox(height: 14),
                           _planningInfoBox(
-                            'Randevu talebiniz rehberlik birimine iletilecektir. Görüşme saatiniz rehberlikçi tarafından gerektiğinde güncellenebilir.',
+                            selectedDateKey == null
+                                ? 'Görüşme için uygun tarihi seçin.'
+                                : 'Seçtiğiniz gün içinde rehberlik birimine gelebilirsiniz. Görüşmeniz gün içinde rehberlikçinizin uygunluğuna göre gerçekleştirilecektir.',
                             color: Colors.cyanAccent,
                           ),
                         ],
@@ -2424,8 +2393,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                   'counselorId': counselorId,
                                   'counselorName': counselor,
                                   'reason': reason,
-                                  'dayLabel': day,
-                                  'time': time,
+                                  'dayLabel':
+                                      _formatPlanningDay(selectedDateKey!),
+                                  'appointmentDate': selectedDateKey,
+                                  'time': '',
                                   'status': 'pending',
                                   'createdAt': FieldValue.serverTimestamp(),
                                   'updatedAt': FieldValue.serverTimestamp(),
@@ -2436,8 +2407,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                     'id': appointment.id,
                                     'counselor': counselor!,
                                     'reason': reason!,
-                                    'day': day!,
-                                    'time': time!,
+                                    'day':
+                                        _formatPlanningDay(selectedDateKey!),
+                                    'time': '',
                                     'status': 'Onay Bekliyor',
                                   };
                                 });
@@ -2446,7 +2418,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(
                                     content: Text(
-                                      'Randevu talebiniz oluşturuldu: $counselor • $day • $time',
+                                      'Randevu talebiniz oluşturuldu: $counselor • ${_formatPlanningDay(selectedDateKey!)}',
                                     ),
                                   ),
                                 );
@@ -3976,8 +3948,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 'Görüşme konusu', appointment['reason']!),
             _guidanceDetailRow(
                 Icons.calendar_today_rounded, 'Tarih', appointment['day']!),
-            _guidanceDetailRow(
-                Icons.schedule_rounded, 'Saat', appointment['time']!),
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
@@ -4014,10 +3984,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           ],
         ),
         actions: [
-          TextButton.icon(
-            onPressed: appointment['status'] == 'Görüşmede'
-                ? null
-                : () async {
+          if (appointment['status'] == 'Onay Bekliyor')
+            TextButton.icon(
+            onPressed: () async {
                     final cancel = await showDialog<bool>(
                       context: ctx,
                       builder: (confirmCtx) => AlertDialog(
@@ -4175,8 +4144,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   const SizedBox(height: 2),
                   Text(
                     _guidanceAppointment == null
-                        ? 'Rehberlikçini seç, uygun gün ve saati planla.'
-                        : '${_guidanceAppointment!['day']} • ${_guidanceAppointment!['time']} • ${_guidanceAppointment!['status']}',
+                        ? 'Rehberlikçini seç, uygun tarihi planla.'
+                        : '${_guidanceAppointment!['day']} • ${_guidanceAppointment!['status']}',
                     style:
                         const TextStyle(color: Colors.white60, fontSize: 11.5),
                   ),
