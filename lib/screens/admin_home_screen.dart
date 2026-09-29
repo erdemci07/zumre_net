@@ -1453,6 +1453,71 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
+  Future<void> _requestTeacherReportPdf({
+    required DateTime startDate,
+    required DateTime endDate,
+  }) async {
+    var selectedLevel = 'LGS';
+    final level = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF071A3A),
+          title: const Text(
+            'Öğretmen Faaliyet Özeti',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Kademeyi seçin. Seçilen kapsamdaki öğretmenler, faaliyet kaydı olmasa da raporda listelenir.',
+                style: TextStyle(color: Colors.white70, height: 1.35),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                children: ['LGS', 'YKS']
+                    .map(
+                      (item) => ChoiceChip(
+                        label: Text(item),
+                        selected: selectedLevel == item,
+                        onSelected: (_) =>
+                            setDialogState(() => selectedLevel = item),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Vazgeç'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(ctx, selectedLevel),
+              icon: const Icon(Icons.picture_as_pdf_rounded),
+              label: const Text('Raporu Oluştur'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (level == null) return;
+
+    await _requestReportPdf(
+      endpoint: '/reports/teacher-activity-summary',
+      fallbackFileName: '${level}_Ogretmen_Faaliyet_Ozeti.pdf',
+      preferredFileName:
+          '${level}_Ogretmen_Faaliyet_Ozeti_${_formatIsoDate(startDate)}_${_formatIsoDate(endDate)}.pdf',
+      startDate: startDate,
+      endDate: endDate,
+      educationLevel: level,
+    );
+  }
+
   String _classBranchFilePrefix(String className, String branch) {
     final cleanClass = className.trim();
     final cleanBranch = branch.trim();
@@ -1495,6 +1560,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     String? className,
     String? branch,
     String? department,
+    String? educationLevel,
   }) async {
     var loadingShown = false;
 
@@ -1524,6 +1590,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
           if (branch != null && branch.isNotEmpty) 'branch': branch,
           if (department != null && department.isNotEmpty)
             'department': department,
+          if (educationLevel != null && educationLevel.isNotEmpty)
+            'educationLevel': educationLevel,
         }),
       );
 
@@ -1864,15 +1932,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
                               ),
                             ),
                             _reportCard(
-                              icon: Icons.timeline_rounded,
-                              title: 'Sınıf Faaliyet Özeti',
+                              icon: Icons.badge_rounded,
+                              title: 'Öğretmen Faaliyet Özeti',
                               subtitle:
-                                  'Pano ve öğrenci/veli grupları için güvenli, toplu faaliyet özeti',
+                                  'LGS/YKS bazında tüm öğretmenleri, faaliyet olmasa da listeler',
                               color: Colors.orangeAccent,
                               compact: compact,
-                              onTap: () => _requestClassReportPdf(
-                                endpoint: '/reports/class-activity-summary',
-                                fallbackFileName: 'Sinif_Faaliyet_Ozeti.pdf',
+                              onTap: () => _requestTeacherReportPdf(
                                 startDate: selectedRange.start,
                                 endDate: selectedRange.end,
                               ),
