@@ -48,16 +48,16 @@ def render(data: dict) -> bytes:
         ]
         story.append(
             simple_table(
-                ["Öğretmen", "Branş", "Zümre", "Etüt"],
+                ["Öğretmen", "Branş", "Zümrede Çözülen Soru", "Tamamlanan Etüt"],
                 rows,
-                [64 * mm, 58 * mm, 24 * mm, 24 * mm],
+                [55 * mm, 45 * mm, 38 * mm, 32 * mm],
                 font_size=8.5,
             )
         )
         story.append(Spacer(1, 8))
         story.append(
             Paragraph(
-                "Faaliyeti olmayan öğretmenler de kapsam listesinde gösterilir.",
+                "Faaliyeti olmayan öğretmenler de kapsam listesinde gösterilir. Zümre sütunu, tamamlanan soru sayısını gösterir.",
                 styles["small"],
             )
         )
