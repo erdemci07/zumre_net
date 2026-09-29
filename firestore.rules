@@ -211,7 +211,18 @@ service cloud.firestore {
 
     match /users/{userId} {
 
-      allow read: if isSignedIn();
+      // Öğrenci yalnız kendi kaydını ve arayüzde seçim yaptığı
+      // öğretmen/rehberlikçi kayıtlarını okuyabilir. Personel mevcut
+      // operasyonel akışlar için kullanıcı kayıtlarını okuyabilir.
+      allow read: if isSignedIn()
+        && (
+          isOwner(userId)
+          || isAdmin()
+          || isTeacher()
+          || isStudyGuard()
+          || isGuidance()
+          || (isStudent() && resource.data.role in ["teacher", "guidance"])
+        );
       allow create, update, delete: if isAdmin();
 
       allow update: if isTeacher()
@@ -223,14 +234,6 @@ service cloud.firestore {
             "manualAbsentDate",
             "breakUntil",
             "updatedAt"
-          ]);
-
-      allow update: if isStudent()
-        && isOwner(userId)
-        && request.resource.data.diff(resource.data)
-          .affectedKeys()
-          .hasOnly([
-            "cooldownUntil"
           ]);
 
       allow update: if isStudyGuard()
@@ -342,34 +345,9 @@ service cloud.firestore {
 
       allow read: if isSignedIn();
 
-      allow create: if isStudent()
-        && false;
-
-      allow create: if isTeacher()
-        && request.resource.data.teacherId == request.auth.uid
-        && canStartZumreQueue()
-        && request.resource.data.status == "waiting";
-
+      // Queue oluşturma/iptal lifecycle'ı callable Cloud Functions üzerinden
+      // server-authoritative yürür. Admin SDK bu kuralları bypass eder.
       allow create: if isAdmin();
-
-      allow update: if isStudent()
-        && resource.data.studentId == request.auth.uid
-        && resource.data.status == "waiting"
-        && request.resource.data.studentId == resource.data.studentId
-        && request.resource.data.teacherId == resource.data.teacherId
-        && request.resource.data.subject == resource.data.subject
-        && request.resource.data.diff(resource.data)
-          .affectedKeys()
-          .hasOnly([
-            "status",
-            "cancelledAt",
-            "canceledAt",
-            "updatedAt"
-          ])
-        && (
-          request.resource.data.status == "cancelled"
-          || request.resource.data.status == "canceled"
-        );
 
       allow update: if isTeacher()
         && resource.data.teacherId == request.auth.uid
@@ -388,14 +366,6 @@ service cloud.firestore {
           ]);
 
       allow update: if isAdmin();
-
-      allow delete: if isStudent()
-        && resource.data.studentId == request.auth.uid
-        && resource.data.status == "waiting";
-
-      allow delete: if isTeacher()
-        && resource.data.teacherId == request.auth.uid
-        && resource.data.status == "waiting";
 
       allow delete: if isAdmin();
     }
