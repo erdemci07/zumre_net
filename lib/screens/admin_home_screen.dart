@@ -3225,7 +3225,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
-  bool _scopeIsOpenNow(
+  bool _scopeZumreIsOpenNow(
     Map<String, dynamic> scheduleData,
     String educationLevel,
   ) {
@@ -3255,13 +3255,42 @@ class _StatisticsPageState extends State<StatisticsPage> {
     });
   }
 
+  bool _scopeStudyIsOpenNow(
+    Map<String, dynamic> scheduleData,
+    String educationLevel,
+  ) {
+    final now = DateTime.now();
+    final weekly = scheduleData['weeklySchedule'];
+    if (weekly is! Map) return false;
+    final dayKey = _scheduleDays[now.weekday - 1]['key']!;
+    final day = weekly[dayKey];
+    if (day is! Map ||
+        day['closed'] == true ||
+        day['studyClosed'] == true) {
+      return false;
+    }
+
+    final nowMinutes = now.hour * 60 + now.minute;
+    final rawSlots = day['studySlots'];
+    if (rawSlots is! List) return false;
+
+    return rawSlots.whereType<Map>().any((slot) {
+      if (!timeSlotMatchesEducationLevel(slot, educationLevel)) return false;
+      final start = _clockToMinutes('${slot['start'] ?? ''}');
+      final end = _clockToMinutes('${slot['end'] ?? ''}');
+      return start >= 0 &&
+          end > start &&
+          nowMinutes >= start &&
+          nowMinutes < end;
+    });
+  }
+
   Widget _runtimeSummaryStrip() {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _firestore.collection('settings').doc('runtimeState').snapshots(),
       builder: (context, runtimeSnapshot) {
         final runtimeData = runtimeSnapshot.data?.data() ?? {};
         final mode = _institutionModeFromRuntime(runtimeData);
-        final studyOpen = runtimeData['isStudyOpen'] == true;
         final suffix = mode == 'closed'
             ? 'Kurum kapalı'
             : mode == 'exam'
@@ -3274,9 +3303,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
           builder: (context, scheduleSnapshot) {
             final scheduleData = scheduleSnapshot.data?.data() ?? {};
             final lgsOpen =
-                suffix == null && _scopeIsOpenNow(scheduleData, 'LGS');
+                suffix == null && _scopeZumreIsOpenNow(scheduleData, 'LGS');
             final yksOpen =
-                suffix == null && _scopeIsOpenNow(scheduleData, 'YKS');
+                suffix == null && _scopeZumreIsOpenNow(scheduleData, 'YKS');
+            final lgsStudyOpen =
+                suffix == null && _scopeStudyIsOpenNow(scheduleData, 'LGS');
+            final yksStudyOpen =
+                suffix == null && _scopeStudyIsOpenNow(scheduleData, 'YKS');
 
             return Wrap(
               spacing: 8,
@@ -3295,9 +3328,16 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       yksOpen ? Colors.greenAccent : Colors.orangeAccent,
                 ),
                 _smallStatusPill(
-                  label: 'Etüt',
-                  value: suffix ?? (studyOpen ? 'Aktif' : 'Kapalı'),
-                  color: studyOpen && suffix == null
+                  label: 'LGS Etüt',
+                  value: suffix ?? (lgsStudyOpen ? 'Aktif' : 'Kapalı'),
+                  color: lgsStudyOpen
+                      ? Colors.greenAccent
+                      : Colors.orangeAccent,
+                ),
+                _smallStatusPill(
+                  label: 'YKS Etüt',
+                  value: suffix ?? (yksStudyOpen ? 'Aktif' : 'Kapalı'),
+                  color: yksStudyOpen
                       ? Colors.greenAccent
                       : Colors.orangeAccent,
                 ),
