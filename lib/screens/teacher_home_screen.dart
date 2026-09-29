@@ -802,7 +802,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           (e) => {
             'start': e['start'] ?? '09:00',
             'end': e['end'] ?? '17:00',
-            'educationLevel': e['educationLevel'] ?? e['scope'] ?? 'BOTH',
           },
         ),
       );
@@ -879,7 +878,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                         temp[day.key]!.add({
                                           'start': '09:00',
                                           'end': '17:00',
-                                          'educationLevel': 'BOTH',
                                         });
                                       });
                                     },
@@ -1090,41 +1088,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 8),
-                                      DropdownButtonFormField<String>(
-                                        initialValue: timeSlotScopes.contains(
-                                                slot['educationLevel'])
-                                            ? slot['educationLevel']
-                                            : 'BOTH',
-                                        isExpanded: true,
-                                        dropdownColor: const Color(0xFF06312E),
-                                        style: const TextStyle(
-                                            color: Colors.white),
-                                        decoration: const InputDecoration(
-                                          labelText: 'Eğitim Kapsamı',
-                                          labelStyle:
-                                              TextStyle(color: Colors.white60),
-                                        ),
-                                        items: const [
-                                          DropdownMenuItem(
-                                            value: 'BOTH',
-                                            child: Text('LGS + YKS'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'LGS',
-                                            child: Text('Yalnız LGS'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'YKS',
-                                            child: Text('Yalnız YKS'),
-                                          ),
-                                        ],
-                                        onChanged: (value) {
-                                          if (value != null) {
-                                            slot['educationLevel'] = value;
-                                          }
-                                        },
-                                      ),
                                       const SizedBox(height: 10),
                                     ],
                                   );
@@ -1223,8 +1186,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         return {
           'start': '${item['start']}',
           'end': '${item['end']}',
-          'educationLevel':
-              '${item['educationLevel'] ?? item['scope'] ?? 'BOTH'}',
         };
       }).toList();
     }
