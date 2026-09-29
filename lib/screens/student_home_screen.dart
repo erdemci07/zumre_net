@@ -626,6 +626,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Timer? _cooldownTimer;
   Timer? _zumrePillTimer;
   StreamSubscription? _queueSubscription;
+  StreamSubscription? _queuePositionSubscription;
+  String? _queuePositionTeacherId;
   StreamSubscription<DocumentSnapshot>? _studentSubscription;
   StreamSubscription<DocumentSnapshot>? _runtimeStateSubscription;
   List<Map<String, dynamic>> _cachedZumreSlots = [];
@@ -965,6 +967,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   @override
   void dispose() {
     _queueSubscription?.cancel();
+    _queuePositionSubscription?.cancel();
     _cooldownTimer?.cancel();
     _zumrePillTimer?.cancel();
     _studentSubscription?.cancel();
@@ -1114,13 +1117,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             });
           }
 
-          await _firestore
-              .collection('users')
-              .doc(_auth.currentUser!.uid)
-              .update({
-            'cooldownUntil': FieldValue.delete(),
-          });
-
+          // Sunucu geçmiş cooldown timestamp'ini güvenle yok sayar.
+          // İstemcinin kullanıcı belgesinde lifecycle alanı değiştirmesine
+          // gerek yok; böylece cooldown yalnız backend tarafından yönetilir.
           return;
         }
 
@@ -1149,120 +1148,143 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   Future<void> _listenToQueue(String queueId) async {
-    _queueSubscription?.cancel();
-
-    final initialQueueDoc =
-        await _firestore.collection('queues').doc(queueId).get();
-
-    if (!initialQueueDoc.exists) {
-      if (!mounted) return;
-
-      setState(() {
-        _isInQueue = false;
-        _currentQueueId = null;
-        _currentTeacherName = null;
-        _queuePosition = 0;
-        _estimatedWaitMinutes = null;
-      });
-      return;
-    }
-
-    final teacherId = initialQueueDoc.data()?['teacherId']?.toString();
-    if (teacherId == null || teacherId.isEmpty) return;
+    await _queueSubscription?.cancel();
+    await _queuePositionSubscription?.cancel();
+    _queuePositionTeacherId = null;
 
     _queueSubscription = _firestore
+        .collection('queues')
+        .doc(queueId)
+        .snapshots()
+        .listen((queueDoc) async {
+      if (!queueDoc.exists) {
+        await _queuePositionSubscription?.cancel();
+        _queuePositionSubscription = null;
+        _queuePositionTeacherId = null;
+
+        if (!mounted) return;
+        setState(() {
+          _isInQueue = false;
+          _currentQueueId = null;
+          _currentTeacherName = null;
+          _queuePosition = 0;
+          _estimatedWaitMinutes = null;
+        });
+        return;
+      }
+
+      final data = queueDoc.data();
+      if (data == null) return;
+
+      final status = data['status']?.toString();
+      final teacherId = data['teacherId']?.toString();
+      final teacherNameFromQueue = data['teacherName']?.toString();
+
+      if (teacherNameFromQueue != null && teacherNameFromQueue.isNotEmpty) {
+        if (mounted) {
+          setState(() => _currentTeacherName = teacherNameFromQueue);
+        }
+      } else if (teacherId != null && teacherId.isNotEmpty) {
+        await _getCurrentTeacherName(teacherId);
+      }
+
+      if (!mounted) return;
+
+      if (status == 'in_progress') {
+        await _queuePositionSubscription?.cancel();
+        _queuePositionSubscription = null;
+        _queuePositionTeacherId = null;
+
+        setState(() {
+          _isInQueue = true;
+          _currentQueueId = queueId;
+          _queuePosition = 0;
+          _estimatedWaitMinutes = null;
+        });
+        return;
+      }
+
+      if (status != 'waiting') {
+        await _queuePositionSubscription?.cancel();
+        _queuePositionSubscription = null;
+        _queuePositionTeacherId = null;
+
+        setState(() {
+          _isInQueue = false;
+          _currentQueueId = null;
+          _currentTeacherName = null;
+          _queuePosition = 0;
+          _estimatedWaitMinutes = null;
+        });
+        return;
+      }
+
+      setState(() {
+        _isInQueue = true;
+        _currentQueueId = queueId;
+      });
+
+      if (teacherId != null &&
+          teacherId.isNotEmpty &&
+          _queuePositionTeacherId != teacherId) {
+        _listenQueuePosition(queueId, teacherId);
+      }
+    });
+  }
+
+  void _listenQueuePosition(String queueId, String teacherId) {
+    _queuePositionSubscription?.cancel();
+    _queuePositionTeacherId = teacherId;
+
+    _queuePositionSubscription = _firestore
         .collection('queues')
         .where('teacherId', isEqualTo: teacherId)
         .where('status', whereIn: ['waiting', 'in_progress'])
         .snapshots()
-        .listen((snapshot) async {
-          final docs = snapshot.docs.toList();
-          final currentQueueDocs = docs.where((doc) => doc.id == queueId);
+        .listen((snapshot) {
+      if (!mounted || _currentQueueId != queueId) return;
 
-          if (currentQueueDocs.isEmpty) {
-            await _queueSubscription?.cancel();
-            _queueSubscription = null;
+      final docs = snapshot.docs.toList();
+      final currentQueueDocs = docs.where((doc) => doc.id == queueId);
 
-            if (!mounted) return;
+      // Öğretmen devri sırasında eski öğretmenin query'sinden kayıt anlık
+      // olarak düşebilir. Queue belgesi ayrı dinlendiği için burada sırayı
+      // kapatmıyoruz; yeni teacherId gelince position listener yeniden bağlanır.
+      if (currentQueueDocs.isEmpty) return;
 
-            setState(() {
-              _isInQueue = false;
-              _currentQueueId = null;
-              _currentTeacherName = null;
-              _queuePosition = 0;
-              _estimatedWaitMinutes = null;
-            });
-            return;
-          }
+      final currentData = currentQueueDocs.first.data();
+      if (currentData['status'] != 'waiting') return;
 
-          final currentQueueDoc = currentQueueDocs.first;
-          final data = currentQueueDoc.data();
-          final status = data['status'];
-          final teacherNameFromQueue = data['teacherName']?.toString();
+      QueryDocumentSnapshot<Map<String, dynamic>>? activeDoc;
+      for (final doc in docs) {
+        if (doc.data()['status'] == 'in_progress') {
+          activeDoc = doc;
+          break;
+        }
+      }
 
-          if (teacherNameFromQueue != null && teacherNameFromQueue.isNotEmpty) {
-            _currentTeacherName = teacherNameFromQueue;
-          } else {
-            await _getCurrentTeacherName(teacherId);
-          }
+      final waitingDocs =
+          docs.where((doc) => doc.data()['status'] == 'waiting').toList()
+            ..sort((a, b) => compareQueuePriority(a.data(), b.data()));
 
-          if (!mounted) return;
+      var position = 1;
+      var estimatedWaitMinutes = activeDoc == null
+          ? 0
+          : _activeQueueRemainingMinutes(activeDoc.data());
 
-          if (status == 'in_progress') {
-            setState(() {
-              _isInQueue = true;
-              _currentQueueId = queueId;
-              _queuePosition = 0;
-              _estimatedWaitMinutes = null;
-            });
-            return;
-          }
+      for (final doc in waitingDocs) {
+        if (doc.id == queueId) break;
+        final queueData = doc.data();
+        estimatedWaitMinutes += _queueEstimatedMinutes(queueData) +
+            _toInt(queueData['extraMinutes']);
+        position++;
+      }
 
-          if (status != 'waiting') {
-            setState(() {
-              _isInQueue = false;
-              _currentQueueId = null;
-              _currentTeacherName = null;
-              _queuePosition = 0;
-              _estimatedWaitMinutes = null;
-            });
-            return;
-          }
-
-          QueryDocumentSnapshot<Map<String, dynamic>>? activeDoc;
-
-          for (final doc in docs) {
-            if (doc.data()['status'] == 'in_progress') {
-              activeDoc = doc;
-              break;
-            }
-          }
-
-          final waitingDocs =
-              docs.where((doc) => doc.data()['status'] == 'waiting').toList();
-
-          waitingDocs.sort((a, b) => compareQueuePriority(a.data(), b.data()));
-
-          int position = 1;
-          var estimatedWaitMinutes = activeDoc == null
-              ? 0
-              : _activeQueueRemainingMinutes(activeDoc.data());
-
-          for (final doc in waitingDocs) {
-            if (doc.id == queueId) break;
-            final queueData = doc.data();
-            estimatedWaitMinutes += _queueEstimatedMinutes(queueData) +
-                _toInt(queueData['extraMinutes']);
-            position++;
-          }
-
-          setState(() {
-            _isInQueue = true;
-            _currentQueueId = queueId;
-            _queuePosition = position;
-            _estimatedWaitMinutes = estimatedWaitMinutes;
-          });
-        });
+      setState(() {
+        _queuePosition = position;
+        _estimatedWaitMinutes = estimatedWaitMinutes;
+      });
+    });
   }
 
   Future<void> _joinQueue() async {
@@ -1504,36 +1526,46 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     if (confirm == true) {
       try {
-        final cooldownDate = DateTime.now().add(const Duration(minutes: 2));
-
-        await _firestore.collection('queues').doc(_currentQueueId).update({
-          'status': 'cancelled',
-          'cancelledAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
+        final callable = _functions.httpsCallable('studentCancelQueue');
+        final response = await callable.call<Map<String, dynamic>>({
+          'queueId': _currentQueueId,
         });
 
-        await _firestore
-            .collection('users')
-            .doc(_auth.currentUser!.uid)
-            .update({
-          'cooldownUntil': Timestamp.fromDate(cooldownDate),
-        });
+        final cooldownUntilMs =
+            (response.data['cooldownUntilMs'] as num?)?.toInt() ??
+                DateTime.now()
+                    .add(const Duration(minutes: 2))
+                    .millisecondsSinceEpoch;
 
         if (mounted) {
           setState(() {
             _isInQueue = false;
-            _cooldownUntil = cooldownDate.millisecondsSinceEpoch;
-            _remainingCooldownSeconds = 120;
+            _cooldownUntil = cooldownUntilMs;
+            _remainingCooldownSeconds =
+                ((_cooldownUntil - DateTime.now().millisecondsSinceEpoch) /
+                        1000)
+                    .ceil()
+                    .clamp(0, 120)
+                    .toInt();
             _currentQueueId = null;
             _currentTeacherName = null;
             _queuePosition = 0;
+            _estimatedWaitMinutes = null;
           });
         }
 
         _startCooldownTimer();
 
-        _queueSubscription?.cancel();
+        await _queueSubscription?.cancel();
+        await _queuePositionSubscription?.cancel();
         _queueSubscription = null;
+        _queuePositionSubscription = null;
+        _queuePositionTeacherId = null;
+      } on FirebaseFunctionsException catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Sıra iptal edilemedi.')),
+        );
       } catch (e) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(

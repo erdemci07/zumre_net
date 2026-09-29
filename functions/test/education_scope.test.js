@@ -28,6 +28,27 @@ test("production className prefixes keep LGS and YKS mathematics pools separate"
     assert.equal(helpers.teacherMatchesStudentScope(yksTeacher, student, "MATEMATİK"), true);
   }
 
+  assert.equal(
+    helpers.studentEducationLevel({ className: "DERSLİK 8" }),
+    "LGS"
+  );
+  assert.equal(
+    helpers.studentEducationLevel({ className: "DERSLİK 10 SAY" }),
+    "YKS"
+  );
+  assert.equal(
+    helpers.studentEducationLevel({ branch: "DERSLİK 7" }),
+    "LGS"
+  );
+  assert.equal(
+    helpers.studentEducationLevel({ department: "DERSLİK 12 SAY" }),
+    "YKS"
+  );
+  assert.equal(
+    helpers.studentEducationLevel({ className: "MEZUN 10" }),
+    "YKS"
+  );
+
   const unknownLevelStudent = { className: "DERSLİK-16-SÖZEL" };
   assert.equal(helpers.studentEducationLevel(unknownLevelStudent), null);
   assert.equal(helpers.teacherMatchesStudentScope(lgsTeacher, unknownLevelStudent, "MATEMATİK"), false);

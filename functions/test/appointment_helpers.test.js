@@ -321,6 +321,7 @@ test("appointment linked queue fields match student queue listener contract", ()
     teacherId: "teacher-a",
     teacherName: "BARAN HOCA",
     subject: "MATEMATİK",
+    educationLevel: "LGS",
     questionCount: 2,
     estimatedMinutes: 7,
     scheduledStart: fakeTimestamp(new Date("2099-09-15T16:30:00+03:00")),
@@ -338,6 +339,7 @@ test("appointment linked queue fields match student queue listener contract", ()
   assert.equal(queueData.status, "in_progress");
   assert.equal(queueData.source, "appointment");
   assert.equal(queueData.appointmentId, "appointment-a");
+  assert.equal(queueData.educationLevel, "LGS");
   assert.equal(queueData.questionCount, 2);
   assert.equal(queueData.estimatedMinutes, 7);
   assert.equal(queueData.extraMinutes, 0);
