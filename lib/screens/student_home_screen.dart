@@ -672,6 +672,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       return {
         'start': '${slot['start']}',
         'end': '${slot['end']}',
+        'educationLevel': timeSlotScopeFromData(slot),
       };
     }).toList();
   }
@@ -686,7 +687,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     if (daily is Map) {
       return {
-        'closed': daily['closed'] == true,
+        'closed': daily['closed'] == true || daily['zumreClosed'] == true,
         'zumreSlots': _scheduleSlotsFromRaw(daily['zumreSlots']),
       };
     }
@@ -861,9 +862,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
     final dailySchedule = _dailyScheduleFromData(data, now);
     final isClosedDay = dailySchedule['closed'] == true;
+    final uid = _auth.currentUser?.uid;
+    final studentData = uid == null
+        ? <String, dynamic>{}
+        : (await _firestore.collection('users').doc(uid).get()).data() ?? {};
+    final educationLevel = inferredStudentEducationLevel(studentData);
+    final allSlots = List<Map<String, dynamic>>.from(dailySchedule['zumreSlots']);
     final slots = isClosedDay
         ? <Map<String, dynamic>>[]
-        : List<Map<String, dynamic>>.from(dailySchedule['zumreSlots']);
+        : allSlots
+            .where((slot) => timeSlotMatchesEducationLevel(slot, educationLevel))
+            .toList();
     _cachedZumreSlots = slots;
     _cachedZumreIsWeekend =
         now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
@@ -887,7 +896,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             );
 
       if (runtimeState != null) {
-        effectiveZumreOpen = runtimeState['isZumreOpen'] ?? isZumreOpen;
+        // Zümre açıklığı öğrencinin LGS/YKS kapsamına göre yerel slotlardan
+        // hesaplanır. Global runtime yalnızca kurum engeli/öğle arası için kullanılır.
+        effectiveZumreOpen = isZumreOpen;
         effectiveLunch = runtimeState['isLunchBreak'] ?? false;
         runtimeMessage = runtimeState['message']?.toString();
       }

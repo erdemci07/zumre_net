@@ -434,10 +434,20 @@ function buildRuntimeScheduleState(scheduleData, now = new Date()) {
   const zumreSlots = dailySchedule.zumreClosed ? [] : dailySchedule.zumreSlots;
   const studySlots = dailySchedule.studyClosed ? [] : dailySchedule.studySlots;
   const isZumreOpen = isNowInSlots(currentMinutes, zumreSlots);
+  const isZumreOpenLGS = isNowInSlots(
+    currentMinutes,
+    zumreSlots.filter((slot) => timeSlotMatchesEducationScope(slot, "LGS"))
+  );
+  const isZumreOpenYKS = isNowInSlots(
+    currentMinutes,
+    zumreSlots.filter((slot) => timeSlotMatchesEducationScope(slot, "YKS"))
+  );
   const isStudyOpen = isNowInSlots(currentMinutes, studySlots);
 
   return {
     isZumreOpen,
+    isZumreOpenLGS,
+    isZumreOpenYKS,
     isLunchBreak: false,
     isStudyOpen,
     currentPeriod: isStudyOpen
@@ -2272,7 +2282,12 @@ function selectNextWaitingQueueDoc(waitingDocs, excludeQueueId = null) {
   return waitingQueues[0] || null;
 }
 
-function assertQueueRuntimeOpen(scheduleData, runtimeData, now = new Date()) {
+function assertQueueRuntimeOpen(
+  scheduleData,
+  runtimeData,
+  now = new Date(),
+  educationLevel = null
+) {
   const runtimeState = buildEffectiveRuntimeState(
     scheduleData,
     runtimeData,
@@ -2293,7 +2308,14 @@ function assertQueueRuntimeOpen(scheduleData, runtimeData, now = new Date()) {
     );
   }
 
-  if (!runtimeState.isZumreOpen) {
+  const nowParts = getIstanbulDateParts(now);
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute;
+  const scopedSlots = getZumreSlots(
+    scheduleData,
+    nowParts.weekday,
+    educationLevel || undefined
+  );
+  if (!isNowInSlots(currentMinutes, scopedSlots)) {
     throw new HttpsError(
       "failed-precondition",
       "Zümre saati dışında sıra alınamaz."
@@ -4378,12 +4400,6 @@ exports.routeQueueRequest = onCall(
         ),
       ]);
 
-      assertQueueRuntimeOpen(
-        scheduleDoc.data() || {},
-        runtimeDoc.data() || {},
-        new Date()
-      );
-
       if (!studentDoc.exists || studentDoc.data()?.role !== "student") {
         throw new HttpsError(
           "permission-denied",
@@ -4392,6 +4408,12 @@ exports.routeQueueRequest = onCall(
       }
 
       const studentData = studentDoc.data() || {};
+      assertQueueRuntimeOpen(
+        scheduleDoc.data() || {},
+        runtimeDoc.data() || {},
+        new Date(),
+        studentEducationLevel(studentData)
+      );
 
       if (studentData.isInStudySession === true) {
         throw new HttpsError(

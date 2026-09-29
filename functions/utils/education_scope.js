@@ -25,8 +25,8 @@ function studentEducationLevel(student = {}) {
   const explicit = educationLevel(student.educationLevel);
   if (explicit) return explicit;
   const className = cleanText(student.className).toLocaleUpperCase("tr-TR");
-  if (/^(5|6|7|8)-/.test(className)) return "LGS";
-  if (/^(9|10|11|12)-/.test(className) || /^MEZUN(?:-|$)/.test(className)) {
+  if (/^(5|6|7|8)(?:\s*[-./]|\s|$)/.test(className)) return "LGS";
+  if (/^(9|10|11|12)(?:\s*[-./]|\s|$)/.test(className) || /^MEZUN(?:\s*[-./]|\s|$)/.test(className)) {
     return "YKS";
   }
   return null;
