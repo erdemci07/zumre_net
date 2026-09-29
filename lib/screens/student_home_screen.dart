@@ -118,6 +118,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String? _studentName;
   String? _studentClassName;
   String? _studentEducationLevel;
+  String? _guidanceCounselorId;
+  String? _guidanceCounselorName;
+  Map<String, dynamic> _guidanceAvailability = const {};
   String? _selectedSubject;
 
   int? get _studentGrade {
@@ -1055,6 +1058,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         _studentClassName = data?['className']?.toString();
         _studentEducationLevel = _scheduleEducationLevel;
         _isInStudySession = data?['isInStudySession'] == true;
+        _guidanceCounselorId =
+            data?['guidanceCounselorId']?.toString().trim();
 
         final visibleSubjects =
             _visibleSubjectOptions.map((subject) => subject.name).toSet();
@@ -1065,6 +1070,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           _selectedTeacherName = null;
         }
       });
+
+      final assignedGuidanceId = _guidanceCounselorId;
+      if (assignedGuidanceId != null && assignedGuidanceId.isNotEmpty) {
+        unawaited(_loadAssignedGuidanceCounselor(assignedGuidanceId));
+      } else if (_guidanceCounselorName != null ||
+          _guidanceAvailability.isNotEmpty) {
+        setState(() {
+          _guidanceCounselorName = null;
+          _guidanceAvailability = const {};
+        });
+      }
 
       // Sınıf bilgisi setState içinde güncellendi; ders kartlarının kullandığı
       // aynı LGS/YKS kapsamıyla programı her snapshot'ta yeniden hesapla.
@@ -2103,6 +2119,54 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  Future<void> _loadAssignedGuidanceCounselor(String counselorId) async {
+    try {
+      final doc =
+          await _firestore.collection('users').doc(counselorId).get();
+      if (!mounted || _guidanceCounselorId != counselorId) return;
+      if (!doc.exists || doc.data()?['role'] != 'guidance') {
+        setState(() {
+          _guidanceCounselorName = null;
+          _guidanceAvailability = const {};
+        });
+        return;
+      }
+      final data = doc.data()!;
+      setState(() {
+        _guidanceCounselorName =
+            '${data['fullName'] ?? data['name'] ?? 'Rehberlik Servisi'}';
+        _guidanceAvailability = Map<String, dynamic>.from(
+          data['guidanceAvailability'] is Map
+              ? data['guidanceAvailability'] as Map
+              : const {},
+        );
+      });
+    } catch (_) {
+      // Atama öğrenci belgesinde korunur; geçici okuma hatasında seçim açılmaz.
+    }
+  }
+
+  String _guidanceDayKey(String dateKey) {
+    final date = _parseDateKey(dateKey);
+    return switch (date.weekday) {
+      DateTime.monday => 'monday',
+      DateTime.tuesday => 'tuesday',
+      DateTime.wednesday => 'wednesday',
+      DateTime.thursday => 'thursday',
+      DateTime.friday => 'friday',
+      DateTime.saturday => 'saturday',
+      DateTime.sunday => 'sunday',
+      _ => 'monday',
+    };
+  }
+
+  bool _guidanceWorksOnDate(String dateKey) {
+    final weekly = _guidanceAvailability['weekly'];
+    if (weekly is! Map) return false;
+    final slots = weekly[_guidanceDayKey(dateKey)];
+    return slots is List && slots.isNotEmpty;
+  }
+
   void _listenGuidanceAppointment() {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
@@ -2160,25 +2224,49 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   Future<void> _showGuidanceAppointmentDemo() async {
-    final counselorSnapshot = await _firestore
-        .collection('users')
-        .where('role', isEqualTo: 'guidance')
-        .get();
-    final counselors = counselorSnapshot.docs
-        .map((d) => {
-              'id': d.id,
-              'name':
-                  '${d.data()['fullName'] ?? d.data()['name'] ?? 'Rehberlik Servisi'}',
-            })
-        .toList();
-    if (!mounted) return;
-    if (counselors.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Şu anda kayıtlı rehberlikçi bulunmuyor.')),
+    final counselorId = _guidanceCounselorId;
+    if (counselorId == null || counselorId.isEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF081D3A),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Row(children: [
+            Icon(Icons.info_outline_rounded, color: Colors.cyanAccent),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text('Rehber Öğretmen Ataması',
+                  style: TextStyle(color: Colors.white)),
+            ),
+          ]),
+          content: const Text(
+            'Rehber öğretmeniniz henüz tanımlanmamış. Randevu oluşturabilmek için mevcut rehber öğretmeninizle görüşerek atamanızı istemeniz gerekir.',
+            style: TextStyle(color: Colors.white70, height: 1.4),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Tamam'),
+            ),
+          ],
+        ),
       );
       return;
     }
+
+    if (_guidanceCounselorName == null) {
+      await _loadAssignedGuidanceCounselor(counselorId);
+    }
+    if (!mounted) return;
+    final counselorName = _guidanceCounselorName;
+    if (counselorName == null || counselorName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Rehber öğretmen bilgisi şu anda yüklenemedi.'),
+      ));
+      return;
+    }
+
     const reasons = [
       'Akademik takip',
       'Sınav / hedef planlama',
@@ -2188,8 +2276,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     ];
     final dateKeys = _upcomingAppointmentDateKeys();
 
-    String? counselor;
-    String? counselorId;
     String? reason;
     String? selectedDateKey;
     bool isCreatingRequest = false;
@@ -2199,8 +2285,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) {
-          final ready =
-              counselor != null && reason != null && selectedDateKey != null;
+          final ready = reason != null &&
+              selectedDateKey != null &&
+              _guidanceWorksOnDate(selectedDateKey!);
           return Dialog(
             backgroundColor: Colors.transparent,
             insetPadding:
@@ -2220,119 +2307,95 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ),
                 borderRadius: BorderRadius.circular(28),
                 border: Border.all(color: Colors.white24),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.30),
-                    blurRadius: 24,
-                    offset: const Offset(0, 12),
-                  ),
-                ],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: Colors.cyanAccent.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.forum_rounded,
-                            color: Colors.cyanAccent, size: 25),
+                  Row(children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Colors.cyanAccent.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Rehberlik Randevusu',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 21,
-                                    fontWeight: FontWeight.bold)),
-                            SizedBox(height: 3),
-                            Text(
-                                'Görüşme için rehberlikçi, konu ve tarih seçin.',
-                                style: TextStyle(
-                                    color: Colors.white60, fontSize: 12.5)),
-                          ],
-                        ),
+                      child: const Icon(Icons.forum_rounded,
+                          color: Colors.cyanAccent, size: 25),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Rehberlik Randevusu',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.bold)),
+                          SizedBox(height: 3),
+                          Text('Konu ve uygun tarihi seçin.',
+                              style: TextStyle(
+                                  color: Colors.white60, fontSize: 12.5)),
+                        ],
                       ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        icon: const Icon(Icons.close_rounded,
-                            color: Colors.white70),
-                      ),
-                    ],
-                  ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close_rounded,
+                          color: Colors.white70),
+                    ),
+                  ]),
                   const SizedBox(height: 14),
                   Flexible(
                     child: SingleChildScrollView(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _planningSectionTitle('Rehberlikçi'),
-                          ...counselors.map((item) {
-                            final name = item['name']!;
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: InkWell(
-                                onTap: () => setDialogState(() {
-                                  counselor = name;
-                                  counselorId = item['id'];
-                                }),
-                                borderRadius: BorderRadius.circular(16),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 12),
-                                  decoration: BoxDecoration(
-                                    color: counselor == name
-                                        ? Colors.cyanAccent
-                                            .withValues(alpha: 0.12)
-                                        : Colors.white.withValues(alpha: 0.05),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: counselor == name
-                                          ? Colors.cyanAccent
-                                              .withValues(alpha: 0.65)
-                                          : Colors.white12,
+                          _planningSectionTitle('Rehber Öğretmeniniz'),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color:
+                                  Colors.cyanAccent.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color:
+                                    Colors.cyanAccent.withValues(alpha: 0.55),
+                              ),
+                            ),
+                            child: Row(children: [
+                              const CircleAvatar(
+                                radius: 18,
+                                backgroundColor: Colors.white12,
+                                child: Icon(Icons.person_rounded,
+                                    color: Colors.white70, size: 20),
+                              ),
+                              const SizedBox(width: 11),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(counselorName,
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700)),
+                                    const SizedBox(height: 2),
+                                    const Text(
+                                      'Randevular yalnız atanmış rehber öğretmeninizle oluşturulur.',
+                                      style: TextStyle(
+                                          color: Colors.white60,
+                                          fontSize: 11.5),
                                     ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 18,
-                                        backgroundColor: Colors.white
-                                            .withValues(alpha: 0.10),
-                                        child: const Icon(Icons.person_rounded,
-                                            color: Colors.white70, size: 20),
-                                      ),
-                                      const SizedBox(width: 11),
-                                      Expanded(
-                                        child: Text(name,
-                                            style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.w600)),
-                                      ),
-                                      Icon(
-                                        counselor == name
-                                            ? Icons.check_circle_rounded
-                                            : Icons.chevron_right_rounded,
-                                        color: counselor == name
-                                            ? Colors.cyanAccent
-                                            : Colors.white38,
-                                      ),
-                                    ],
-                                  ),
+                                  ],
                                 ),
                               ),
-                            );
-                          }),
-                          const SizedBox(height: 8),
+                              const Icon(Icons.check_circle_rounded,
+                                  color: Colors.cyanAccent),
+                            ]),
+                          ),
+                          const SizedBox(height: 14),
                           _planningSectionTitle('Görüşme Konusu'),
                           Wrap(
                             spacing: 8,
@@ -2353,22 +2416,25 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,
-                            children: dateKeys
-                                .map((dateKey) => _planningChoiceChip(
-                                      label: _formatPlanningDay(dateKey),
-                                      selected: selectedDateKey == dateKey,
-                                      enabled: true,
-                                      onTap: () => setDialogState(
-                                          () => selectedDateKey = dateKey),
-                                      color: Colors.cyanAccent,
-                                    ))
-                                .toList(),
+                            children: dateKeys.map((dateKey) {
+                              final works = _guidanceWorksOnDate(dateKey);
+                              return _planningChoiceChip(
+                                label: works
+                                    ? _formatPlanningDay(dateKey)
+                                    : '${_formatPlanningDay(dateKey)} • Öğretmeniniz bugün kurumda değil',
+                                selected: selectedDateKey == dateKey,
+                                enabled: works,
+                                onTap: () => setDialogState(
+                                    () => selectedDateKey = dateKey),
+                                color: Colors.cyanAccent,
+                              );
+                            }).toList(),
                           ),
                           const SizedBox(height: 14),
                           _planningInfoBox(
                             selectedDateKey == null
-                                ? 'Görüşme için uygun tarihi seçin.'
-                                : 'Seçtiğiniz gün içinde rehberlik birimine gelebilirsiniz. Görüşmeniz gün içinde rehberlikçinizin uygunluğuna göre gerçekleştirilecektir.',
+                                ? 'Rehber öğretmeninizin kurumda olduğu günlerden birini seçin.'
+                                : 'Seçtiğiniz gün içinde rehberlik birimine gelebilirsiniz. Görüşmeniz gün içinde rehber öğretmeninizin uygunluğuna göre gerçekleştirilecektir.',
                             color: Colors.cyanAccent,
                           ),
                         ],
@@ -2391,12 +2457,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                   'studentId': uid,
                                   'studentName': _studentName ?? 'Öğrenci',
                                   'counselorId': counselorId,
-                                  'counselorName': counselor,
+                                  'counselorName': counselorName,
                                   'reason': reason,
                                   'dayLabel':
                                       _formatPlanningDay(selectedDateKey!),
                                   'appointmentDate': selectedDateKey,
-                                  'time': '',
+                                  'time': 'Gün içinde',
                                   'status': 'pending',
                                   'createdAt': FieldValue.serverTimestamp(),
                                   'updatedAt': FieldValue.serverTimestamp(),
@@ -2405,11 +2471,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 setState(() {
                                   _guidanceAppointment = {
                                     'id': appointment.id,
-                                    'counselor': counselor!,
+                                    'counselor': counselorName,
                                     'reason': reason!,
                                     'day':
                                         _formatPlanningDay(selectedDateKey!),
-                                    'time': '',
+                                    'time': 'Gün içinde',
                                     'status': 'Onay Bekliyor',
                                   };
                                 });
@@ -2418,7 +2484,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(
                                     content: Text(
-                                      'Randevu talebiniz oluşturuldu: $counselor • ${_formatPlanningDay(selectedDateKey!)}',
+                                      'Randevu talebiniz oluşturuldu: $counselorName • ${_formatPlanningDay(selectedDateKey!)}',
                                     ),
                                   ),
                                 );
@@ -2429,11 +2495,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 }
                                 if (mounted) {
                                   ScaffoldMessenger.of(this.context)
-                                      .showSnackBar(
-                                    const SnackBar(
-                                        content: Text(
-                                            'Randevu talebi oluşturulamadı. Lütfen tekrar deneyin.')),
-                                  );
+                                      .showSnackBar(const SnackBar(
+                                    content: Text(
+                                        'Randevu talebi oluşturulamadı. Lütfen tekrar deneyin.'),
+                                  ));
                                 }
                               }
                             }
