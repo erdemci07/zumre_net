@@ -395,6 +395,227 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
     }
   }
 
+  Future<void> _showStudentAssignmentDialog() async {
+    final snapshot = await db
+        .collection('users')
+        .where('role', isEqualTo: 'student')
+        .get();
+    if (!mounted) return;
+
+    final available = snapshot.docs
+        .where((doc) =>
+            '${doc.data()['guidanceCounselorId'] ?? ''}'.trim().isEmpty)
+        .toList();
+    String query = '';
+    final selectedIds = <String>{};
+    bool submitting = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final filtered = available.where((doc) {
+            final data = doc.data();
+            final name = guidanceStudentName(data).toLowerCase();
+            final classLabel = formatStudentClassDisplay(
+              className: data['className'],
+              branch: data['branch'],
+              department: data['department'],
+            ).toLowerCase();
+            final q = query.trim().toLowerCase();
+            return q.isEmpty || name.contains(q) || classLabel.contains(q);
+          }).toList()
+            ..sort((a, b) {
+              final ac = formatStudentClassDisplay(
+                className: a.data()['className'],
+                branch: a.data()['branch'],
+                department: a.data()['department'],
+              );
+              final bc = formatStudentClassDisplay(
+                className: b.data()['className'],
+                branch: b.data()['branch'],
+                department: b.data()['department'],
+              );
+              final byClass = ac.compareTo(bc);
+              return byClass != 0
+                  ? byClass
+                  : guidanceStudentName(a.data())
+                      .compareTo(guidanceStudentName(b.data()));
+            });
+
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 22),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 560, maxHeight: 720),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF4A102B), Color(0xFF8B3155)],
+                ),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Column(
+                children: [
+                  Row(children: [
+                    const Icon(Icons.group_add_rounded,
+                        color: Color(0xFFFFB1C8), size: 28),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Öğrenci Ata',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w800)),
+                          Text(
+                              'Henüz rehber öğretmeni olmayan öğrencileri kendinize atayın.',
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: submitting
+                          ? null
+                          : () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close_rounded,
+                          color: Colors.white70),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  TextField(
+                    onChanged: (value) =>
+                        setDialogState(() => query = value),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Öğrenci veya sınıf ara',
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      prefixIcon: const Icon(Icons.search_rounded,
+                          color: Colors.white70),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: .10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: filtered.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'Atanabilecek öğrenci bulunmuyor.',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          )
+                        : ListView.builder(
+                            itemCount: filtered.length,
+                            itemBuilder: (_, index) {
+                              final doc = filtered[index];
+                              final data = doc.data();
+                              final selected = selectedIds.contains(doc.id);
+                              final classLabel = formatStudentClassDisplay(
+                                className: data['className'],
+                                branch: data['branch'],
+                                department: data['department'],
+                              );
+                              return CheckboxListTile(
+                                value: selected,
+                                activeColor: const Color(0xFFFFB1C8),
+                                checkColor: const Color(0xFF4A1830),
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                title: Text(guidanceStudentName(data),
+                                    style:
+                                        const TextStyle(color: Colors.white)),
+                                subtitle: classLabel.isEmpty
+                                    ? null
+                                    : Text(classLabel,
+                                        style: const TextStyle(
+                                            color: Colors.white60)),
+                                onChanged: submitting
+                                    ? null
+                                    : (value) => setDialogState(() {
+                                          if (value == true) {
+                                            selectedIds.add(doc.id);
+                                          } else {
+                                            selectedIds.remove(doc.id);
+                                          }
+                                        }),
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: selectedIds.isEmpty || submitting
+                          ? null
+                          : () async {
+                              setDialogState(() => submitting = true);
+                              try {
+                                final response = await functions
+                                    .httpsCallable('guidanceAssignStudents')
+                                    .call({
+                                  'studentIds': selectedIds.toList(),
+                                });
+                                final data =
+                                    Map<String, dynamic>.from(response.data);
+                                final assigned =
+                                    (data['assignedCount'] as num?)?.toInt() ??
+                                        0;
+                                final skipped =
+                                    (data['skippedCount'] as num?)?.toInt() ??
+                                        0;
+                                if (!dialogContext.mounted) return;
+                                Navigator.pop(dialogContext);
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(skipped == 0
+                                        ? '$assigned öğrenci size atandı.'
+                                        : '$assigned öğrenci atandı, $skipped öğrenci daha önce atanmış olduğu için atlandı.'),
+                                  ),
+                                );
+                              } on FirebaseFunctionsException catch (error) {
+                                if (!dialogContext.mounted) return;
+                                setDialogState(() => submitting = false);
+                                ScaffoldMessenger.of(dialogContext)
+                                    .showSnackBar(SnackBar(
+                                  content: Text(error.message ??
+                                      'Öğrenci ataması yapılamadı.'),
+                                ));
+                              }
+                            },
+                      icon: const Icon(Icons.person_add_alt_1_rounded),
+                      label: Text(submitting
+                          ? 'Atanıyor...'
+                          : 'Seçilenleri Öğrencilerime Ekle'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFFFB1C8),
+                        foregroundColor: const Color(0xFF4A1830),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> addStudent() async {
     final students = await db
         .collection('users')
@@ -2234,6 +2455,14 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                     icon: const Icon(
                                         Icons.event_available_rounded),
                                     label: const Text('Çalışma Programı')),
+                                OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.white,
+                                        side: const BorderSide(
+                                            color: Colors.white54)),
+                                    onPressed: _showStudentAssignmentDialog,
+                                    icon: const Icon(Icons.group_add_rounded),
+                                    label: const Text('Öğrenci Ata')),
                                 OutlinedButton.icon(
                                     style: OutlinedButton.styleFrom(
                                         foregroundColor: Colors.white,
