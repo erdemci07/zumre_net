@@ -692,7 +692,19 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
         .where('role', isEqualTo: 'student')
         .where('guidanceCounselorId', isEqualTo: auth.currentUser!.uid)
         .get();
+    final activeTaskSnapshot = await db
+        .collection('guidanceTasks')
+        .where('counselorId', isEqualTo: auth.currentUser!.uid)
+        .get();
     if (!mounted) return;
+    final activeTasksByStudent = <String, Map<String, dynamic>>{};
+    for (final doc in activeTaskSnapshot.docs) {
+      final data = doc.data();
+      if (data['active'] != false) {
+        final id = '${data['studentId'] ?? ''}';
+        if (id.isNotEmpty) activeTasksByStudent[id] = data;
+      }
+    }
 
     String query = '';
     String? studentId = initialStudentId;
@@ -701,6 +713,12 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
     String title = 'Haftalık Ödev Kontrolü';
     String day = 'Her Pazartesi';
     bool isSubmitting = false;
+    Map<String, dynamic>? selectedExistingTask =
+        studentId == null ? null : activeTasksByStudent[studentId];
+    if (selectedExistingTask != null) {
+      studentId = null;
+      studentName = null;
+    }
     const tasks = [
       'Haftalık Ödev Kontrolü',
       'Akademik Takip',
@@ -829,13 +847,23 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                   className: x['className'],
                                   branch: x['branch'],
                                 );
+                                final existingTask =
+                                    activeTasksByStudent[d.id];
+                                final hasTask = existingTask != null;
                                 final selected = studentId == d.id;
+                                final existingTitle =
+                                    '${existingTask?['title'] ?? ''}'.trim();
+                                final existingSchedule =
+                                    '${existingTask?['schedule'] ?? ''}'.trim();
                                 return ListTile(
                                   dense: mobile,
-                                  onTap: () => setD(() {
-                                    studentId = d.id;
-                                    studentName = n;
-                                  }),
+                                  enabled: !hasTask,
+                                  onTap: hasTask
+                                      ? null
+                                      : () => setD(() {
+                                            studentId = d.id;
+                                            studentName = n;
+                                          }),
                                   leading: CircleAvatar(
                                     backgroundColor: selected
                                         ? const Color(0xFFFFB1C8)
@@ -851,19 +879,79 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                       style: const TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.w700)),
-                                  subtitle: cls.isEmpty
-                                      ? null
-                                      : Text(cls,
-                                          style: const TextStyle(
-                                              color: Colors.white60)),
-                                  trailing: selected
-                                      ? const Icon(Icons.check_circle,
-                                          color: Color(0xFFFFB1C8))
-                                      : null,
+                                  subtitle: Text(
+                                    hasTask
+                                        ? [
+                                            if (cls.isNotEmpty) cls,
+                                            'Zaten aktif takip var',
+                                            if (existingTitle.isNotEmpty)
+                                              existingTitle,
+                                            if (existingSchedule.isNotEmpty)
+                                              existingSchedule,
+                                          ].join(' • ')
+                                        : cls,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: hasTask
+                                          ? const Color(0xFFFFD7E4)
+                                          : Colors.white60,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  trailing: Icon(
+                                    hasTask
+                                        ? Icons.lock_clock_rounded
+                                        : selected
+                                            ? Icons.check_circle
+                                            : Icons.chevron_right_rounded,
+                                    color: hasTask
+                                        ? Colors.white38
+                                        : selected
+                                            ? const Color(0xFFFFB1C8)
+                                            : Colors.white38,
+                                  ),
                                 );
                               },
                             ),
                     ),
+                    if (selectedExistingTask != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(13),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFB1C8)
+                              .withValues(alpha: .10),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0xFFFFB1C8)
+                                .withValues(alpha: .30),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.info_outline_rounded,
+                                color: Color(0xFFFFB1C8)),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Bu öğrencinin zaten aktif haftalık takip programı var: '
+                                '${selectedExistingTask?['title'] ?? 'Haftalık takip'} • '
+                                '${selectedExistingTask?['schedule'] ?? ''}. '
+                                'Değişiklik için Takipleri Yönet ekranını kullanın.',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (studentId != null) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
@@ -1827,7 +1915,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _guidanceInfoRow(
-                          Icons.event_repeat_rounded,
+                          Icons.repeat_rounded,
                           'Haftalık takip',
                           hasTask
                               ? [
