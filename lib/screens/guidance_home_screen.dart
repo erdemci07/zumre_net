@@ -279,11 +279,55 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
   Future<void> _requestClassActivitySummary(
     _GuidanceSummaryRequest request,
   ) async {
+    var loadingShown = false;
     try {
       final token = await auth.currentUser?.getIdToken();
       if (token == null || token.isEmpty) {
         throw StateError('Geçerli oturum bulunamadı.');
       }
+      if (!mounted) return;
+      loadingShown = true;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => PopScope(
+          canPop: false,
+          child: Dialog(
+            backgroundColor: Colors.transparent,
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 420),
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: const Color(0xFF32101F),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: Color(0xFFFFB1C8)),
+                  SizedBox(height: 18),
+                  Text(
+                    'Faaliyet özeti oluşturuluyor…',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  SizedBox(height: 10),
+                  Text(
+                    'Kayıtlar hazırlanıp PDF oluşturuluyor. Bu işlem birkaç saniye sürebilir; pencereyi kapatmayın.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70, height: 1.35),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
       final today = DateTime.now().toIso8601String().substring(0, 10);
       final response = await http.post(
         Uri.parse('$_reportsBaseUrl/reports/class-activity-summary'),
@@ -301,6 +345,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
             'department': request.classOption.department,
         }),
       );
+      if (loadingShown && mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingShown = false;
+      }
       if (response.statusCode != 200) {
         String detail = '';
         try {
@@ -327,11 +375,19 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
         content: Text('Güvenli faaliyet özeti hazır.'),
       ));
     } on StateError catch (error) {
+      if (loadingShown && mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingShown = false;
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(error.message.toString()),
       ));
     } catch (_) {
+      if (loadingShown && mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        loadingShown = false;
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Faaliyet özeti hazırlanamadı. Lütfen tekrar deneyin.'),
