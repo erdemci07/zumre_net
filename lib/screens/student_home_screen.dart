@@ -1032,7 +1032,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       if (!doc.exists || !mounted) return;
 
       final data = doc.data();
-      final previousEducationLevel = _scheduleEducationLevel;
 
       setState(() {
         final fullName = '${data?['fullName'] ?? ''}'.trim();
@@ -1054,9 +1053,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         }
       });
 
-      if (previousEducationLevel != _scheduleEducationLevel) {
-        unawaited(_checkLocalZumreAvailability());
-      }
+      // Sınıf bilgisi setState içinde güncellendi; ders kartlarının kullandığı
+      // aynı LGS/YKS kapsamıyla programı her snapshot'ta yeniden hesapla.
+      unawaited(_checkLocalZumreAvailability());
 
       final cooldownTimestamp = data?['cooldownUntil'] as Timestamp?;
 
