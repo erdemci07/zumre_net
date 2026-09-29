@@ -117,6 +117,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   String? _studentName;
   String? _studentClassName;
+  String? _studentEducationLevel;
   String? _selectedSubject;
 
   int? get _studentGrade {
@@ -668,11 +669,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   List<Map<String, dynamic>> _scheduleSlotsFromRaw(dynamic raw) {
     if (raw is! List) return [];
+
     return raw.whereType<Map>().map((slot) {
       return {
         'start': '${slot['start']}',
         'end': '${slot['end']}',
+        'educationLevel': timeSlotScopeFromData(slot),
       };
+    }).where((slot) {
+      return timeSlotMatchesEducationLevel(slot, _studentEducationLevel);
     }).toList();
   }
 
@@ -686,7 +691,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     if (daily is Map) {
       return {
-        'closed': daily['closed'] == true,
+        'closed':
+            daily['closed'] == true || daily['zumreClosed'] == true,
         'zumreSlots': _scheduleSlotsFromRaw(daily['zumreSlots']),
       };
     }
@@ -753,8 +759,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     if (!_isFreshRuntimeState(data)) return null;
 
     return {
-      'isZumreOpen': data!['isZumreOpen'] == true,
-      'isLunchBreak': data['isLunchBreak'] == true,
+      // runtimeState is institution-wide; the actual LGS/YKS open state
+      // is calculated from the student's scoped zumreSchedule slots.
+      'isZumreOpen': null,
+      'isLunchBreak': data!['isLunchBreak'] == true,
       'message': null,
     };
   }
@@ -1007,6 +1015,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       if (!doc.exists || !mounted) return;
 
       final data = doc.data();
+      final previousEducationLevel = _studentEducationLevel;
+      final nextEducationLevel =
+          inferredStudentEducationLevel(Map<String, dynamic>.from(data ?? {}));
+
       setState(() {
         final fullName = '${data?['fullName'] ?? ''}'.trim();
         final name = '${data?['name'] ?? ''}'.trim();
@@ -1014,6 +1026,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         _studentName = fullName.isNotEmpty ? fullName : '$name $surname'.trim();
         if (_studentName!.isEmpty) _studentName = data?['email'] ?? 'Öğrenci';
         _studentClassName = data?['className']?.toString();
+        _studentEducationLevel = nextEducationLevel;
         _isInStudySession = data?['isInStudySession'] == true;
 
         final visibleSubjects =
@@ -1025,6 +1038,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           _selectedTeacherName = null;
         }
       });
+
+      if (previousEducationLevel != nextEducationLevel) {
+        unawaited(_checkLocalZumreAvailability());
+      }
 
       final cooldownTimestamp = data?['cooldownUntil'] as Timestamp?;
 

@@ -4,6 +4,8 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../models/education_scope.dart';
+
 class StudyGuardHomeScreen extends StatefulWidget {
   const StudyGuardHomeScreen({super.key});
 
@@ -18,6 +20,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
       FirebaseFunctions.instanceFor(region: 'us-central1');
 
   String? _staffName;
+  Set<String> _staffEducationLevels = <String>{};
   String? _selectedDutyTeacherId;
   String? _selectedDutyTeacherName;
   String _activeStudySlotText = 'Etüt saati';
@@ -75,9 +78,17 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
     if (!mounted) return;
 
+    final staffLevels = educationLevelsFromData(data).toSet();
+    // Existing studyGuard records were institution-wide before this scope
+    // field existed. Keep them compatible until an admin narrows the scope.
+    if (staffLevels.isEmpty) {
+      staffLevels.addAll(educationLevels);
+    }
+
     setState(() {
       _staffName =
           data['fullName'] ?? data['name'] ?? data['email'] ?? 'Etüt Görevlisi';
+      _staffEducationLevels = staffLevels;
       _selectedDutyTeacherId = data['dutyTeacherId'] as String?;
       _selectedDutyTeacherName = data['dutyTeacherName'] as String?;
     });
@@ -145,11 +156,17 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
   List<Map<String, dynamic>> _scheduleSlotsFromRaw(dynamic raw) {
     if (raw is! List) return [];
+
     return raw.whereType<Map>().map((slot) {
       return {
         'start': '${slot['start']}',
         'end': '${slot['end']}',
+        'educationLevel': timeSlotScopeFromData(slot),
       };
+    }).where((slot) {
+      return _staffEducationLevels.any(
+        (level) => timeSlotMatchesEducationLevel(slot, level),
+      );
     }).toList();
   }
 
@@ -162,7 +179,8 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
     if (daily is Map) {
       return {
-        'closed': daily['closed'] == true,
+        'closed':
+            daily['closed'] == true || daily['studyClosed'] == true,
         'studySlots': _scheduleSlotsFromRaw(daily['studySlots']),
       };
     }
@@ -376,29 +394,14 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
     if (!_isFreshRuntimeState(data)) return false;
     _isInstitutionBlockingStudy = false;
+
+    // runtimeState.isStudyOpen is institution-wide. The study guard must
+    // decide availability from its own LGS/YKS-scoped study slots.
     if (_cachedScheduleData != null) {
       return _applyLocalStudyScheduleFromCache(runSessionSideEffects: true);
     }
 
-    final isOpen = data!['isStudyOpen'] == true;
-
-    if (!mounted) return true;
-
-    setState(() {
-      _isStudyOpenNow = isOpen;
-      _activeStudySlotText = 'Etüt saati';
-      _studyScheduleMessage = isOpen
-          ? 'Etüt saati aktif. Yoklama alabilirsiniz.'
-          : 'Şu an etüt saati aktif değil.';
-    });
-
-    if (isOpen) {
-      await _ensureActiveSession();
-    } else {
-      await _finishStudySessionSilently(autoEnded: true);
-    }
-
-    return true;
+    return false;
   }
 
   void _listenRuntimeScheduleState() {
@@ -711,6 +714,13 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     }
 
     final data = doc.data() as Map<String, dynamic>;
+    final studentLevel = inferredStudentEducationLevel(data);
+
+    if (studentLevel == null ||
+        !_staffEducationLevels.contains(studentLevel)) {
+      _showSnack('Bu öğrenci etüt kapsamınızda değil.');
+      return false;
+    }
 
     if (data['isInStudySession'] == true) {
       _showSnack('Bu öğrenci zaten etütte görünüyor.');
@@ -2176,6 +2186,15 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
                                 if (data['isInStudySession'] == true) {
                                   return false;
                                 }
+
+                                final studentLevel =
+                                    inferredStudentEducationLevel(data);
+                                if (studentLevel == null ||
+                                    !_staffEducationLevels
+                                        .contains(studentLevel)) {
+                                  return false;
+                                }
+
                                 if (activeQueueStudentIds.contains(doc.id)) {
                                   return false;
                                 }

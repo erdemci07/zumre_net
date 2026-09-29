@@ -50,3 +50,34 @@ test("teacher availability detects real interval overlap but not touching interv
   );
   assert.equal(touching, null);
 });
+
+
+test("study slots are filtered by the study guard education scope", () => {
+  const schedule = {
+    weeklySchedule: {
+      monday: {
+        studySlots: [
+          { start: "14:00", end: "15:00", educationLevel: "LGS" },
+          { start: "15:00", end: "16:00", educationLevel: "YKS" },
+        ],
+      },
+    },
+  };
+
+  const lgsSlots = helpers.getStudySlots(schedule, "Mon", "LGS");
+  const yksSlots = helpers.getStudySlots(schedule, "Mon", "YKS");
+
+  assert.deepEqual(lgsSlots.map((slot) => slot.educationLevel), ["LGS"]);
+  assert.deepEqual(yksSlots.map((slot) => slot.educationLevel), ["YKS"]);
+});
+
+test("legacy study guards remain dual-scope until admin narrows them", () => {
+  assert.deepEqual(
+    helpers.studyGuardEducationLevels({}),
+    ["LGS", "YKS"]
+  );
+  assert.deepEqual(
+    helpers.studyGuardEducationLevels({ educationLevels: ["LGS"] }),
+    ["LGS"]
+  );
+});
