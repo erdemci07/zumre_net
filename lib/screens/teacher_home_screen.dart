@@ -1107,41 +1107,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                         ],
                                       ),
                                       const SizedBox(height: 8),
-                                      DropdownButtonFormField<String>(
-                                        initialValue: timeSlotScopes.contains(
-                                                slot['educationLevel'])
-                                            ? slot['educationLevel']
-                                            : 'BOTH',
-                                        isExpanded: true,
-                                        dropdownColor: const Color(0xFF06312E),
-                                        style: const TextStyle(
-                                            color: Colors.white),
-                                        decoration: const InputDecoration(
-                                          labelText: 'Eğitim Kapsamı',
-                                          labelStyle:
-                                              TextStyle(color: Colors.white60),
-                                        ),
-                                        items: const [
-                                          DropdownMenuItem(
-                                            value: 'BOTH',
-                                            child: Text('LGS + YKS'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'LGS',
-                                            child: Text('Yalnız LGS'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'YKS',
-                                            child: Text('Yalnız YKS'),
-                                          ),
-                                        ],
-                                        onChanged: (value) {
-                                          if (value != null) {
-                                            slot['educationLevel'] = value;
-                                          }
-                                        },
-                                      ),
-                                      const SizedBox(height: 10),
+
                                     ],
                                   );
                                 }),
