@@ -11,8 +11,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from auth import require_admin, require_reporter
-from firestore_queries import build_class_report, build_institution_summary
-from reports import class_activity, class_activity_summary, class_tracking, institution_summary
+from firestore_queries import build_class_report, build_institution_summary, build_teacher_activity_summary
+from reports import class_activity, class_activity_summary, class_tracking, institution_summary, teacher_activity_summary
 
 
 if not firebase_admin._apps:
@@ -36,6 +36,7 @@ class ReportRequest(BaseModel):
     class_name: str | None = Field(default=None, alias="className")
     branch: str | None = None
     department: str | None = None
+    education_level: str | None = Field(default=None, alias="educationLevel")
 
 
 def _safe_filename(value: str) -> str:
@@ -159,3 +160,31 @@ def class_activity_summary_report(
         "Sinif_Faaliyet_Ozeti",
         class_required=True,
     )
+
+
+@app.post("/reports/teacher-activity-summary")
+def teacher_activity_summary_report(
+    request: ReportRequest,
+    _: dict = Depends(require_admin),
+):
+    try:
+        data = build_teacher_activity_summary(
+            request.start_date,
+            request.end_date,
+            request.education_level or "",
+        )
+        pdf_bytes = teacher_activity_summary.render(data)
+        level = data["education_level"]
+        filename = f"{level}_Ogretmen_Faaliyet_Ozeti_{request.start_date}_{request.end_date}.pdf"
+        return _pdf_response(pdf_bytes, filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logging.exception(
+            "Teacher activity report generation failed: startDate=%s endDate=%s educationLevel=%s exceptionType=%s",
+            request.start_date,
+            request.end_date,
+            request.education_level or "",
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=500, detail="Öğretmen faaliyet raporu oluşturulamadı.") from exc
