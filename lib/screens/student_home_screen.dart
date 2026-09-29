@@ -117,7 +117,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   String? _studentName;
   String? _studentClassName;
-  String? _studentEducationLevel;
   String? _guidanceCounselorId;
   String? _guidanceCounselorName;
   Map<String, dynamic> _guidanceAvailability = const {};
@@ -1056,7 +1055,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         _studentName = fullName.isNotEmpty ? fullName : '$name $surname'.trim();
         if (_studentName!.isEmpty) _studentName = data?['email'] ?? 'Öğrenci';
         _studentClassName = data?['className']?.toString();
-        _studentEducationLevel = _scheduleEducationLevel;
         _isInStudySession = data?['isInStudySession'] == true;
         _guidanceCounselorId =
             data?['guidanceCounselorId']?.toString().trim();
