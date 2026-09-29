@@ -41,9 +41,9 @@ String? inferredStudentEducationLevel(Map<String, dynamic> data) {
   if (explicit != null) return explicit;
 
   final className = data['className']?.toString().trim().toUpperCase() ?? '';
-  if (RegExp(r'^(5|6|7|8)-').hasMatch(className)) return 'LGS';
-  if (RegExp(r'^(9|10|11|12)-').hasMatch(className) ||
-      RegExp(r'^MEZUN(?:-|$)').hasMatch(className)) {
+  if (RegExp(r'^(5|6|7|8)(?:\\s*[-./]|\\s|$)').hasMatch(className)) return 'LGS';
+  if (RegExp(r'^(9|10|11|12)(?:\\s*[-./]|\\s|$)').hasMatch(className) ||
+      RegExp(r'^MEZUN(?:\\s*[-./]|\\s|$)').hasMatch(className)) {
     return 'YKS';
   }
   return null;
