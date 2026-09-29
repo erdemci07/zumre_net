@@ -1231,50 +1231,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
           Column(
             children: [
               Tooltip(
-                message:
-                    'Kurumda branş öğretmeniyseniz seçiniz. Değilseniz boş bırakınız.',
-                child: InkWell(
-                  onTap:
-                      _activeSessionId == null ? null : _showDutyTeacherDialog,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: _selectedDutyTeacherId == null
-                          ? Colors.white.withValues(alpha: 0.10)
-                          : Colors.cyanAccent.withValues(alpha: 0.20),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: _selectedDutyTeacherId == null
-                            ? Colors.white24
-                            : Colors.cyanAccent.withValues(alpha: 0.50),
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.supervisor_account_rounded,
-                      color: _selectedDutyTeacherId == null
-                          ? Colors.white70
-                          : Colors.cyanAccent,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Öğretmen',
-                style: TextStyle(
-                  color: Colors.white60,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 10),
-          Column(
-            children: [
-              Tooltip(
                 message: 'Çıkış Yap',
                 child: InkWell(
                   onTap: () async {
@@ -2539,7 +2495,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
             children: [
               _header(),
               _sessionCard(),
-              _dutyTeacherReminderCard(),
               _studentSearch(),
               _currentStudents(),
             ],
