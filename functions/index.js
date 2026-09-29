@@ -850,6 +850,81 @@ async function deleteWaitingZumreQueuesWhenClosed(
   };
 }
 
+async function completeActiveZumreQueuesForInstitutionMode(
+  reason = "institution_override"
+) {
+  const snapshot = await db
+    .collection("queues")
+    .where("status", "==", "in_progress")
+    .get();
+
+  if (snapshot.empty) {
+    return { checkedCount: 0, completedCount: 0 };
+  }
+
+  let batch = db.batch();
+  let batchSize = 0;
+  let completedCount = 0;
+
+  for (const queueDoc of snapshot.docs) {
+    const queueData = queueDoc.data() || {};
+    let appointmentRef = null;
+
+    if (queueData.source === "appointment" && queueData.appointmentId) {
+      const candidateRef = db.collection("appointments").doc(
+        cleanText(queueData.appointmentId)
+      );
+      const appointmentDoc = await candidateRef.get();
+      const appointmentData = appointmentDoc.data() || {};
+      if (
+        appointmentDoc.exists &&
+        appointmentData.status === "started" &&
+        appointmentData.linkedQueueId === queueDoc.id
+      ) {
+        appointmentRef = candidateRef;
+      }
+    }
+
+    const writesNeeded = appointmentRef ? 2 : 1;
+    if (batchSize + writesNeeded > 400) {
+      await batch.commit();
+      batch = db.batch();
+      batchSize = 0;
+    }
+
+    batch.update(queueDoc.ref, {
+      status: "completed",
+      completedAt: fieldValue.serverTimestamp(),
+      updatedAt: fieldValue.serverTimestamp(),
+      autoCompleted: true,
+      autoCompleteReason: reason,
+    });
+    batchSize += 1;
+
+    if (appointmentRef) {
+      batch.update(appointmentRef, {
+        status: "completed",
+        completedAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+        autoCompleted: true,
+        autoCompleteReason: reason,
+      });
+      batchSize += 1;
+    }
+
+    completedCount += 1;
+  }
+
+  if (batchSize > 0) {
+    await batch.commit();
+  }
+
+  return {
+    checkedCount: snapshot.size,
+    completedCount,
+  };
+}
+
 // ============================================================
 // KULLANICI ŞİFRESİ GÜNCELLEME
 // ============================================================
@@ -3552,8 +3627,17 @@ exports.setInstitutionMode = onCall(
       await deleteWaitingZumreQueuesWhenClosed({}, now, {
         forceClosed: true,
       });
+      const queueCloseResult =
+        await completeActiveZumreQueuesForInstitutionMode("institution_closed");
+      const studyCloseResult =
+        await closeActiveStudySessionsForInstitutionMode();
 
-      return { ok: true, mode: "closed" };
+      return {
+        ok: true,
+        mode: "closed",
+        completedActiveQueues: queueCloseResult.completedCount,
+        closedStudySessions: studyCloseResult.closedCount,
+      };
     }
 
     const examType = cleanText(request.data?.examType).toLowerCase();
@@ -3595,6 +3679,8 @@ exports.setInstitutionMode = onCall(
     await deleteWaitingZumreQueuesWhenClosed({}, now, {
       forceClosed: true,
     });
+    const queueCloseResult =
+      await completeActiveZumreQueuesForInstitutionMode("exam_started");
     const studyCloseResult = await closeActiveStudySessionsForInstitutionMode();
 
     return {
@@ -3602,6 +3688,7 @@ exports.setInstitutionMode = onCall(
       mode: "exam",
       examType,
       examEndsAt: endTimestamp.toDate().toISOString(),
+      completedActiveQueues: queueCloseResult.completedCount,
       closedStudySessions: studyCloseResult.closedCount,
     };
   }
@@ -4005,6 +4092,8 @@ exports.startPlannedExamNow = onCall(
     await deleteWaitingZumreQueuesWhenClosed({}, now, {
       forceClosed: true,
     });
+    const queueCloseResult =
+      await completeActiveZumreQueuesForInstitutionMode("planned_exam_started");
     const studyCloseResult = await closeActiveStudySessionsForInstitutionMode();
 
     return {
@@ -4014,6 +4103,7 @@ exports.startPlannedExamNow = onCall(
       examType,
       examEndsAt: scheduledEnd.toISOString(),
       cancelledCount: conflictDocs.length,
+      completedActiveQueues: queueCloseResult.completedCount,
       closedStudySessions: studyCloseResult.closedCount,
     };
   }
@@ -4810,6 +4900,7 @@ exports.routeQueueRequest = onCall(
 
       transaction.update(student.ref, {
         lastQueueRequestAt: fieldValue.serverTimestamp(),
+        cooldownUntil: fieldValue.delete(),
       });
       transaction.update(selected.teacher.ref, {
         lastQueueRoutedAt: fieldValue.serverTimestamp(),
@@ -6499,6 +6590,9 @@ async function applyPlannedExamRuntime(now = new Date()) {
     }, { merge: true });
 
     await deleteWaitingZumreQueuesWhenClosed({}, now, { forceClosed: true });
+    await completeActiveZumreQueuesForInstitutionMode(
+      "planned_exam_started"
+    );
     await closeActiveStudySessionsForInstitutionMode();
 
     return {
