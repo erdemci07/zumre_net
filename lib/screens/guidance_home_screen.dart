@@ -224,7 +224,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                 DropdownButtonFormField<_GuidanceClassOption>(
                   initialValue: selected,
                   isExpanded: true,
-                  dropdownColor: const Color(0xFF06312E),
+                  dropdownColor: const Color(0xFF4A1830),
                   iconEnabledColor: Colors.white70,
                   style: const TextStyle(color: Colors.white),
                   decoration: _guidanceDialogFieldDecoration('Sınıf'),
@@ -258,8 +258,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                         _GuidanceSummaryRequest(selected),
                       ),
                       style: FilledButton.styleFrom(
-                        backgroundColor: Colors.greenAccent,
-                        foregroundColor: const Color(0xFF06312E),
+                        backgroundColor: const Color(0xFFFFB1C8),
+                        foregroundColor: const Color(0xFF4A1830),
                       ),
                       icon: const Icon(Icons.ios_share_rounded),
                       label: const Text('Özeti Hazırla'),
@@ -462,7 +462,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                 Container(
                     padding: const EdgeInsets.all(11),
                     decoration: BoxDecoration(
-                        color: Colors.greenAccent.withValues(alpha: .16),
+                        color: const Color(0xFFFFB1C8).withValues(alpha: .16),
                         shape: BoxShape.circle),
                     child: const Icon(Icons.person_add_alt_1_rounded,
                         color: Color(0xFFFFB1C8), size: 28)),
@@ -530,7 +530,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                     }),
                                 leading: CircleAvatar(
                                     backgroundColor: selected
-                                        ? Colors.greenAccent
+                                        ? const Color(0xFFFFB1C8)
                                         : Colors.white12,
                                     child: Icon(
                                         selected
@@ -593,7 +593,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                               label: Text(e),
                               selected: day == e,
                               onSelected: (_) => setD(() => day = e),
-                              selectedColor: Colors.greenAccent,
+                              selectedColor: const Color(0xFFFFB1C8),
                               backgroundColor: Colors.white10,
                               labelStyle: TextStyle(
                                   color: day == e
@@ -618,7 +618,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   height: 50,
                   child: FilledButton.icon(
                       style: FilledButton.styleFrom(
-                          backgroundColor: Colors.greenAccent,
+                          backgroundColor: const Color(0xFFFFB1C8),
                           foregroundColor: const Color(0xFF4A102B),
                           disabledBackgroundColor: Colors.white12),
                       onPressed: selectedId == null || isSubmitting
@@ -693,247 +693,285 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
         .where('guidanceCounselorId', isEqualTo: auth.currentUser!.uid)
         .get();
     if (!mounted) return;
+
     String query = '';
     String? studentId = initialStudentId;
     String? studentName =
         initialStudent == null ? null : guidanceStudentName(initialStudent);
     String title = 'Haftalık Ödev Kontrolü';
     String day = 'Her Pazartesi';
-    await showDialog(
-        context: context,
-        builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
-              final filtered = students.docs.where((d) {
-                final x = d.data();
-                final n =
-                    '${x['fullName'] ?? '${x['name'] ?? ''} ${x['surname'] ?? ''}'}'
-                        .toLowerCase();
-                return query.isEmpty || n.contains(query.toLowerCase());
-              }).toList();
-              return Dialog(
-                  insetPadding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(28)),
-                  child: Container(
-                      constraints:
-                          const BoxConstraints(maxWidth: 520, maxHeight: 700),
-                      padding: const EdgeInsets.all(18),
+    bool isSubmitting = false;
+    const tasks = [
+      'Haftalık Ödev Kontrolü',
+      'Akademik Takip',
+      'Hedef Kontrolü',
+      'Ders Programı Kontrolü',
+    ];
+    const days = [
+      'Her Pazartesi',
+      'Her Salı',
+      'Her Çarşamba',
+      'Her Perşembe',
+      'Her Cuma',
+      'Her Cumartesi',
+      'Her Pazar',
+    ];
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          final filtered = students.docs.where((d) {
+            final x = d.data();
+            final n =
+                '${x['fullName'] ?? '${x['name'] ?? ''} ${x['surname'] ?? ''}'}'
+                    .toLowerCase();
+            return query.isEmpty || n.contains(query.toLowerCase());
+          }).toList();
+          final screen = MediaQuery.of(ctx).size;
+          final mobile = screen.width < 600;
+
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.symmetric(
+              horizontal: mobile ? 10 : 24,
+              vertical: mobile ? 10 : 24,
+            ),
+            child: Container(
+              width: double.infinity,
+              constraints: BoxConstraints(
+                maxWidth: 560,
+                maxHeight: screen.height * .92,
+              ),
+              padding: EdgeInsets.all(mobile ? 14 : 18),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF4A102B), Color(0xFF8B3155)],
+                ),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.repeat_rounded,
+                          color: Color(0xFFFFB1C8), size: 28),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Haftalık Takip Ver',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 21,
+                                    fontWeight: FontWeight.w800)),
+                            Text('Öğrenci, görev ve tekrar gününü seçin.',
+                                style: TextStyle(
+                                    color: Colors.white70, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.close_rounded,
+                            color: Colors.white70),
+                      ),
+                    ]),
+                    const SizedBox(height: 12),
+                    TextField(
+                      onChanged: (v) => setD(() => query = v),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Öğrenci ara...',
+                        hintStyle: const TextStyle(color: Colors.white54),
+                        prefixIcon: const Icon(Icons.search_rounded,
+                            color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.white.withValues(alpha: .10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      constraints: BoxConstraints(
+                        minHeight: 86,
+                        maxHeight: mobile ? 150 : 190,
+                      ),
                       decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [Color(0xFF4A102B), Color(0xFF8B3155)]),
-                          borderRadius: BorderRadius.circular(28)),
-                      child: Column(children: [
-                        Row(children: [
-                          const Icon(Icons.repeat_rounded,
-                              color: Color(0xFFFFB1C8), size: 30),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                              child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                Text('Haftalık Takip Ver',
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.w800)),
-                                Text('Öğrenci ve düzenli takip görevini seçin.',
-                                    style: TextStyle(
-                                        color: Colors.white70, fontSize: 12))
-                              ])),
-                          IconButton(
-                              onPressed: () => Navigator.pop(ctx),
-                              icon: const Icon(Icons.close_rounded,
-                                  color: Colors.white70))
-                        ]),
-                        const SizedBox(height: 12),
-                        TextField(
-                            onChanged: (v) => setD(() => query = v),
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(
-                                hintText: 'Öğrenci ara...',
-                                hintStyle:
-                                    const TextStyle(color: Colors.white54),
-                                prefixIcon: const Icon(Icons.search_rounded,
-                                    color: Colors.white70),
-                                filled: true,
-                                fillColor: Colors.white.withValues(alpha: .10),
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(18),
-                                    borderSide: BorderSide.none))),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                            height: 190,
-                            child: Container(
-                                decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: .07),
-                                    borderRadius: BorderRadius.circular(18)),
-                                child: ListView.builder(
-                                    itemCount: filtered.length,
-                                    itemBuilder: (_, i) {
-                                      final d = filtered[i], x = d.data();
-                                      final n =
-                                          '${x['fullName'] ?? '${x['name'] ?? ''} ${x['surname'] ?? ''}'}'
-                                              .trim();
-                                      final cls = formatStudentClassDisplay(
-                                        className: x['className'],
-                                        branch: x['branch'],
+                        color: Colors.white.withValues(alpha: .07),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: filtered.isEmpty
+                          ? const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(18),
+                                child: Text('Öğrenci bulunamadı.',
+                                    style: TextStyle(color: Colors.white60)),
+                              ),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: filtered.length,
+                              itemBuilder: (_, i) {
+                                final d = filtered[i], x = d.data();
+                                final n =
+                                    '${x['fullName'] ?? '${x['name'] ?? ''} ${x['surname'] ?? ''}'}'
+                                        .trim();
+                                final cls = formatStudentClassDisplay(
+                                  className: x['className'],
+                                  branch: x['branch'],
+                                );
+                                final selected = studentId == d.id;
+                                return ListTile(
+                                  dense: mobile,
+                                  onTap: () => setD(() {
+                                    studentId = d.id;
+                                    studentName = n;
+                                  }),
+                                  leading: CircleAvatar(
+                                    backgroundColor: selected
+                                        ? const Color(0xFFFFB1C8)
+                                        : Colors.white12,
+                                    child: Icon(
+                                      selected ? Icons.check : Icons.person,
+                                      color: selected
+                                          ? const Color(0xFF4A102B)
+                                          : Colors.white,
+                                    ),
+                                  ),
+                                  title: Text(n,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700)),
+                                  subtitle: cls.isEmpty
+                                      ? null
+                                      : Text(cls,
+                                          style: const TextStyle(
+                                              color: Colors.white60)),
+                                  trailing: selected
+                                      ? const Icon(Icons.check_circle,
+                                          color: Color(0xFFFFB1C8))
+                                      : null,
+                                );
+                              },
+                            ),
+                    ),
+                    if (studentId != null) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: title,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF4A102B),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: _guidanceDialogFieldDecoration('Görev'),
+                        items: tasks
+                            .map((value) => DropdownMenuItem(
+                                  value: value,
+                                  child: Text(value),
+                                ))
+                            .toList(),
+                        onChanged: (value) =>
+                            setD(() => title = value ?? title),
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        initialValue: day,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF4A102B),
+                        style: const TextStyle(color: Colors.white),
+                        decoration:
+                            _guidanceDialogFieldDecoration('Tekrar Günü'),
+                        items: days
+                            .map((value) => DropdownMenuItem(
+                                  value: value,
+                                  child: Text(value),
+                                ))
+                            .toList(),
+                        onChanged: (value) => setD(() => day = value ?? day),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFFFB1C8),
+                          foregroundColor: const Color(0xFF4A102B),
+                        ),
+                        onPressed: studentId == null || isSubmitting
+                            ? null
+                            : () async {
+                                final selectedStudentId = studentId!;
+                                final uid = auth.currentUser!.uid;
+                                final taskRef = db
+                                    .collection('guidanceTasks')
+                                    .doc('${uid}_${selectedStudentId}');
+                                setD(() => isSubmitting = true);
+                                try {
+                                  await db.runTransaction((tx) async {
+                                    final existing = await tx.get(taskRef);
+                                    if (existing.exists &&
+                                        existing.data()?['active'] != false) {
+                                      throw StateError(
+                                        'Bu öğrenci için zaten aktif bir haftalık görevlendirme var.',
                                       );
-                                      final sel = studentId == d.id;
-                                      return ListTile(
-                                          onTap: () => setD(() {
-                                                studentId = d.id;
-                                                studentName = n;
-                                              }),
-                                          leading: CircleAvatar(
-                                              backgroundColor: sel
-                                                  ? Colors.greenAccent
-                                                  : Colors.white12,
-                                              child: Icon(
-                                                  sel
-                                                      ? Icons.check
-                                                      : Icons.person,
-                                                  color: sel
-                                                      ? const Color(0xFF4A102B)
-                                                      : Colors.white)),
-                                          title: Text(n,
-                                              style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w700)),
-                                          subtitle: cls.isEmpty
-                                              ? null
-                                              : Text(cls,
-                                                  style: const TextStyle(
-                                                      color: Colors.white60)),
-                                          trailing: sel
-                                              ? const Icon(Icons.check_circle,
-                                                  color: Color(0xFFFFB1C8))
-                                              : null);
-                                    }))),
-                        if (studentId != null) ...[
-                          const SizedBox(height: 10),
-                          const Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text('Görev',
-                                  style: TextStyle(
-                                      color: Colors.white70,
-                                      fontWeight: FontWeight.w700))),
-                          const SizedBox(height: 6),
-                          Wrap(
-                              spacing: 7,
-                              runSpacing: 7,
-                              children: [
-                                'Haftalık Ödev Kontrolü',
-                                'Akademik Takip',
-                                'Hedef Kontrolü',
-                                'Ders Programı Kontrolü'
-                              ]
-                                  .map((e) => ChoiceChip(
-                                      label: Text(e),
-                                      selected: title == e,
-                                      onSelected: (_) => setD(() => title = e),
-                                      selectedColor: Colors.greenAccent,
-                                      backgroundColor: Colors.white10,
-                                      labelStyle: TextStyle(
-                                          color: title == e
-                                              ? const Color(0xFF4A102B)
-                                              : Colors.white)))
-                                  .toList()),
-                          const SizedBox(height: 12),
-                          const Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text('Tekrar Günü',
-                                  style: TextStyle(
-                                      color: Colors.white70,
-                                      fontWeight: FontWeight.w700))),
-                          const SizedBox(height: 6),
-                          Wrap(
-                              spacing: 7,
-                              runSpacing: 7,
-                              children: [
-                                'Her Pazartesi',
-                                'Her Salı',
-                                'Her Çarşamba',
-                                'Her Perşembe',
-                                'Her Cuma',
-                                'Her Cumartesi',
-                                'Her Pazar'
-                              ]
-                                  .map((e) => ChoiceChip(
-                                      label: Text(e),
-                                      selected: day == e,
-                                      onSelected: (_) => setD(() => day = e),
-                                      selectedColor: Colors.greenAccent,
-                                      backgroundColor: Colors.white10,
-                                      labelStyle: TextStyle(
-                                          color: day == e
-                                              ? const Color(0xFF4A102B)
-                                              : Colors.white)))
-                                  .toList())
-                        ],
-                        const SizedBox(height: 12),
-                        SizedBox(
-                            width: double.infinity,
-                            height: 50,
-                            child: FilledButton.icon(
-                                onPressed: studentId == null
-                                    ? null
-                                    : () async {
-                                        final selectedStudentId = studentId!;
-                                        final uid = auth.currentUser!.uid;
-                                        final taskRef = db
-                                            .collection('guidanceTasks')
-                                            .doc('${uid}_${selectedStudentId}');
-                                        try {
-                                          await db.runTransaction((tx) async {
-                                            final existing =
-                                                await tx.get(taskRef);
-                                            if (existing.exists &&
-                                                existing.data()?['active'] !=
-                                                    false) {
-                                              throw StateError(
-                                                'Bu öğrenci için zaten aktif bir haftalık görevlendirme var.',
-                                              );
-                                            }
-                                            tx.set(taskRef, {
-                                              'studentId': selectedStudentId,
-                                              'studentName': studentName,
-                                              'counselorId': uid,
-                                              'title': title,
-                                              'schedule': day,
-                                              'active': true,
-                                              'createdAt':
-                                                  FieldValue.serverTimestamp(),
-                                              'updatedAt':
-                                                  FieldValue.serverTimestamp(),
-                                            });
-                                          });
-                                          if (ctx.mounted) Navigator.pop(ctx);
-                                        } on StateError catch (error) {
-                                          if (!ctx.mounted) return;
-                                          ScaffoldMessenger.of(ctx)
-                                              .showSnackBar(
-                                            SnackBar(
-                                              content: Text(error.message),
-                                            ),
-                                          );
-                                        } catch (_) {
-                                          if (!ctx.mounted) return;
-                                          ScaffoldMessenger.of(ctx)
-                                              .showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Görevlendirme kaydedilemedi. Lütfen tekrar deneyin.',
-                                              ),
-                                            ),
-                                          );
-                                        }
-                                      },
-                                icon: const Icon(Icons.repeat_rounded),
-                                label: const Text('Takibi Başlat')))
-                      ])));
-            }));
+                                    }
+                                    tx.set(taskRef, {
+                                      'studentId': selectedStudentId,
+                                      'studentName': studentName,
+                                      'counselorId': uid,
+                                      'title': title,
+                                      'schedule': day,
+                                      'active': true,
+                                      'createdAt':
+                                          FieldValue.serverTimestamp(),
+                                      'updatedAt':
+                                          FieldValue.serverTimestamp(),
+                                    });
+                                  });
+                                  if (ctx.mounted) Navigator.pop(ctx);
+                                } on StateError catch (error) {
+                                  if (!ctx.mounted) return;
+                                  setD(() => isSubmitting = false);
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    SnackBar(content: Text(error.message)),
+                                  );
+                                } catch (_) {
+                                  if (!ctx.mounted) return;
+                                  setD(() => isSubmitting = false);
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Görevlendirme kaydedilemedi. Lütfen tekrar deneyin.',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
+                        icon: const Icon(Icons.repeat_rounded),
+                        label: Text(
+                          isSubmitting ? 'Kaydediliyor...' : 'Takibi Başlat',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> manageWeeklyTasks() async {
@@ -1068,7 +1106,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               : Colors.white.withValues(alpha: .08),
           borderRadius: BorderRadius.circular(15),
           border: Border.all(
-              color: selected ? Colors.greenAccent : Colors.white24),
+              color: selected ? const Color(0xFFFFB1C8) : Colors.white24),
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Flexible(
@@ -1151,8 +1189,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               (slot) => {
                 'start': '${slot['start'] ?? '09:00'}',
                 'end': '${slot['end'] ?? '17:00'}',
-                'educationLevel':
-                    '${slot['educationLevel'] ?? slot['scope'] ?? 'BOTH'}',
               },
             )
             .toList(),
@@ -1198,7 +1234,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF06312E), Color(0xFF008A5C)],
+                colors: [Color(0xFF4A102B), Color(0xFF8B3155)],
               ),
               borderRadius: BorderRadius.circular(28),
               border: Border.all(color: Colors.white24),
@@ -1251,7 +1287,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                   temp[day.key]!.add({
                                     'start': '09:00',
                                     'end': '17:00',
-                                    'educationLevel': 'BOTH',
                                   });
                                 }),
                                 icon: const Icon(
@@ -1392,7 +1427,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                           initialValue: [15, 20, 30].contains(slotMinutes)
                               ? slotMinutes
                               : 20,
-                          dropdownColor: const Color(0xFF06312E),
+                          dropdownColor: const Color(0xFF4A1830),
                           iconEnabledColor: Colors.white70,
                           style: const TextStyle(color: Colors.white),
                           decoration: _guidanceDialogFieldDecoration(
@@ -1481,8 +1516,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                             }
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.greenAccent,
-                            foregroundColor: const Color(0xFF06312E),
+                            backgroundColor: const Color(0xFFFFB1C8),
+                            foregroundColor: const Color(0xFF4A1830),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Text('Kaydet'),
@@ -1700,7 +1735,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               constraints: const BoxConstraints(maxWidth: 380),
               padding: const EdgeInsets.all(22),
               decoration: BoxDecoration(
-                color: const Color(0xFF06312E),
+                color: const Color(0xFF4A1830),
                 borderRadius: BorderRadius.circular(26),
                 border: Border.all(color: Colors.white24),
                 boxShadow: [
@@ -1797,7 +1832,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
           final name =
               '${userSnap.data?.data()?['fullName'] ?? 'Rehberlik Servisi'}';
           return Scaffold(
-            backgroundColor: const Color(0xFF06312E),
+            backgroundColor: const Color(0xFF4A1830),
             appBar: AppBar(
                 elevation: 0,
                 backgroundColor: const Color(0xFF6B2143),
@@ -1811,12 +1846,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                           style: TextStyle(fontSize: 11, color: Colors.white60))
                     ]),
                 actions: [
-                  IconButton(
-                      tooltip: 'Çalışma saatlerim',
-                      onPressed: () => _showOwnAvailabilityDialog(
-                            userSnap.data?.data() ?? const {},
-                          ),
-                      icon: const Icon(Icons.event_available_rounded)),
                   IconButton(
                       tooltip: 'Çıkış Yap',
                       onPressed: () async {
@@ -1910,6 +1939,17 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                       const TextStyle(color: Colors.white70)),
                               const SizedBox(height: 14),
                               Wrap(spacing: 8, runSpacing: 8, children: [
+                                OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.white,
+                                        side: const BorderSide(
+                                            color: Colors.white54)),
+                                    onPressed: () => _showOwnAvailabilityDialog(
+                                      userSnap.data?.data() ?? const {},
+                                    ),
+                                    icon: const Icon(
+                                        Icons.event_available_rounded),
+                                    label: const Text('Çalışma Programı')),
                                 OutlinedButton.icon(
                                     style: OutlinedButton.styleFrom(
                                         foregroundColor: Colors.white,
