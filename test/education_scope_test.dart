@@ -75,6 +75,11 @@ void main() {
     ]) {
       expect(inferredStudentEducationLevel({'className': className}), 'YKS');
     }
+    expect(inferredStudentEducationLevel({'className': 'DERSLİK 8'}), 'LGS');
+    expect(
+        inferredStudentEducationLevel({'className': 'DERSLİK 10 SAY'}), 'YKS');
+    expect(
+        inferredStudentEducationLevel({'className': 'DERSLİK 11 EA'}), 'YKS');
     expect(inferredStudentEducationLevel({'className': 'DERSLİK-16-SÖZEL'}),
         isNull);
     final lgsTeacher = {
