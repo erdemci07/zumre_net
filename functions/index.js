@@ -715,7 +715,8 @@ async function completeTimedOutZumreQueues(scheduleData, now = new Date()) {
     };
   }
 
-  const batch = db.batch();
+  let batch = db.batch();
+  let batchSize = 0;
   let checkedCount = 0;
   let completedCount = 0;
 
@@ -727,19 +728,12 @@ async function completeTimedOutZumreQueues(scheduleData, now = new Date()) {
       continue;
     }
 
-    batch.update(queueDoc.ref, {
-      status: "completed",
-      completedAt: fieldValue.serverTimestamp(),
-      updatedAt: fieldValue.serverTimestamp(),
-      autoCompleted: true,
-      autoCompleteReason: "zumre_timeout",
-    });
-
+    let appointmentRef = null;
     if (queueData.source === "appointment" && queueData.appointmentId) {
-      const appointmentRef = db.collection("appointments").doc(
+      const candidateRef = db.collection("appointments").doc(
         cleanText(queueData.appointmentId)
       );
-      const appointmentDoc = await appointmentRef.get();
+      const appointmentDoc = await candidateRef.get();
       const appointmentData = appointmentDoc.data() || {};
 
       if (
@@ -747,20 +741,41 @@ async function completeTimedOutZumreQueues(scheduleData, now = new Date()) {
         appointmentData.status === "started" &&
         appointmentData.linkedQueueId === queueDoc.id
       ) {
-        batch.update(appointmentRef, {
-          status: "completed",
-          completedAt: fieldValue.serverTimestamp(),
-          updatedAt: fieldValue.serverTimestamp(),
-          autoCompleted: true,
-          autoCompleteReason: "zumre_timeout",
-        });
+        appointmentRef = candidateRef;
       }
+    }
+
+    const writesNeeded = appointmentRef ? 2 : 1;
+    if (batchSize + writesNeeded > 400) {
+      await batch.commit();
+      batch = db.batch();
+      batchSize = 0;
+    }
+
+    batch.update(queueDoc.ref, {
+      status: "completed",
+      completedAt: fieldValue.serverTimestamp(),
+      updatedAt: fieldValue.serverTimestamp(),
+      autoCompleted: true,
+      autoCompleteReason: "zumre_timeout",
+    });
+    batchSize += 1;
+
+    if (appointmentRef) {
+      batch.update(appointmentRef, {
+        status: "completed",
+        completedAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+        autoCompleted: true,
+        autoCompleteReason: "zumre_timeout",
+      });
+      batchSize += 1;
     }
 
     completedCount += 1;
   }
 
-  if (completedCount > 0) {
+  if (batchSize > 0) {
     await batch.commit();
   }
 
@@ -4973,7 +4988,14 @@ exports.routeQueueTransfer = onCall(
       const studentDoc = studentId
         ? await transaction.get(db.collection("users").doc(studentId))
         : null;
-      const studentData = studentDoc?.data() || {};
+      if (!studentDoc?.exists || studentDoc.data()?.role !== "student") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Öğrenci kaydı artık kullanılamıyor."
+        );
+      }
+
+      const studentData = studentDoc.data() || {};
       const subject = cleanText(queueData.subject);
       const questionCount = normalizeQuestionCount(queueData.questionCount);
       const queueLevel = queueEducationLevel(queueData, studentData);
