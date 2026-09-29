@@ -2176,12 +2176,41 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                     return;
                                   }
 
-                                  final callable = _functions
-                                      .httpsCallable('teacherAddManualQueue');
-                                  await callable.call<Map<String, dynamic>>({
-                                    'studentId': selectedId,
-                                    'subject': _teacherSubject ?? 'Ders',
-                                  });
+                                  try {
+                                    final callable = _functions
+                                        .httpsCallable('teacherAddManualQueue');
+                                    await callable.call<Map<String, dynamic>>({
+                                      'studentId': selectedId,
+                                      'subject': _teacherSubject ?? 'Ders',
+                                    });
+                                  } on FirebaseFunctionsException catch (e) {
+                                    // Backend workflow ilk kurulumda henüz
+                                    // canlı değilse mevcut production akışı
+                                    // geçici fallback olarak korunur.
+                                    if (e.code != 'not-found' &&
+                                        e.code != 'unimplemented') {
+                                      rethrow;
+                                    }
+
+                                    await _firestore.collection('queues').add({
+                                      'studentId': selectedId,
+                                      'studentName': selectedStudentName,
+                                      'teacherId': teacherId,
+                                      'teacherName':
+                                          _teacherName ?? 'Öğretmen',
+                                      'subject': _teacherSubject ?? 'Ders',
+                                      'status': 'waiting',
+                                      'isManual': true,
+                                      'questionCount': 1,
+                                      'estimatedMinutes': 4,
+                                      'extraMinutes': 0,
+                                      'createdAt':
+                                          FieldValue.serverTimestamp(),
+                                      'startedAt': null,
+                                      'updatedAt':
+                                          FieldValue.serverTimestamp(),
+                                    });
+                                  }
 
                                   await _takeNextWaitingQueue();
 
