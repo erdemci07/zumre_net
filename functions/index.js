@@ -184,9 +184,27 @@ function getDailySchedule(scheduleData, weekday) {
   };
 }
 
-function getStudySlots(scheduleData, weekday) {
+function getStudySlots(scheduleData, weekday, educationLevelOrLevels) {
   const daily = getDailySchedule(scheduleData, weekday);
-  return daily.studyClosed ? [] : daily.studySlots;
+  const slots = daily.studyClosed ? [] : daily.studySlots;
+
+  if (educationLevelOrLevels === undefined || educationLevelOrLevels === null) {
+    return slots;
+  }
+
+  const rawLevels = Array.isArray(educationLevelOrLevels)
+    ? educationLevelOrLevels
+    : [educationLevelOrLevels];
+  const levels = cleanEducationLevels(rawLevels);
+
+  // Legacy study guards had no scope and must remain institution-wide.
+  if (levels.length === 0) {
+    return slots;
+  }
+
+  return slots.filter((slot) =>
+    levels.some((level) => timeSlotMatchesEducationScope(slot, level))
+  );
 }
 
 function getZumreSlots(scheduleData, weekday, educationLevel) {
@@ -513,7 +531,7 @@ function buildEffectiveRuntimeState(
  * Bir etüt oturumunun hangi yönetici tanımlı saat aralığına
  * ait olduğunu başlangıç zamanından bulur.
  */
-function findSessionSlot(sessionStartedAt, scheduleData) {
+function findSessionSlot(sessionStartedAt, scheduleData, educationLevel) {
   if (!sessionStartedAt || typeof sessionStartedAt.toDate !== "function") {
     return null;
   }
@@ -522,7 +540,11 @@ function findSessionSlot(sessionStartedAt, scheduleData) {
   const startedParts = getIstanbulDateParts(startedDate);
   const startedMinutes = startedParts.hour * 60 + startedParts.minute;
 
-  const slots = getStudySlots(scheduleData, startedParts.weekday);
+  const slots = getStudySlots(
+    scheduleData,
+    startedParts.weekday,
+    educationLevel
+  );
 
   const matchingSlot = slots.find(
     (slot) =>
@@ -547,7 +569,11 @@ function findSessionSlot(sessionStartedAt, scheduleData) {
  * şimdi >= 20:30          → kapanmalı
  */
 function shouldCloseSession(sessionData, scheduleData, now = new Date()) {
-  const slot = findSessionSlot(sessionData.startedAt, scheduleData);
+  const slot = findSessionSlot(
+    sessionData.startedAt,
+    scheduleData,
+    sessionData.educationLevel
+  );
 
   /*
    * Oturum hiçbir tanımlı saate bağlanamıyorsa güvenli tarafta
@@ -568,10 +594,18 @@ function shouldCloseSession(sessionData, scheduleData, now = new Date()) {
   return currentMinutes >= slot.endMinutes;
 }
 
-function findCurrentStudySlot(scheduleData, now = new Date()) {
+function findCurrentStudySlot(
+  scheduleData,
+  now = new Date(),
+  educationLevels
+) {
   const nowParts = getIstanbulDateParts(now);
   const currentMinutes = nowParts.hour * 60 + nowParts.minute;
-  const slots = getStudySlots(scheduleData, nowParts.weekday);
+  const slots = getStudySlots(
+    scheduleData,
+    nowParts.weekday,
+    educationLevels
+  );
   const slot = slots.find(
     (item) =>
       currentMinutes >= item.startMinutes &&
@@ -814,6 +848,17 @@ function cleanSubjects(value) {
 function cleanEducationLevels(value) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map(validEducationLevel).filter(Boolean))];
+}
+
+function studyGuardEducationLevels(data = {}) {
+  const levels = cleanEducationLevels(data.educationLevels);
+  const singleLevel = validEducationLevel(data.educationLevel);
+
+  if (singleLevel && !levels.includes(singleLevel)) {
+    levels.push(singleLevel);
+  }
+
+  return levels.length > 0 ? levels : ["LGS", "YKS"];
 }
 
 function cleanTeachingScopes(value) {
@@ -2272,7 +2317,12 @@ function selectNextWaitingQueueDoc(waitingDocs, excludeQueueId = null) {
   return waitingQueues[0] || null;
 }
 
-function assertQueueRuntimeOpen(scheduleData, runtimeData, now = new Date()) {
+function assertQueueRuntimeOpen(
+  scheduleData,
+  runtimeData,
+  now = new Date(),
+  educationLevel
+) {
   const runtimeState = buildEffectiveRuntimeState(
     scheduleData,
     runtimeData,
@@ -2293,7 +2343,15 @@ function assertQueueRuntimeOpen(scheduleData, runtimeData, now = new Date()) {
     );
   }
 
-  if (!runtimeState.isZumreOpen) {
+  const nowParts = getIstanbulDateParts(now);
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute;
+  const scopedZumreSlots = getZumreSlots(
+    scheduleData,
+    nowParts.weekday,
+    educationLevel
+  );
+
+  if (!isNowInSlots(currentMinutes, scopedZumreSlots)) {
     throw new HttpsError(
       "failed-precondition",
       "Zümre saati dışında sıra alınamaz."
@@ -2415,6 +2473,14 @@ function buildUserDocument(payload, options = {}) {
     });
   }
 
+  if (payload.role === "studyGuard") {
+    Object.assign(userData, {
+      educationLevels: payload.educationLevels.length > 0
+        ? payload.educationLevels
+        : ["LGS", "YKS"],
+    });
+  }
+
   return userData;
 }
 
@@ -2452,6 +2518,21 @@ function applyRoleCleanup(updateData, newRole) {
     updateData.breakUntil = fieldValue.delete();
     updateData.educationLevels = fieldValue.delete();
     updateData.teachingScopes = fieldValue.delete();
+  } else if (newRole === "studyGuard") {
+    updateData.subjects = fieldValue.delete();
+    updateData.teacherStatus = fieldValue.delete();
+    updateData.weeklyAvailability = fieldValue.delete();
+    updateData.manualAbsentDate = fieldValue.delete();
+    updateData.breakUntil = fieldValue.delete();
+    updateData.className = fieldValue.delete();
+    updateData.branch = fieldValue.delete();
+    updateData.department = fieldValue.delete();
+    updateData.studentNo = fieldValue.delete();
+    updateData.isInStudySession = fieldValue.delete();
+    updateData.activeStudySessionId = fieldValue.delete();
+    updateData.educationLevel = fieldValue.delete();
+    updateData.teachingScopes = fieldValue.delete();
+    updateData.guidanceCounselorId = fieldValue.delete();
   } else {
     updateData.subjects = fieldValue.delete();
     updateData.teacherStatus = fieldValue.delete();
@@ -3728,17 +3809,19 @@ exports.ensureStudySession = onCall(
       now
     );
 
-    if (
-      runtimeState.institutionMode !== "active" ||
-      runtimeState.isStudyOpen !== true
-    ) {
+    if (runtimeState.institutionMode !== "active") {
       throw new HttpsError(
         "failed-precondition",
         "Şu an etüt saati aktif değil."
       );
     }
 
-    const slot = findCurrentStudySlot(scheduleData, now);
+    const staffEducationLevels = studyGuardEducationLevels(staff.data);
+    const slot = findCurrentStudySlot(
+      scheduleData,
+      now,
+      staffEducationLevels
+    );
     if (!slot) {
       throw new HttpsError(
         "failed-precondition",
@@ -3781,6 +3864,8 @@ exports.ensureStudySession = onCall(
         slotDate: slot.dateKey,
         slotStart: slot.start,
         slotEnd: slot.end,
+        educationLevel: slot.educationLevel,
+        educationLevels: staffEducationLevels,
         dutyTeacherId: null,
         dutyTeacherName: null,
         dutyTeacherPreviousStatus: null,
@@ -4378,12 +4463,6 @@ exports.routeQueueRequest = onCall(
         ),
       ]);
 
-      assertQueueRuntimeOpen(
-        scheduleDoc.data() || {},
-        runtimeDoc.data() || {},
-        new Date()
-      );
-
       if (!studentDoc.exists || studentDoc.data()?.role !== "student") {
         throw new HttpsError(
           "permission-denied",
@@ -4392,6 +4471,14 @@ exports.routeQueueRequest = onCall(
       }
 
       const studentData = studentDoc.data() || {};
+      const studentLevel = studentEducationLevel(studentData);
+
+      assertQueueRuntimeOpen(
+        scheduleDoc.data() || {},
+        runtimeDoc.data() || {},
+        new Date(),
+        studentLevel
+      );
 
       if (studentData.isInStudySession === true) {
         throw new HttpsError(
@@ -4411,7 +4498,6 @@ exports.routeQueueRequest = onCall(
         );
       }
 
-      const studentLevel = studentEducationLevel(studentData);
       const candidateTeachers = teachersSnapshot.docs.filter((doc) =>
         teacherMatchesStudentScope(doc.data(), studentData, subject) &&
         isTeacherScheduledNow(doc.data(), new Date(), studentLevel)
@@ -6412,6 +6498,11 @@ if (process.env.NODE_ENV === "test") {
     buildAppointmentLinkedQueueData,
     canRequesterTransferAppointment,
     changedZumreDayKeys,
+    getStudySlots,
+    findCurrentStudySlot,
+    shouldCloseSession,
+    studyGuardEducationLevels,
+    assertQueueRuntimeOpen,
     transferEditUntilFor,
     dateKeyFromIstanbulDate,
     estimatedMinutesForQuestionCount,
