@@ -5104,13 +5104,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         selectedCount == 0 || _isBulkDeleting || _isLoading
                             ? null
                             : () => _bulkDeleteUsers(allUsers),
-                    onAssignGuidance: selectedStudentIds.isEmpty ||
-                            _isBulkDeleting ||
-                            _isLoading
-                        ? null
-                        : () => _showBulkGuidanceCounselorAssignment(
-                              selectedStudentIds,
-                            ),
+
                   ),
                 ),
                 SliverPadding(
@@ -5298,45 +5292,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                               ),
                                             ),
                                           )
-                                        else if (role == 'student')
-                                          TextButton.icon(
-                                            onPressed: _isBulkDeleting
-                                                ? null
-                                                : () =>
-                                                    _showGuidanceCounselorAssignment(
-                                                      uid,
-                                                      data,
-                                                    ),
-                                            icon: const Icon(
-                                              Icons.supervisor_account_rounded,
-                                              size: 16,
-                                            ),
-                                            label: const Text('Rehber Ata'),
-                                            style: TextButton.styleFrom(
-                                              foregroundColor:
-                                                  Colors.lightBlueAccent,
-                                              backgroundColor: Colors
-                                                  .lightBlueAccent
-                                                  .withValues(alpha: 0.12),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 9,
-                                                vertical: 5,
-                                              ),
-                                              minimumSize: Size.zero,
-                                              tapTargetSize:
-                                                  MaterialTapTargetSize
-                                                      .shrinkWrap,
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                side: BorderSide(
-                                                  color: Colors.lightBlueAccent
-                                                      .withValues(alpha: 0.45),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
+
                                       ],
                                     ),
                                   ],
@@ -5604,7 +5560,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
     required bool allVisibleSelected,
     required ValueChanged<bool?>? onSelectAllChanged,
     required VoidCallback? onDeleteSelected,
-    required VoidCallback? onAssignGuidance,
   }) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -5641,11 +5596,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
             final countText = Text(
               _isBulkDeleting
                   ? '$progressCount / $progressTotal kullanıcı işlendi'
-                  : selectedStudentCount > 0
-                      ? '$selectedStudentCount öğrenci seçili'
-                      : selectedCount > 0
-                          ? '$selectedCount seçili • Rehber ataması yalnız öğrenciler için'
-                          : 'Rehber atamak için öğrenci seçin',
+                  : selectedCount > 0
+                      ? '$selectedCount kullanıcı seçili'
+                      : 'Toplu işlem için kullanıcı seçin',
               style: const TextStyle(color: Colors.white60, fontSize: 12),
             );
             final deleteButton = ElevatedButton.icon(
@@ -5677,23 +5630,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 ),
               ),
             );
-            final assignButton = ElevatedButton.icon(
-              onPressed: onAssignGuidance,
-              icon: const Icon(Icons.supervisor_account_rounded, size: 18),
-              label: const Text('Rehber Öğretmen Ata'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFF0B3D78),
-                disabledBackgroundColor: Colors.white.withValues(alpha: 0.18),
-                disabledForegroundColor: Colors.white60,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
-            );
-
             if (isNarrow) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5705,8 +5641,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  assignButton,
-                  const SizedBox(height: 8),
                   deleteButton,
                 ],
               );
@@ -5718,8 +5652,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 const SizedBox(width: 10),
                 countText,
                 const Spacer(),
-                assignButton,
-                const SizedBox(width: 8),
                 deleteButton,
               ],
             );
