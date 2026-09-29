@@ -82,6 +82,10 @@ void main() {
         inferredStudentEducationLevel({'className': 'DERSLİK 11 EA'}), 'YKS');
     expect(inferredStudentEducationLevel({'className': 'DERSLİK-16-SÖZEL'}),
         isNull);
+    expect(inferredStudentEducationLevel({'branch': 'DERSLİK 7'}), 'LGS');
+    expect(
+        inferredStudentEducationLevel({'department': 'DERSLİK 12 SAY'}), 'YKS');
+    expect(inferredStudentEducationLevel({'className': 'MEZUN 10'}), 'YKS');
     final lgsTeacher = {
       'teachingScopes': [
         {'level': 'LGS', 'subject': 'MATEMATİK'},
