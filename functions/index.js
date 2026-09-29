@@ -628,7 +628,20 @@ function studySessionIdFor(staffId, slot) {
   return `${staffId}_${slot.dateKey}-${safeStart}-${safeEnd}`;
 }
 
-function findZumreSlot(startedAt, scheduleData) {
+function queueEducationLevel(queueData = {}, studentData = null) {
+  return validEducationLevel(queueData.educationLevel) ||
+    (studentData ? studentEducationLevel(studentData) : null);
+}
+
+function scopedQueueZumreSlots(scheduleData, weekday, educationLevel) {
+  return getZumreSlots(
+    scheduleData,
+    weekday,
+    educationLevel || undefined
+  );
+}
+
+function findZumreSlot(startedAt, scheduleData, educationLevel = null) {
   if (!startedAt || typeof startedAt.toDate !== "function") {
     return null;
   }
@@ -636,7 +649,11 @@ function findZumreSlot(startedAt, scheduleData) {
   const startedDate = startedAt.toDate();
   const startedParts = getIstanbulDateParts(startedDate);
   const startedMinutes = startedParts.hour * 60 + startedParts.minute;
-  const slots = getZumreSlots(scheduleData, startedParts.weekday);
+  const slots = scopedQueueZumreSlots(
+    scheduleData,
+    startedParts.weekday,
+    educationLevel
+  );
 
   const matchingSlot = slots.find(
     (slot) =>
@@ -657,13 +674,22 @@ function findZumreSlot(startedAt, scheduleData) {
 function shouldAutoCompleteZumreQueue(queueData, scheduleData, now = new Date()) {
   const nowParts = getIstanbulDateParts(now);
   const currentMinutes = nowParts.hour * 60 + nowParts.minute;
-  const currentZumreSlots = getZumreSlots(scheduleData, nowParts.weekday);
+  const educationLevel = queueEducationLevel(queueData);
+  const currentZumreSlots = scopedQueueZumreSlots(
+    scheduleData,
+    nowParts.weekday,
+    educationLevel
+  );
 
   if (isNowInSlots(currentMinutes, currentZumreSlots)) {
     return false;
   }
 
-  const queueSlot = findZumreSlot(queueData.startedAt, scheduleData);
+  const queueSlot = findZumreSlot(
+    queueData.startedAt,
+    scheduleData,
+    educationLevel
+  );
 
   if (!queueSlot) {
     return false;
@@ -728,15 +754,6 @@ async function deleteWaitingZumreQueuesWhenClosed(
 ) {
   const nowParts = getIstanbulDateParts(now);
   const currentMinutes = nowParts.hour * 60 + nowParts.minute;
-  const currentZumreSlots = getZumreSlots(scheduleData, nowParts.weekday);
-
-  if (!options.forceClosed && isNowInSlots(currentMinutes, currentZumreSlots)) {
-    return {
-      checkedCount: 0,
-      deletedCount: 0,
-      skippedBecauseOpen: true,
-    };
-  }
 
   const snapshot = await db
     .collection("queues")
@@ -754,8 +771,25 @@ async function deleteWaitingZumreQueuesWhenClosed(
   let batch = db.batch();
   let batchSize = 0;
   let deletedCount = 0;
+  let keptOpenCount = 0;
 
   for (const queueDoc of snapshot.docs) {
+    const queueData = queueDoc.data();
+
+    if (!options.forceClosed) {
+      const level = queueEducationLevel(queueData);
+      const queueSlots = scopedQueueZumreSlots(
+        scheduleData,
+        nowParts.weekday,
+        level
+      );
+
+      if (isNowInSlots(currentMinutes, queueSlots)) {
+        keptOpenCount += 1;
+        continue;
+      }
+    }
+
     batch.delete(queueDoc.ref);
     batchSize += 1;
     deletedCount += 1;
@@ -774,7 +808,7 @@ async function deleteWaitingZumreQueuesWhenClosed(
   return {
     checkedCount: snapshot.size,
     deletedCount,
-    skippedBecauseOpen: false,
+    skippedBecauseOpen: keptOpenCount > 0,
   };
 }
 
@@ -1513,6 +1547,7 @@ function buildAppointmentLinkedQueueData(appointmentId, appointmentData, now) {
     teacherId: appointmentData.teacherId,
     teacherName: cleanText(appointmentData.teacherName) || "Öğretmen",
     subject: cleanText(appointmentData.subject) || "Ders",
+    educationLevel: validEducationLevel(appointmentData.educationLevel),
     questionCount: normalizeQuestionCount(appointmentData.questionCount),
     estimatedMinutes: Number(appointmentData.estimatedMinutes) ||
       estimatedMinutesForQuestionCount(
@@ -2275,38 +2310,70 @@ async function reconcileNoShowsAtDayEnd(now = new Date()) {
 }
 
 async function startNextWaitingQueueInTransaction(transaction, teacherId) {
-  const activeSnapshot = await transaction.get(
-    db.collection("queues")
-      .where("teacherId", "==", teacherId)
-      .where("status", "==", "in_progress")
-      .limit(1)
-  );
+  const [
+    activeSnapshot,
+    waitingSnapshot,
+    teacherDoc,
+    scheduleDoc,
+    runtimeDoc,
+  ] = await Promise.all([
+    transaction.get(
+      db.collection("queues")
+        .where("teacherId", "==", teacherId)
+        .where("status", "==", "in_progress")
+        .limit(1)
+    ),
+    transaction.get(
+      db.collection("queues")
+        .where("teacherId", "==", teacherId)
+        .where("status", "==", "waiting")
+    ),
+    transaction.get(db.collection("users").doc(teacherId)),
+    transaction.get(db.collection("settings").doc("zumreSchedule")),
+    transaction.get(db.collection("settings").doc("runtimeState")),
+  ]);
 
-  if (!activeSnapshot.empty) {
+  if (!activeSnapshot.empty || waitingSnapshot.empty || !teacherDoc.exists) {
     return null;
   }
 
-  const waitingSnapshot = await transaction.get(
-    db.collection("queues")
-      .where("teacherId", "==", teacherId)
-      .where("status", "==", "waiting")
-  );
-
-  if (waitingSnapshot.empty) {
-    return null;
-  }
-
+  const teacherData = teacherDoc.data() || {};
+  const scheduleData = scheduleDoc.data() || {};
+  const runtimeData = runtimeDoc.data() || {};
   const waitingQueues = waitingSnapshot.docs
     .sort((a, b) => compareQueuePriorityDocs(a, b));
-  const nextQueue = waitingQueues[0];
 
-  transaction.update(nextQueue.ref, {
-    status: "in_progress",
-    startedAt: fieldValue.serverTimestamp(),
-    updatedAt: fieldValue.serverTimestamp(),
-  });
+  for (const nextQueue of waitingQueues) {
+    const queueData = nextQueue.data() || {};
+    const studentId = cleanText(queueData.studentId);
+    if (!studentId) continue;
 
-  return nextQueue.id;
+    const studentDoc = await transaction.get(
+      db.collection("users").doc(studentId)
+    );
+    if (!studentDoc.exists) continue;
+
+    const blockReason = queueStartBlockReason({
+      scheduleData,
+      runtimeData,
+      queueData,
+      teacherData,
+      studentData: studentDoc.data() || {},
+      now: new Date(),
+    });
+
+    if (blockReason) continue;
+
+    transaction.update(nextQueue.ref, {
+      status: "in_progress",
+      startedAt: fieldValue.serverTimestamp(),
+      updatedAt: fieldValue.serverTimestamp(),
+    });
+
+    return nextQueue.id;
+  }
+
+  return null;
 }
 
 function selectNextWaitingQueueDoc(waitingDocs, excludeQueueId = null) {
@@ -2315,6 +2382,43 @@ function selectNextWaitingQueueDoc(waitingDocs, excludeQueueId = null) {
     .sort((a, b) => compareQueuePriorityDocs(a, b));
 
   return waitingQueues[0] || null;
+}
+
+async function linkedStartedAppointmentRef(
+  transaction,
+  queueDoc,
+  teacherId
+) {
+  const queueData = queueDoc.data() || {};
+  if (queueData.source !== "appointment" || !queueData.appointmentId) {
+    return null;
+  }
+
+  const appointmentRef = db.collection("appointments").doc(
+    cleanText(queueData.appointmentId)
+  );
+  const appointmentDoc = await transaction.get(appointmentRef);
+
+  if (!appointmentDoc.exists) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Bağlı planlı zümre kaydı bulunamadı."
+    );
+  }
+
+  const appointmentData = appointmentDoc.data() || {};
+  if (
+    appointmentData.teacherId !== teacherId ||
+    appointmentData.linkedQueueId !== queueDoc.id ||
+    appointmentData.status !== "started"
+  ) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Bağlı planlı zümre durumu geçerli değil."
+    );
+  }
+
+  return appointmentRef;
 }
 
 function assertQueueRuntimeOpen(
@@ -2357,6 +2461,73 @@ function assertQueueRuntimeOpen(
       "Zümre saati dışında sıra alınamaz."
     );
   }
+}
+
+function queueStartBlockReason({
+  scheduleData,
+  runtimeData,
+  queueData,
+  teacherData,
+  studentData,
+  now = new Date(),
+}) {
+  const educationLevel = queueEducationLevel(queueData, studentData);
+  if (!educationLevel) {
+    return "Öğrencinin LGS/YKS kapsamı belirlenemedi.";
+  }
+
+  const runtimeState = buildEffectiveRuntimeState(
+    scheduleData,
+    runtimeData,
+    now
+  );
+  if (runtimeState.institutionMode !== "active") {
+    return "Kurum şu anda sıra işlemlerine kapalı.";
+  }
+  if (runtimeState.isLunchBreak) {
+    return "Öğle arasında öğrenci başlatılamaz.";
+  }
+
+  const nowParts = getIstanbulDateParts(now);
+  const currentMinutes = nowParts.hour * 60 + nowParts.minute;
+  const slots = getZumreSlots(
+    scheduleData,
+    nowParts.weekday,
+    educationLevel
+  );
+  if (!isNowInSlots(currentMinutes, slots)) {
+    return "Öğrencinin zümre saati şu anda aktif değil.";
+  }
+
+  if (studentData.role !== "student") {
+    return "Öğrenci kaydı artık kullanılamıyor.";
+  }
+  if (studentData.isInStudySession === true) {
+    return "Öğrenci şu anda etütte görünüyor.";
+  }
+
+  const subject = cleanText(queueData.subject);
+  if (
+    teacherData.role !== "teacher" ||
+    teacherData.teacherStatus !== "available"
+  ) {
+    return "Öğretmen şu anda müsait değil.";
+  }
+  if (
+    !teacherHasSubject(teacherData, subject) ||
+    !teacherMatchesEducationScope(
+      teacherData,
+      educationLevel,
+      subject
+    )
+  ) {
+    return "Öğretmen bu ders ve eğitim kapsamı için uygun değil.";
+  }
+  if (!isTeacherScheduledNow(teacherData, now, educationLevel)) {
+    return "Öğretmen şu anda çalışma programında değil.";
+  }
+
+  return null;
 }
 
 function validateUserPayload(data, options = {}) {
@@ -2452,8 +2623,8 @@ function buildUserDocument(payload, options = {}) {
       guardianSurname: payload.guardianSurname,
       guardianPhone: payload.guardianPhone,
       guidanceCounselorId: payload.guidanceCounselorId,
-      isInStudySession: false,
-      activeStudySessionId: null,
+      isInStudySession: options.existingIsInStudySession === true,
+      activeStudySessionId: options.existingActiveStudySessionId || null,
       ...(payload.educationLevel ? { educationLevel: payload.educationLevel } : {}),
     });
   }
@@ -2632,6 +2803,16 @@ async function hasActiveStudySessionFor(uid, fieldName) {
   );
 }
 
+async function hasActiveAppointmentFor(uid, fieldName) {
+  const snapshot = await db
+    .collection("appointments")
+    .where(fieldName, "==", uid)
+    .where("status", "in", ACTIVE_APPOINTMENT_STATUSES)
+    .limit(1)
+    .get();
+  return !snapshot.empty;
+}
+
 async function assertNoActiveUserOperation(uid, userData) {
   const role = userData?.role;
 
@@ -2639,11 +2820,12 @@ async function assertNoActiveUserOperation(uid, userData) {
     if (
       userData.isInStudySession === true ||
       userData.activeStudySessionId ||
-      await hasActiveQueueFor(uid, "studentId")
+      await hasActiveQueueFor(uid, "studentId") ||
+      await hasActiveAppointmentFor(uid, "studentId")
     ) {
       throw new HttpsError(
         "failed-precondition",
-        "Bu öğrencinin aktif bir işlemi bulunuyor. Önce işlemi sonlandırın."
+        "Bu öğrencinin aktif veya planlı bir işlemi bulunuyor. Önce işlemi sonlandırın."
       );
     }
   }
@@ -2652,11 +2834,12 @@ async function assertNoActiveUserOperation(uid, userData) {
     if (
       userData.teacherStatus === "studyGuard" ||
       await hasActiveQueueFor(uid, "teacherId") ||
-      await hasActiveStudySessionFor(uid, "dutyTeacherId")
+      await hasActiveStudySessionFor(uid, "dutyTeacherId") ||
+      await hasActiveAppointmentFor(uid, "teacherId")
     ) {
       throw new HttpsError(
         "failed-precondition",
-        "Bu öğretmenin aktif bir işlemi bulunuyor. Önce işlemi sonlandırın."
+        "Bu öğretmenin aktif veya planlı bir işlemi bulunuyor. Önce işlemi sonlandırın."
       );
     }
   }
@@ -2672,26 +2855,35 @@ async function assertNoActiveUserOperation(uid, userData) {
 }
 
 async function loadUserDeleteGuardContext() {
-  const [activeQueuesSnapshot, activeSessionsSnapshot, adminsSnapshot] =
-    await Promise.all([
-      db
-        .collection("queues")
-        .where("status", "in", ["waiting", "in_progress"])
-        .get(),
-      db
-        .collection("studySessions")
-        .where("status", "==", "active")
-        .get(),
-      db
-        .collection("users")
-        .where("role", "==", "admin")
-        .limit(2)
-        .get(),
-    ]);
+  const [
+    activeQueuesSnapshot,
+    activeSessionsSnapshot,
+    activeAppointmentsSnapshot,
+    adminsSnapshot,
+  ] = await Promise.all([
+    db
+      .collection("queues")
+      .where("status", "in", ["waiting", "in_progress"])
+      .get(),
+    db
+      .collection("studySessions")
+      .where("status", "==", "active")
+      .get(),
+    db
+      .collection("appointments")
+      .where("status", "in", ACTIVE_APPOINTMENT_STATUSES)
+      .get(),
+    db
+      .collection("users")
+      .where("role", "==", "admin")
+      .limit(2)
+      .get(),
+  ]);
 
   return {
     activeQueues: activeQueuesSnapshot.docs,
     activeStudySessions: activeSessionsSnapshot.docs,
+    activeAppointments: activeAppointmentsSnapshot.docs,
     hasMultipleAdmins: adminsSnapshot.size > 1,
   };
 }
@@ -2719,6 +2911,10 @@ function getDeleteBlockReason(uid, userData, guardContext, adminUid) {
     if (hasContextMatch(guardContext.activeQueues, "studentId", uid)) {
       return "aktif zümre sırası";
     }
+
+    if (hasContextMatch(guardContext.activeAppointments, "studentId", uid)) {
+      return "aktif veya planlı zümre randevusu";
+    }
   }
 
   if (role === "teacher") {
@@ -2732,6 +2928,10 @@ function getDeleteBlockReason(uid, userData, guardContext, adminUid) {
 
     if (hasContextMatch(guardContext.activeStudySessions, "dutyTeacherId", uid)) {
       return "aktif etüt branş öğretmeni";
+    }
+
+    if (hasContextMatch(guardContext.activeAppointments, "teacherId", uid)) {
+      return "aktif veya planlı zümre randevusu";
     }
   }
 
@@ -2990,6 +3190,8 @@ exports.adminUpdateUser = onCall(
         uid,
         existingTeacherStatus: existingData.teacherStatus || "absent",
         existingWeeklyAvailability: existingData.weeklyAvailability || {},
+        existingIsInStudySession: existingData.isInStudySession === true,
+        existingActiveStudySessionId: existingData.activeStudySessionId || null,
       });
 
       applyRoleCleanup(updateData, payload.role);
@@ -4472,11 +4674,20 @@ exports.routeQueueRequest = onCall(
 
       const studentData = studentDoc.data() || {};
       const studentLevel = studentEducationLevel(studentData);
+      const now = new Date();
+      const cooldownUntil = timestampToDate(studentData.cooldownUntil);
+
+      if (cooldownUntil && cooldownUntil > now) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Sıranızı iptal ettikten sonra 2 dakika beklemelisiniz."
+        );
+      }
 
       assertQueueRuntimeOpen(
         scheduleDoc.data() || {},
         runtimeDoc.data() || {},
-        new Date(),
+        now,
         studentLevel
       );
 
@@ -4500,7 +4711,7 @@ exports.routeQueueRequest = onCall(
 
       const candidateTeachers = teachersSnapshot.docs.filter((doc) =>
         teacherMatchesStudentScope(doc.data(), studentData, subject) &&
-        isTeacherScheduledNow(doc.data(), new Date(), studentLevel)
+        isTeacherScheduledNow(doc.data(), now, studentLevel)
       );
 
       if (candidateTeachers.length === 0) {
@@ -4596,6 +4807,74 @@ exports.routeQueueRequest = onCall(
   }
 );
 
+exports.studentCancelQueue = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const student = await assertRoleCaller(request, "student");
+    const queueId = cleanText(request.data?.queueId);
+
+    if (!queueId) {
+      throw new HttpsError("invalid-argument", "Geçersiz sıra bilgisi.");
+    }
+
+    const queueRef = db.collection("queues").doc(queueId);
+    const cooldownUntil = new Date(Date.now() + 2 * 60 * 1000);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [queueDoc, studentDoc] = await Promise.all([
+        transaction.get(queueRef),
+        transaction.get(student.ref),
+      ]);
+
+      if (!queueDoc.exists) {
+        throw new HttpsError("not-found", "Sıra kaydı bulunamadı.");
+      }
+
+      const queueData = queueDoc.data() || {};
+      if (queueData.studentId !== student.uid) {
+        throw new HttpsError(
+          "permission-denied",
+          "Bu sırayı iptal etme yetkiniz yok."
+        );
+      }
+
+      if (queueData.status !== "waiting") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Öğretmen sorunuzla ilgilenmeye başladıktan sonra sıra iptal edilemez."
+        );
+      }
+
+      if (!studentDoc.exists || studentDoc.data()?.role !== "student") {
+        throw new HttpsError(
+          "permission-denied",
+          "Öğrenci kaydı bulunamadı."
+        );
+      }
+
+      transaction.update(queueRef, {
+        status: "cancelled",
+        cancelledAt: fieldValue.serverTimestamp(),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+      transaction.update(student.ref, {
+        cooldownUntil: timestampFromDate(cooldownUntil),
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+
+      return { cancelled: true };
+    });
+
+    return {
+      ok: true,
+      ...result,
+      cooldownUntilMs: cooldownUntil.getTime(),
+    };
+  }
+);
+
 exports.routeQueueTransfer = onCall(
   {
     region: REGION,
@@ -4615,19 +4894,26 @@ exports.routeQueueTransfer = onCall(
     const queueRef = db.collection("queues").doc(queueId);
 
     const result = await db.runTransaction(async (transaction) => {
-      const [queueDoc, activeQueuesSnapshot, teachersSnapshot] =
-        await Promise.all([
-          transaction.get(queueRef),
-          transaction.get(
-            db.collection("queues")
-              .where("status", "in", ["waiting", "in_progress"])
-          ),
-          transaction.get(
-            db.collection("users")
-              .where("role", "==", "teacher")
-              .where("teacherStatus", "==", "available")
-          ),
-        ]);
+      const [
+        queueDoc,
+        activeQueuesSnapshot,
+        teachersSnapshot,
+        scheduleDoc,
+        runtimeDoc,
+      ] = await Promise.all([
+        transaction.get(queueRef),
+        transaction.get(
+          db.collection("queues")
+            .where("status", "in", ["waiting", "in_progress"])
+        ),
+        transaction.get(
+          db.collection("users")
+            .where("role", "==", "teacher")
+            .where("teacherStatus", "==", "available")
+        ),
+        transaction.get(db.collection("settings").doc("zumreSchedule")),
+        transaction.get(db.collection("settings").doc("runtimeState")),
+      ]);
 
       if (!queueDoc.exists) {
         throw new HttpsError(
@@ -4646,6 +4932,13 @@ exports.routeQueueTransfer = onCall(
         );
       }
 
+      if (queueData.source === "appointment") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Başlamış planlı zümre normal sıra devriyle aktarılamaz."
+        );
+      }
+
       if (status !== "waiting" && status !== "in_progress") {
         throw new HttpsError(
           "failed-precondition",
@@ -4653,13 +4946,35 @@ exports.routeQueueTransfer = onCall(
         );
       }
 
+      const studentId = cleanText(queueData.studentId);
+      const studentDoc = studentId
+        ? await transaction.get(db.collection("users").doc(studentId))
+        : null;
+      const studentData = studentDoc?.data() || {};
       const subject = cleanText(queueData.subject);
       const questionCount = normalizeQuestionCount(queueData.questionCount);
-      const queueLevel = validEducationLevel(queueData.educationLevel);
+      const queueLevel = queueEducationLevel(queueData, studentData);
+      const now = new Date();
+
+      assertQueueRuntimeOpen(
+        scheduleDoc.data() || {},
+        runtimeDoc.data() || {},
+        now,
+        queueLevel
+      );
+
+      if (studentData.isInStudySession === true) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Öğrenci şu anda etütte görünüyor."
+        );
+      }
+
       const candidateTeachers = teachersSnapshot.docs.filter((doc) =>
         doc.id !== teacher.uid &&
         teacherHasSubject(doc.data(), subject) &&
-        teacherMatchesEducationScope(doc.data(), queueLevel, subject)
+        teacherMatchesEducationScope(doc.data(), queueLevel, subject) &&
+        isTeacherScheduledNow(doc.data(), now, queueLevel)
       );
 
       if (candidateTeachers.length === 0) {
@@ -4692,6 +5007,7 @@ exports.routeQueueTransfer = onCall(
       transaction.update(queueRef, {
         teacherId: selected.teacher.id,
         teacherName: selectedTeacherName,
+        educationLevel: queueLevel,
         status: "waiting",
         transferredAt: fieldValue.serverTimestamp(),
         transferredFromTeacherId: teacher.uid,
@@ -4730,6 +5046,115 @@ exports.routeQueueTransfer = onCall(
       teacherId: result.teacherId,
       teacherName: result.teacherName,
     };
+  }
+);
+
+exports.teacherAddManualQueue = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const studentId = cleanText(request.data?.studentId);
+    const subject = cleanText(request.data?.subject);
+
+    if (!studentId || !subject) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Öğrenci ve ders bilgisi zorunludur."
+      );
+    }
+
+    const queueRef = db.collection("queues").doc();
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [
+        teacherDoc,
+        studentDoc,
+        scheduleDoc,
+        runtimeDoc,
+        activeQueuesSnapshot,
+      ] = await Promise.all([
+        transaction.get(teacher.ref),
+        transaction.get(db.collection("users").doc(studentId)),
+        transaction.get(db.collection("settings").doc("zumreSchedule")),
+        transaction.get(db.collection("settings").doc("runtimeState")),
+        transaction.get(
+          db.collection("queues")
+            .where("status", "in", ["waiting", "in_progress"])
+        ),
+      ]);
+
+      if (!teacherDoc.exists || teacherDoc.data()?.role !== "teacher") {
+        throw new HttpsError(
+          "permission-denied",
+          "Öğretmen kaydı bulunamadı."
+        );
+      }
+      if (!studentDoc.exists || studentDoc.data()?.role !== "student") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Seçilen öğrenci bulunamadı."
+        );
+      }
+
+      const existingQueue = activeQueuesSnapshot.docs.find(
+        (doc) => doc.data().studentId === studentId
+      );
+      if (existingQueue) {
+        throw new HttpsError(
+          "already-exists",
+          "Bu öğrencinin zaten aktif zümre sırası var."
+        );
+      }
+
+      const teacherData = teacherDoc.data() || {};
+      const studentData = studentDoc.data() || {};
+      const educationLevel = studentEducationLevel(studentData);
+      const queueData = {
+        studentId,
+        teacherId: teacher.uid,
+        subject,
+        educationLevel,
+        status: "waiting",
+      };
+
+      const blockReason = queueStartBlockReason({
+        scheduleData: scheduleDoc.data() || {},
+        runtimeData: runtimeDoc.data() || {},
+        queueData,
+        teacherData,
+        studentData,
+        now: new Date(),
+      });
+      if (blockReason) {
+        throw new HttpsError("failed-precondition", blockReason);
+      }
+
+      transaction.set(queueRef, {
+        studentId,
+        studentName: publicDisplayName(studentData, "Öğrenci"),
+        teacherId: teacher.uid,
+        teacherName: publicDisplayName(teacherData, "Öğretmen"),
+        subject,
+        educationLevel,
+        status: "waiting",
+        isManual: true,
+        questionCount: 1,
+        estimatedMinutes: 4,
+        extraMinutes: 0,
+        createdAt: fieldValue.serverTimestamp(),
+        startedAt: null,
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+      transaction.update(teacher.ref, {
+        lastQueueRoutedAt: fieldValue.serverTimestamp(),
+      });
+
+      return { queueId: queueRef.id };
+    });
+
+    return { ok: true, ...result };
   }
 );
 
@@ -4815,6 +5240,35 @@ exports.teacherStartAppointment = onCall(
       const dueState = appointmentCanBecomeLive(appointmentData);
       if (!dueState.ok) {
         throw new HttpsError("failed-precondition", dueState.reason);
+      }
+
+      const [
+        scheduleDoc,
+        runtimeDoc,
+        teacherDoc,
+        studentDoc,
+      ] = await Promise.all([
+        transaction.get(db.collection("settings").doc("zumreSchedule")),
+        transaction.get(db.collection("settings").doc("runtimeState")),
+        transaction.get(teacher.ref),
+        transaction.get(
+          db.collection("users").doc(cleanText(appointmentData.studentId))
+        ),
+      ]);
+
+      const blockReason = queueStartBlockReason({
+        scheduleData: scheduleDoc.data() || {},
+        runtimeData: runtimeDoc.data() || {},
+        queueData: {
+          subject: appointmentData.subject,
+          educationLevel: appointmentData.educationLevel,
+        },
+        teacherData: teacherDoc.data() || {},
+        studentData: studentDoc.data() || {},
+        now: new Date(),
+      });
+      if (blockReason) {
+        throw new HttpsError("failed-precondition", blockReason);
       }
 
       if (!teacherActiveSnapshot.empty) {
@@ -5327,7 +5781,13 @@ exports.teacherStartQueue = onCall(
     const queueRef = db.collection("queues").doc(queueId);
 
     const result = await db.runTransaction(async (transaction) => {
-      const [queueDoc, activeSnapshot] = await Promise.all([
+      const [
+        queueDoc,
+        activeSnapshot,
+        scheduleDoc,
+        runtimeDoc,
+        teacherDoc,
+      ] = await Promise.all([
         transaction.get(queueRef),
         transaction.get(
           db.collection("queues")
@@ -5335,6 +5795,9 @@ exports.teacherStartQueue = onCall(
             .where("status", "==", "in_progress")
             .limit(1)
         ),
+        transaction.get(db.collection("settings").doc("zumreSchedule")),
+        transaction.get(db.collection("settings").doc("runtimeState")),
+        transaction.get(teacher.ref),
       ]);
 
       if (!queueDoc.exists) {
@@ -5360,9 +5823,27 @@ exports.teacherStartQueue = onCall(
         );
       }
 
+      const studentDoc = await transaction.get(
+        db.collection("users").doc(cleanText(queueData.studentId))
+      );
+      const blockReason = queueStartBlockReason({
+        scheduleData: scheduleDoc.data() || {},
+        runtimeData: runtimeDoc.data() || {},
+        queueData,
+        teacherData: teacherDoc.data() || {},
+        studentData: studentDoc.data() || {},
+        now: new Date(),
+      });
+      if (blockReason) {
+        throw new HttpsError("failed-precondition", blockReason);
+      }
+
       let completedCurrent = false;
+      let currentAppointmentRef = null;
+      let activeDoc = null;
+
       if (!activeSnapshot.empty) {
-        const activeDoc = activeSnapshot.docs[0];
+        activeDoc = activeSnapshot.docs[0];
         if (activeDoc.id === queueId) {
           return { started: false, completedCurrent: false };
         }
@@ -5374,16 +5855,35 @@ exports.teacherStartQueue = onCall(
           );
         }
 
+        currentAppointmentRef = await linkedStartedAppointmentRef(
+          transaction,
+          activeDoc,
+          teacher.uid
+        );
+      }
+
+      if (activeDoc) {
         transaction.update(activeDoc.ref, {
           status: "completed",
           completedAt: fieldValue.serverTimestamp(),
           updatedAt: fieldValue.serverTimestamp(),
         });
+        if (currentAppointmentRef) {
+          transaction.update(currentAppointmentRef, {
+            status: "completed",
+            completedAt: fieldValue.serverTimestamp(),
+            updatedAt: fieldValue.serverTimestamp(),
+          });
+        }
         completedCurrent = true;
       }
 
       transaction.update(queueRef, {
         status: "in_progress",
+        educationLevel: queueEducationLevel(
+          queueData,
+          studentDoc.data() || {}
+        ),
         startedAt: fieldValue.serverTimestamp(),
         updatedAt: fieldValue.serverTimestamp(),
       });
@@ -5413,7 +5913,14 @@ exports.teacherCompleteQueue = onCall(
     const queueRef = db.collection("queues").doc(queueId);
 
     const result = await db.runTransaction(async (transaction) => {
-      const [queueDoc, activeSnapshot, waitingSnapshot] = await Promise.all([
+      const [
+        queueDoc,
+        activeSnapshot,
+        waitingSnapshot,
+        scheduleDoc,
+        runtimeDoc,
+        teacherDoc,
+      ] = await Promise.all([
         transaction.get(queueRef),
         transaction.get(
           db.collection("queues")
@@ -5425,6 +5932,9 @@ exports.teacherCompleteQueue = onCall(
             .where("teacherId", "==", teacher.uid)
             .where("status", "==", "waiting")
         ),
+        transaction.get(db.collection("settings").doc("zumreSchedule")),
+        transaction.get(db.collection("settings").doc("runtimeState")),
+        transaction.get(teacher.ref),
       ]);
 
       if (!queueDoc.exists) {
@@ -5449,33 +5959,28 @@ exports.teacherCompleteQueue = onCall(
         waitingSnapshot.docs,
         queueId
       );
-      let appointmentRef = null;
-      let appointmentDoc = null;
 
-      if (queueData.source === "appointment" && queueData.appointmentId) {
-        appointmentRef = db.collection("appointments").doc(
-          cleanText(queueData.appointmentId)
+      const appointmentRef = await linkedStartedAppointmentRef(
+        transaction,
+        queueDoc,
+        teacher.uid
+      );
+
+      let canStartNext = false;
+      let nextStudentDoc = null;
+      if (otherActiveQueues.length === 0 && nextQueue) {
+        const nextData = nextQueue.data() || {};
+        nextStudentDoc = await transaction.get(
+          db.collection("users").doc(cleanText(nextData.studentId))
         );
-        appointmentDoc = await transaction.get(appointmentRef);
-
-        if (!appointmentDoc.exists) {
-          throw new HttpsError(
-            "failed-precondition",
-            "Bağlı planlı zümre kaydı bulunamadı."
-          );
-        }
-
-        const appointmentData = appointmentDoc.data() || {};
-        if (
-          appointmentData.teacherId !== teacher.uid ||
-          appointmentData.linkedQueueId !== queueId ||
-          appointmentData.status !== "started"
-        ) {
-          throw new HttpsError(
-            "failed-precondition",
-            "Bağlı planlı zümre durumu geçerli değil."
-          );
-        }
+        canStartNext = !queueStartBlockReason({
+          scheduleData: scheduleDoc.data() || {},
+          runtimeData: runtimeDoc.data() || {},
+          queueData: nextData,
+          teacherData: teacherDoc.data() || {},
+          studentData: nextStudentDoc.data() || {},
+          now: new Date(),
+        });
       }
 
       transaction.update(queueRef, {
@@ -5492,16 +5997,16 @@ exports.teacherCompleteQueue = onCall(
         });
       }
 
-      if (otherActiveQueues.length > 0) {
-        return { completed: true, startedNextQueueId: null };
-      }
-
-      if (!nextQueue) {
+      if (!nextQueue || !canStartNext) {
         return { completed: true, startedNextQueueId: null };
       }
 
       transaction.update(nextQueue.ref, {
         status: "in_progress",
+        educationLevel: queueEducationLevel(
+          nextQueue.data() || {},
+          nextStudentDoc?.data() || {}
+        ),
         startedAt: fieldValue.serverTimestamp(),
         updatedAt: fieldValue.serverTimestamp(),
       });
@@ -5584,7 +6089,14 @@ exports.teacherCancelQueue = onCall(
     const queueRef = db.collection("queues").doc(queueId);
 
     const result = await db.runTransaction(async (transaction) => {
-      const [queueDoc, activeSnapshot, waitingSnapshot] = await Promise.all([
+      const [
+        queueDoc,
+        activeSnapshot,
+        waitingSnapshot,
+        scheduleDoc,
+        runtimeDoc,
+        teacherDoc,
+      ] = await Promise.all([
         transaction.get(queueRef),
         transaction.get(
           db.collection("queues")
@@ -5596,6 +6108,9 @@ exports.teacherCancelQueue = onCall(
             .where("teacherId", "==", teacher.uid)
             .where("status", "==", "waiting")
         ),
+        transaction.get(db.collection("settings").doc("zumreSchedule")),
+        transaction.get(db.collection("settings").doc("runtimeState")),
+        transaction.get(teacher.ref),
       ]);
 
       if (!queueDoc.exists) {
@@ -5610,9 +6125,44 @@ exports.teacherCancelQueue = onCall(
         );
       }
 
+      if (queueData.source === "appointment") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Başlamış planlı zümre iptal edilemez; işlemi tamamlayın."
+        );
+      }
+
       const status = queueData.status;
       if (status !== "waiting" && status !== "in_progress") {
         return { cancelled: false, startedNextQueueId: null };
+      }
+
+      let nextQueue = null;
+      let nextStudentDoc = null;
+      let canStartNext = false;
+
+      if (status === "in_progress") {
+        const otherActiveQueues = activeSnapshot.docs
+          .filter((doc) => doc.id !== queueId);
+        nextQueue = selectNextWaitingQueueDoc(
+          waitingSnapshot.docs,
+          queueId
+        );
+
+        if (otherActiveQueues.length === 0 && nextQueue) {
+          const nextData = nextQueue.data() || {};
+          nextStudentDoc = await transaction.get(
+            db.collection("users").doc(cleanText(nextData.studentId))
+          );
+          canStartNext = !queueStartBlockReason({
+            scheduleData: scheduleDoc.data() || {},
+            runtimeData: runtimeDoc.data() || {},
+            queueData: nextData,
+            teacherData: teacherDoc.data() || {},
+            studentData: nextStudentDoc.data() || {},
+            now: new Date(),
+          });
+        }
       }
 
       transaction.update(queueRef, {
@@ -5621,27 +6171,16 @@ exports.teacherCancelQueue = onCall(
         updatedAt: fieldValue.serverTimestamp(),
       });
 
-      if (status !== "in_progress") {
-        return { cancelled: true, startedNextQueueId: null };
-      }
-
-      const otherActiveQueues = activeSnapshot.docs
-        .filter((doc) => doc.id !== queueId);
-      const nextQueue = selectNextWaitingQueueDoc(
-        waitingSnapshot.docs,
-        queueId
-      );
-
-      if (otherActiveQueues.length > 0) {
-        return { cancelled: true, startedNextQueueId: null };
-      }
-
-      if (!nextQueue) {
+      if (!nextQueue || !canStartNext) {
         return { cancelled: true, startedNextQueueId: null };
       }
 
       transaction.update(nextQueue.ref, {
         status: "in_progress",
+        educationLevel: queueEducationLevel(
+          nextQueue.data() || {},
+          nextStudentDoc?.data() || {}
+        ),
         startedAt: fieldValue.serverTimestamp(),
         updatedAt: fieldValue.serverTimestamp(),
       });
