@@ -136,6 +136,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return _subjectOptions;
   }
 
+  // Zümre kapsamı ders kartlarıyla aynı kaynaktan belirlenir.
+  // Ortaokul/LGS kartları gösteriliyorsa LGS; geri kalan tüm öğrenciler YKS.
+  String get _scheduleEducationLevel {
+    final subjects = _visibleSubjectOptions;
+    final usesLgsCards =
+        identical(subjects, _lgsSubjects) || identical(subjects, _middleSchoolSubjects);
+    return usesLgsCards ? 'LGS' : 'YKS';
+  }
+
   Map<String, String>? _guidanceAppointment;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
       _guidanceAppointmentSubscription;
@@ -1023,9 +1032,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       if (!doc.exists || !mounted) return;
 
       final data = doc.data();
-      final previousEducationLevel = _studentEducationLevel;
-      final nextEducationLevel =
-          inferredStudentEducationLevel(Map<String, dynamic>.from(data ?? {}));
+      final previousEducationLevel = _scheduleEducationLevel;
 
       setState(() {
         final fullName = '${data?['fullName'] ?? ''}'.trim();
@@ -1034,7 +1041,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         _studentName = fullName.isNotEmpty ? fullName : '$name $surname'.trim();
         if (_studentName!.isEmpty) _studentName = data?['email'] ?? 'Öğrenci';
         _studentClassName = data?['className']?.toString();
-        _studentEducationLevel = nextEducationLevel;
+        _studentEducationLevel = _scheduleEducationLevel;
         _isInStudySession = data?['isInStudySession'] == true;
 
         final visibleSubjects =
@@ -1047,7 +1054,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         }
       });
 
-      if (previousEducationLevel != nextEducationLevel) {
+      if (previousEducationLevel != _scheduleEducationLevel) {
         unawaited(_checkLocalZumreAvailability());
       }
 
