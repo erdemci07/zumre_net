@@ -6848,6 +6848,108 @@ exports.guidanceAssignStudents = onCall({ region: REGION }, async (request) => {
   };
 });
 
+exports.guidanceUnassignStudent = onCall({ region: REGION }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
+  }
+
+  const counselorId = request.auth.uid;
+  const counselor = await db.collection("users").doc(counselorId).get();
+  if (!counselor.exists || counselor.data()?.role !== "guidance") {
+    throw new HttpsError("permission-denied", "Bu işlem yalnız rehberlikçiler içindir.");
+  }
+
+  const studentId = cleanText(request.data?.studentId);
+  if (!studentId) {
+    throw new HttpsError("invalid-argument", "Öğrenci seçimi zorunludur.");
+  }
+
+  const studentRef = db.collection("users").doc(studentId);
+  const taskRef = db.collection("guidanceTasks").doc(`${counselorId}_${studentId}`);
+  const taskDeactivated = await db.runTransaction(async (transaction) => {
+    const [student, task] = await Promise.all([
+      transaction.get(studentRef),
+      transaction.get(taskRef),
+    ]);
+
+    if (!student.exists || student.data()?.role !== "student") {
+      throw new HttpsError("not-found", "Öğrenci kaydı bulunamadı.");
+    }
+    if (cleanText(student.data()?.guidanceCounselorId) !== counselorId) {
+      throw new HttpsError("failed-precondition", "Bu öğrenci size atanmış değil.");
+    }
+
+    const shouldDeactivateTask = task.exists && task.data()?.active !== false;
+    transaction.update(studentRef, {
+      guidanceCounselorId: fieldValue.delete(),
+      updatedAt: fieldValue.serverTimestamp(),
+    });
+    if (shouldDeactivateTask) {
+      transaction.update(taskRef, {
+        active: false,
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+    }
+    return shouldDeactivateTask;
+  });
+
+  return { ok: true, taskDeactivated };
+});
+
+exports.guidanceChangeAssignedStudent = onCall({ region: REGION }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
+  }
+
+  const counselorId = request.auth.uid;
+  const counselor = await db.collection("users").doc(counselorId).get();
+  if (!counselor.exists || counselor.data()?.role !== "guidance") {
+    throw new HttpsError("permission-denied", "Bu işlem yalnız rehberlikçiler içindir.");
+  }
+
+  const studentId = cleanText(request.data?.studentId);
+  const nextCounselorId = cleanText(request.data?.counselorId);
+  if (!studentId || !nextCounselorId || nextCounselorId === counselorId) {
+    throw new HttpsError("invalid-argument", "Öğrenci ve yeni rehberlikçi seçimi zorunludur.");
+  }
+
+  const nextCounselor = await db.collection("users").doc(nextCounselorId).get();
+  if (!nextCounselor.exists || nextCounselor.data()?.role !== "guidance") {
+    throw new HttpsError("failed-precondition", "Seçilen kullanıcı rehberlikçi değil.");
+  }
+
+  const studentRef = db.collection("users").doc(studentId);
+  const taskRef = db.collection("guidanceTasks").doc(`${counselorId}_${studentId}`);
+  const taskDeactivated = await db.runTransaction(async (transaction) => {
+    const [student, task] = await Promise.all([
+      transaction.get(studentRef),
+      transaction.get(taskRef),
+    ]);
+
+    if (!student.exists || student.data()?.role !== "student") {
+      throw new HttpsError("not-found", "Öğrenci kaydı bulunamadı.");
+    }
+    if (cleanText(student.data()?.guidanceCounselorId) !== counselorId) {
+      throw new HttpsError("failed-precondition", "Bu öğrenci size atanmış değil.");
+    }
+
+    const shouldDeactivateTask = task.exists && task.data()?.active !== false;
+    transaction.update(studentRef, {
+      guidanceCounselorId: nextCounselorId,
+      updatedAt: fieldValue.serverTimestamp(),
+    });
+    if (shouldDeactivateTask) {
+      transaction.update(taskRef, {
+        active: false,
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+    }
+    return shouldDeactivateTask;
+  });
+
+  return { ok: true, taskDeactivated };
+});
+
 exports.publicGuidanceVerifyStudent = onCall({ region: REGION }, async (request) => {
   const username = publicGuidance.normalizeUsername(request.data?.username);
   const phone = publicGuidance.normalizePhone(request.data?.guardianPhone);

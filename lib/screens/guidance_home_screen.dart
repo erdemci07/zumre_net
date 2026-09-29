@@ -12,6 +12,7 @@ import 'package:printing/printing.dart';
 import '../utils/class_name_display.dart';
 import '../utils/guidance_presentation.dart';
 import '../utils/guidance_student_groups.dart';
+import '../utils/user_management_filters.dart';
 
 const _guidanceTerminalStatuses = {'completed', 'cancelled', 'no_show'};
 
@@ -92,6 +93,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
       _studentsSubscription;
   Map<String, Map<String, dynamic>> _studentsById = const {};
+  final Set<String> _updatingAssignmentStudentIds = {};
   static const _reportsBaseUrl =
       'https://zumrenet-reports-542741706921.europe-west1.run.app';
 
@@ -396,34 +398,42 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
   }
 
   Future<void> _showStudentAssignmentDialog() async {
-    final snapshot = await db
-        .collection('users')
-        .where('role', isEqualTo: 'student')
-        .get();
+    final snapshot =
+        await db.collection('users').where('role', isEqualTo: 'student').get();
+    final counselorsSnapshot =
+        await db.collection('users').where('role', isEqualTo: 'guidance').get();
     if (!mounted) return;
 
-    final available = snapshot.docs
-        .where((doc) =>
-            '${doc.data()['guidanceCounselorId'] ?? ''}'.trim().isEmpty)
-        .toList();
-    String query = '';
+    final students = snapshot.docs;
+    final studentsData = students.map((doc) => doc.data()).toList();
+    final counselorNamesById = {
+      for (final doc in counselorsSnapshot.docs)
+        doc.id: guidanceStudentName(doc.data()),
+    };
+    final currentCounselorId = auth.currentUser?.uid;
+    var filters = const UserManagementFilters(role: 'student');
     final selectedIds = <String>{};
     bool submitting = false;
+
+    void applyFilters(
+      StateSetter setDialogState,
+      UserManagementFilters nextFilters,
+    ) {
+      setDialogState(() {
+        final options =
+            cascadingStudentFilterOptions(studentsData, nextFilters);
+        filters = clearInvalidStudentFilterSelections(nextFilters, options);
+      });
+    }
 
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
-          final filtered = available.where((doc) {
-            final data = doc.data();
-            final name = guidanceStudentName(data).toLowerCase();
-            final classLabel = formatStudentClassDisplay(
-              className: data['className'],
-              branch: data['branch'],
-              department: data['department'],
-            ).toLowerCase();
-            final q = query.trim().toLowerCase();
-            return q.isEmpty || name.contains(q) || classLabel.contains(q);
+          final filterOptions =
+              cascadingStudentFilterOptions(studentsData, filters);
+          final filtered = students.where((doc) {
+            return userMatchesManagementFilters(doc.data(), filters);
           }).toList()
             ..sort((a, b) {
               final ac = formatStudentClassDisplay(
@@ -442,6 +452,45 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   : guidanceStudentName(a.data())
                       .compareTo(guidanceStudentName(b.data()));
             });
+
+          Widget filterDropdown({
+            required String label,
+            required List<String> options,
+            required String? value,
+            required ValueChanged<String?> onChanged,
+          }) =>
+              DropdownButtonFormField<String>(
+                initialValue: value ?? '',
+                isExpanded: true,
+                dropdownColor: const Color(0xFF64203C),
+                iconEnabledColor: Colors.white70,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+                decoration: InputDecoration(
+                  labelText: label,
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white.withValues(alpha: .08),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                items: [
+                  const DropdownMenuItem(
+                    value: '',
+                    child: Text('Tümü', overflow: TextOverflow.ellipsis),
+                  ),
+                  ...options.map(
+                    (option) => DropdownMenuItem(
+                      value: option,
+                      child: Text(option, overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+                ],
+                onChanged: submitting ? null : onChanged,
+              );
 
           return Dialog(
             backgroundColor: Colors.transparent,
@@ -491,8 +540,16 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   ]),
                   const SizedBox(height: 12),
                   TextField(
-                    onChanged: (value) =>
-                        setDialogState(() => query = value),
+                    onChanged: (value) => applyFilters(
+                      setDialogState,
+                      UserManagementFilters(
+                        role: 'student',
+                        search: value,
+                        className: filters.className,
+                        branch: filters.branch,
+                        department: filters.department,
+                      ),
+                    ),
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       hintText: 'Öğrenci veya sınıf ara',
@@ -506,6 +563,78 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                         borderSide: BorderSide.none,
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      const spacing = 8.0;
+                      final columns = constraints.maxWidth >= 450 ? 3 : 2;
+                      final width =
+                          (constraints.maxWidth - spacing * (columns - 1)) /
+                              columns;
+                      return Wrap(
+                        spacing: spacing,
+                        runSpacing: spacing,
+                        children: [
+                          SizedBox(
+                            width: width,
+                            child: filterDropdown(
+                              label: 'Sınıf',
+                              options: filterOptions.classNames,
+                              value: filters.className,
+                              onChanged: (value) => applyFilters(
+                                setDialogState,
+                                UserManagementFilters(
+                                  role: 'student',
+                                  search: filters.search,
+                                  className:
+                                      value?.isEmpty == true ? null : value,
+                                  branch: filters.branch,
+                                  department: filters.department,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: width,
+                            child: filterDropdown(
+                              label: 'Şube',
+                              options: filterOptions.branches,
+                              value: filters.branch,
+                              onChanged: (value) => applyFilters(
+                                setDialogState,
+                                UserManagementFilters(
+                                  role: 'student',
+                                  search: filters.search,
+                                  className: filters.className,
+                                  branch: value?.isEmpty == true ? null : value,
+                                  department: filters.department,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: width,
+                            child: filterDropdown(
+                              label: 'Bölüm',
+                              options: filterOptions.departments,
+                              value: filters.department,
+                              onChanged: (value) => applyFilters(
+                                setDialogState,
+                                UserManagementFilters(
+                                  role: 'student',
+                                  search: filters.search,
+                                  className: filters.className,
+                                  branch: filters.branch,
+                                  department:
+                                      value?.isEmpty == true ? null : value,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 10),
                   Expanded(
@@ -522,13 +651,21 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                               final doc = filtered[index];
                               final data = doc.data();
                               final selected = selectedIds.contains(doc.id);
+                              final assignedCounselorId =
+                                  '${data['guidanceCounselorId'] ?? ''}'.trim();
+                              final isAssigned = assignedCounselorId.isNotEmpty;
+                              final assignedToMe = isAssigned &&
+                                  assignedCounselorId == currentCounselorId;
+                              final assignedName =
+                                  counselorNamesById[assignedCounselorId] ??
+                                      'Başka rehberlikçi';
                               final classLabel = formatStudentClassDisplay(
                                 className: data['className'],
                                 branch: data['branch'],
                                 department: data['department'],
                               );
                               return CheckboxListTile(
-                                value: selected,
+                                value: assignedToMe || selected,
                                 activeColor: const Color(0xFFFFB1C8),
                                 checkColor: const Color(0xFF4A1830),
                                 controlAffinity:
@@ -536,12 +673,30 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                 title: Text(guidanceStudentName(data),
                                     style:
                                         const TextStyle(color: Colors.white)),
-                                subtitle: classLabel.isEmpty
-                                    ? null
-                                    : Text(classLabel,
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (classLabel.isNotEmpty)
+                                      Text(
+                                        classLabel,
                                         style: const TextStyle(
-                                            color: Colors.white60)),
-                                onChanged: submitting
+                                            color: Colors.white60),
+                                      ),
+                                    if (isAssigned)
+                                      Text(
+                                        assignedToMe
+                                            ? 'Zaten size atanmış'
+                                            : 'Atanmış: $assignedName',
+                                        style: TextStyle(
+                                          color: assignedToMe
+                                              ? const Color(0xFFFFD7E4)
+                                              : Colors.white54,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                onChanged: submitting || isAssigned
                                     ? null
                                     : (value) => setDialogState(() {
                                           if (value == true) {
@@ -614,6 +769,192 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
         },
       ),
     );
+  }
+
+  Future<void> _removeAssignedStudent(
+    String studentId,
+    Map<String, dynamic> student,
+  ) async {
+    if (studentId.isEmpty ||
+        _updatingAssignmentStudentIds.contains(studentId)) {
+      return;
+    }
+
+    final studentName = guidanceStudentName(student);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF4A102B),
+        title: const Text(
+          'Öğrenci ataması kaldırılsın mı?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          '$studentName öğrencisi listenizden çıkarılacak ve aktif haftalık takip görevi durdurulacak. Öğrenci daha sonra yönetici tarafından başka bir rehberlikçiye atanabilir.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.person_remove_alt_1_rounded),
+            label: const Text('Atamayı Kaldır'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _updatingAssignmentStudentIds.add(studentId));
+    try {
+      await functions.httpsCallable('guidanceUnassignStudent').call({
+        'studentId': studentId,
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('$studentName öğrencisinin ataması kaldırıldı.')),
+      );
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.message ?? 'Öğrenci ataması kaldırılamadı.'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Öğrenci ataması kaldırılamadı.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _updatingAssignmentStudentIds.remove(studentId));
+      }
+    }
+  }
+
+  Future<void> _changeAssignedStudent(
+    String studentId,
+    Map<String, dynamic> student,
+  ) async {
+    if (studentId.isEmpty ||
+        _updatingAssignmentStudentIds.contains(studentId)) {
+      return;
+    }
+
+    final counselorsSnapshot =
+        await db.collection('users').where('role', isEqualTo: 'guidance').get();
+    if (!mounted) return;
+
+    final currentCounselorId = auth.currentUser?.uid;
+    final counselors = counselorsSnapshot.docs
+        .where((doc) => doc.id != currentCounselorId)
+        .toList();
+    if (counselors.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Aktarılabilecek başka rehberlikçi bulunamadı.'),
+      ));
+      return;
+    }
+
+    String? selectedCounselorId = counselors.first.id;
+    final nextCounselorId = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF4A102B),
+          title: const Text(
+            'Öğrencinin rehberlikçisini değiştir',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${guidanceStudentName(student)} öğrencisi seçilen rehberlikçiye devredilecek. Aktif haftalık takip görevi durdurulur.',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                initialValue: selectedCounselorId,
+                isExpanded: true,
+                dropdownColor: const Color(0xFF64203C),
+                style: const TextStyle(color: Colors.white),
+                decoration: _guidanceDialogFieldDecoration('Yeni rehberlikçi'),
+                items: counselors
+                    .map((doc) => DropdownMenuItem(
+                          value: doc.id,
+                          child: Text(
+                            guidanceStudentName(doc.data()),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ))
+                    .toList(),
+                onChanged: (value) => setDialogState(
+                  () => selectedCounselorId = value,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Vazgeç'),
+            ),
+            FilledButton.icon(
+              onPressed: selectedCounselorId == null
+                  ? null
+                  : () => Navigator.pop(dialogContext, selectedCounselorId),
+              icon: const Icon(Icons.swap_horiz_rounded),
+              label: const Text('Öğrenciyi Devret'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFFFB1C8),
+                foregroundColor: const Color(0xFF4A1830),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (nextCounselorId == null || !mounted) return;
+
+    final studentName = guidanceStudentName(student);
+    setState(() => _updatingAssignmentStudentIds.add(studentId));
+    try {
+      await functions.httpsCallable('guidanceChangeAssignedStudent').call({
+        'studentId': studentId,
+        'counselorId': nextCounselorId,
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$studentName yeni rehberlikçiye devredildi.')),
+      );
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.message ?? 'Öğrenci devredilemedi.'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Öğrenci devredilemedi.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _updatingAssignmentStudentIds.remove(studentId));
+      }
+    }
   }
 
   Future<void> addStudent() async {
@@ -1068,8 +1409,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                   className: x['className'],
                                   branch: x['branch'],
                                 );
-                                final existingTask =
-                                    activeTasksByStudent[d.id];
+                                final existingTask = activeTasksByStudent[d.id];
                                 final hasTask = existingTask != null;
                                 final selected = studentId == d.id;
                                 final existingTitle =
@@ -1142,19 +1482,17 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(13),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFB1C8)
-                              .withValues(alpha: .10),
+                          color: Colors.white.withValues(alpha: .08),
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: const Color(0xFFFFB1C8)
-                                .withValues(alpha: .30),
+                            color: Colors.white12,
                           ),
                         ),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Icon(Icons.info_outline_rounded,
-                                color: Color(0xFFFFB1C8)),
+                                color: Colors.white70),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
@@ -1241,10 +1579,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                       'title': title,
                                       'schedule': day,
                                       'active': true,
-                                      'createdAt':
-                                          FieldValue.serverTimestamp(),
-                                      'updatedAt':
-                                          FieldValue.serverTimestamp(),
+                                      'createdAt': FieldValue.serverTimestamp(),
+                                      'updatedAt': FieldValue.serverTimestamp(),
                                     });
                                   });
                                   if (ctx.mounted) Navigator.pop(ctx);
@@ -1925,8 +2261,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                     collapsedIconColor: Colors.white60,
                     title: Text(group.label,
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800)),
+                            color: Colors.white, fontWeight: FontWeight.w800)),
                     subtitle: Text('${group.students.length} öğrenci',
                         style: const TextStyle(color: Colors.white60)),
                     children: group.students.map((student) {
@@ -1950,8 +2285,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                         ),
                         leading: CircleAvatar(
                           backgroundColor: hasTask
-                              ? const Color(0xFFFFB1C8)
-                                  .withValues(alpha: .18)
+                              ? const Color(0xFFFFB1C8).withValues(alpha: .18)
                               : Colors.white10,
                           child: Icon(
                             hasTask
@@ -1975,24 +2309,81 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                             fontSize: 12,
                           ),
                         ),
-                        trailing: IconButton(
-                          tooltip: hasTask
-                              ? 'Aktif haftalık takip mevcut'
-                              : 'Haftalık Takip Ver',
-                          icon: Icon(
-                            hasTask
-                                ? Icons.check_circle_rounded
-                                : Icons.playlist_add_check_rounded,
-                            color: hasTask
-                                ? Colors.white38
-                                : const Color(0xFFFFB1C8),
-                          ),
-                          onPressed: studentId.isEmpty || hasTask
-                              ? null
-                              : () => addWeeklyTask(
-                                    initialStudentId: studentId,
-                                    initialStudent: student,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: hasTask
+                                  ? 'Aktif haftalık takip mevcut'
+                                  : 'Haftalık Takip Ver',
+                              icon: Icon(
+                                hasTask
+                                    ? Icons.check_circle_rounded
+                                    : Icons.playlist_add_check_rounded,
+                                color: hasTask
+                                    ? Colors.white38
+                                    : const Color(0xFFFFB1C8),
+                              ),
+                              onPressed: studentId.isEmpty ||
+                                      hasTask ||
+                                      _updatingAssignmentStudentIds
+                                          .contains(studentId)
+                                  ? null
+                                  : () => addWeeklyTask(
+                                        initialStudentId: studentId,
+                                        initialStudent: student,
+                                      ),
+                            ),
+                            PopupMenuButton<String>(
+                              tooltip: 'Öğrenci atama işlemleri',
+                              enabled: studentId.isNotEmpty &&
+                                  !_updatingAssignmentStudentIds
+                                      .contains(studentId),
+                              onSelected: (action) {
+                                if (action == 'change') {
+                                  _changeAssignedStudent(studentId, student);
+                                } else {
+                                  _removeAssignedStudent(studentId, student);
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'change',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.swap_horiz_rounded),
+                                      SizedBox(width: 10),
+                                      Text('Atamayı Değiştir'),
+                                    ],
                                   ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'remove',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.person_remove_alt_1_rounded),
+                                      SizedBox(width: 10),
+                                      Text('Atamayı Kaldır'),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              icon: _updatingAssignmentStudentIds
+                                      .contains(studentId)
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white70,
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.more_vert_rounded,
+                                      color: Colors.white70,
+                                    ),
+                            ),
+                          ],
                         ),
                       );
                     }).toList(),
@@ -2084,8 +2475,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(dialogContext),
-                    icon: const Icon(Icons.close_rounded,
-                        color: Colors.white70),
+                    icon:
+                        const Icon(Icons.close_rounded, color: Colors.white70),
                   ),
                 ]),
                 if (guardian.isNotEmpty) ...[
@@ -2156,8 +2547,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                               foregroundColor: hasTask
                                   ? Colors.white38
                                   : const Color(0xFF4A102B),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 15),
+                              padding: const EdgeInsets.symmetric(vertical: 15),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(17),
                               ),
@@ -2220,8 +2610,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                  style:
-                      const TextStyle(color: Colors.white54, fontSize: 11)),
+                  style: const TextStyle(color: Colors.white54, fontSize: 11)),
               const SizedBox(height: 2),
               Text(value,
                   style: const TextStyle(
@@ -2450,8 +2839,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                         side: const BorderSide(
                                             color: Colors.white54)),
                                     onPressed: () => _showOwnAvailabilityDialog(
-                                      userSnap.data?.data() ?? const {},
-                                    ),
+                                          userSnap.data?.data() ?? const {},
+                                        ),
                                     icon: const Icon(
                                         Icons.event_available_rounded),
                                     label: const Text('Çalışma Programı')),

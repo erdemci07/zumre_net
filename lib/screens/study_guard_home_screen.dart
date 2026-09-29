@@ -21,7 +21,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
   String? _staffName;
   Set<String> _staffEducationLevels = <String>{};
-  String? _selectedDutyTeacherId;
   String? _selectedDutyTeacherName;
   String _activeStudySlotText = 'Etüt saati';
 
@@ -89,7 +88,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
       _staffName =
           data['fullName'] ?? data['name'] ?? data['email'] ?? 'Etüt Görevlisi';
       _staffEducationLevels = staffLevels;
-      _selectedDutyTeacherId = data['dutyTeacherId'] as String?;
       _selectedDutyTeacherName = data['dutyTeacherName'] as String?;
     });
   }
@@ -105,33 +103,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     return hour * 60 + minute;
   }
 
-  List<String> _teacherSubjectsFromData(Map<String, dynamic> data) {
-    final subjects = <String>[];
-
-    void addSubject(dynamic value) {
-      final subject = value?.toString().trim() ?? '';
-      if (subject.isNotEmpty && !subjects.contains(subject)) {
-        subjects.add(subject);
-      }
-    }
-
-    final rawSubjects = data['subjects'];
-
-    if (rawSubjects is List) {
-      for (final item in rawSubjects) {
-        addSubject(item);
-      }
-    } else if (rawSubjects is String && rawSubjects.trim().isNotEmpty) {
-      for (final item in rawSubjects.split(RegExp(r'[,;/|]'))) {
-        addSubject(item);
-      }
-    }
-
-    addSubject(data['branch']);
-    addSubject(data['subject']);
-
-    return subjects;
-  }
 
   String _dayKey(DateTime date) {
     switch (date.weekday) {
@@ -538,7 +509,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
       setState(() {
         _activeSessionId = doc.id;
-        _selectedDutyTeacherId = data['dutyTeacherId']?.toString();
         _selectedDutyTeacherName = data['dutyTeacherName']?.toString();
       });
 
@@ -619,7 +589,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
         if (mounted && sessionId == _activeSessionId) {
           setState(() {
             _activeSessionId = null;
-            _selectedDutyTeacherId = null;
             _selectedDutyTeacherName = null;
           });
         }
@@ -691,7 +660,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
       setState(() {
         _activeSessionId = null;
-        _selectedDutyTeacherId = null;
         _selectedDutyTeacherName = null;
       });
     } catch (e) {
@@ -1445,102 +1413,19 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     );
   }
 
-  Future<void> _saveDutyTeacher({
-    required String? teacherId,
-    required String? teacherName,
-  }) async {
-    if (_activeSessionId == null) return;
-
-    try {
-      final sessionRef =
-          _firestore.collection('studySessions').doc(_activeSessionId);
-
-      final batch = _firestore.batch();
-
-      if (_selectedDutyTeacherId != null &&
-          _selectedDutyTeacherId != teacherId) {
-        final sessionDoc = await sessionRef.get();
-        final sessionData = sessionDoc.data() ?? {};
-        final previousStatus =
-            sessionData['dutyTeacherPreviousStatus'] ?? 'available';
-        final previousTeacherDoc = await _firestore
-            .collection('users')
-            .doc(_selectedDutyTeacherId)
-            .get();
-        final previousTeacherData = previousTeacherDoc.data();
-
-        batch.update(
-          _firestore.collection('users').doc(_selectedDutyTeacherId),
-          {
-            'teacherStatus': previousTeacherData == null
-                ? previousStatus
-                : _resolveDutyTeacherStatus(previousTeacherData),
-            'breakUntil': FieldValue.delete(),
-            'updatedAt': FieldValue.serverTimestamp(),
-          },
-        );
-      }
-
-      String? previousStatus;
-
-      // Yeni öğretmen seçildiyse mevcut durumunu sakla, sonra studyGuard yap.
-      if (teacherId != null) {
-        final teacherDoc =
-            await _firestore.collection('users').doc(teacherId).get();
-
-        final teacherData = teacherDoc.data() ?? {};
-        previousStatus = teacherData['teacherStatus'] ?? 'available';
-
-        batch.update(
-          _firestore.collection('users').doc(teacherId),
-          {
-            'teacherStatus': 'studyGuard',
-            'updatedAt': FieldValue.serverTimestamp(),
-          },
-        );
-      }
-
-      batch.update(sessionRef, {
-        'dutyTeacherId': teacherId,
-        'dutyTeacherName': teacherName,
-        'dutyTeacherPreviousStatus': previousStatus,
-        'completedDutyTeacherId': teacherId,
-        'completedDutyTeacherName': teacherName,
-        'completedDutyTeacherPreviousStatus': previousStatus,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      await batch.commit();
-
-      if (!mounted) return;
-
-      setState(() {
-        _selectedDutyTeacherId = teacherId;
-        _selectedDutyTeacherName = teacherName;
-      });
-
-      _showSnack(
-        teacherName == null
-            ? 'Etüt için öğretmen seçimi kaldırıldı.'
-            : '$teacherName etüt görevlisi olarak seçildi.',
-      );
-    } catch (e) {
-      _showSnack('Etüt öğretmeni kaydedilemedi: $e');
-    }
-  }
 
   Widget _inactiveInfoCard() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.orangeAccent.withValues(alpha: 0.10),
+        color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.22)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
       ),
       child: const Row(
         children: [
-          Icon(Icons.info_outline, color: Colors.orangeAccent),
+          Icon(Icons.info_outline, color: Colors.white70),
           SizedBox(width: 10),
           Expanded(
             child: Text(

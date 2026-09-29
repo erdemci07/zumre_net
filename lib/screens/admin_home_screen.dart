@@ -311,6 +311,7 @@ class StatisticsPage extends StatefulWidget {
   State<StatisticsPage> createState() => _StatisticsPageState();
 }
 
+// ignore: unused_element
 class _ReportClassOption {
   const _ReportClassOption({
     required this.className,
@@ -1257,174 +1258,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return DateTimeRange(start: today, end: today);
   }
 
-  Future<List<_ReportClassOption>> _loadReportClassOptions() async {
-    final snapshot = await _firestore
-        .collection('users')
-        .where('role', isEqualTo: 'student')
-        .get();
 
-    final optionMap = <String, _ReportClassOption>{};
-
-    for (final doc in snapshot.docs) {
-      final data = doc.data();
-      final className = '${data['className'] ?? ''}'.trim();
-      if (className.isEmpty) continue;
-
-      final option = _ReportClassOption(
-        className: className,
-        branch: '${data['branch'] ?? ''}'.trim(),
-        department: '${data['department'] ?? ''}'.trim(),
-      );
-      optionMap[option.key] = option;
-    }
-
-    final classes = optionMap.values.toList()
-      ..sort((a, b) => a.displayName.compareTo(b.displayName));
-
-    return classes;
-  }
-
-  Future<_ReportClassOption?> _showReportClassPicker() async {
-    final classes = await _loadReportClassOptions();
-    if (!mounted) return null;
-
-    if (classes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Sınıf raporu için öğrenci sınıf bilgisi bulunamadı.'),
-        ),
-      );
-      return null;
-    }
-
-    var selectedClass = classes.first;
-
-    return showDialog<_ReportClassOption>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return Dialog(
-              backgroundColor: Colors.transparent,
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 420),
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF071A3A),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.white24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.30),
-                      blurRadius: 24,
-                      offset: const Offset(0, 12),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: Colors.greenAccent.withValues(alpha: 0.14),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.greenAccent.withValues(alpha: 0.28),
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.groups_rounded,
-                            color: Colors.greenAccent,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Text(
-                            'Sınıf Seç',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 19,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(
-                            Icons.close_rounded,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<_ReportClassOption>(
-                      initialValue: selectedClass,
-                      dropdownColor: const Color(0xFF071A3A),
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        labelText: 'Rapor sınıfı',
-                        labelStyle: const TextStyle(color: Colors.white60),
-                        filled: true,
-                        fillColor: Colors.white.withValues(alpha: 0.08),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: const BorderSide(color: Colors.white12),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide:
-                              const BorderSide(color: Colors.lightBlueAccent),
-                        ),
-                      ),
-                      style: const TextStyle(color: Colors.white),
-                      items: classes
-                          .map(
-                            (classOption) => DropdownMenuItem(
-                              value: classOption,
-                              child: Text(classOption.displayName),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setDialogState(() => selectedClass = value);
-                      },
-                    ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () => Navigator.pop(ctx, selectedClass),
-                        icon: const Icon(Icons.picture_as_pdf_rounded),
-                        label: const Text('Raporu Oluştur'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.lightBlueAccent,
-                          foregroundColor: const Color(0xFF071A3A),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 
   Future<void> _requestTeacherReportPdf({
     required DateTime startDate,
@@ -1519,7 +1353,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                 setDialogState(() => selectedLevel = item),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 160),
-                              padding:
+                                padding:
                                   const EdgeInsets.symmetric(vertical: 16),
                               decoration: BoxDecoration(
                                 color: selected
@@ -1617,32 +1451,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
-  String _classBranchFilePrefix(String className, String branch) {
-    final cleanClass = className.trim();
-    final cleanBranch = branch.trim();
 
-    if (cleanBranch.isNotEmpty) {
-      return _safeFileNamePart('$cleanClass-$cleanBranch');
-    }
-
-    final parts = cleanClass
-        .split(RegExp(r'[-_/\\\s]+'))
-        .where((part) => part.trim().isNotEmpty)
-        .toList();
-
-    if (parts.length >= 2) {
-      return _safeFileNamePart('${parts[0]}-${parts[1]}');
-    }
-
-    return _safeFileNamePart(cleanClass);
-  }
-
-  String _safeFileNamePart(String value) {
-    return value
-        .trim()
-        .replaceAll(RegExp(r'\s+'), '_')
-        .replaceAll(RegExp(r'[^\w\-.]+'), '');
-  }
 
   String? _filenameFromContentDisposition(String? value) {
     if (value == null || value.isEmpty) return null;
@@ -3400,8 +3209,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
     final dayKey = _scheduleDays[now.weekday - 1]['key']!;
     final day = weekly[dayKey];
     if (day is! Map ||
-        day['closed'] == true ||
-        day['zumreClosed'] == true) {
+      day['closed'] == true ||
+      day['zumreClosed'] == true) {
       return false;
     }
 
@@ -3430,8 +3239,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
     final dayKey = _scheduleDays[now.weekday - 1]['key']!;
     final day = weekly[dayKey];
     if (day is! Map ||
-        day['closed'] == true ||
-        day['studyClosed'] == true) {
+      day['closed'] == true ||
+      day['studyClosed'] == true) {
       return false;
     }
 
@@ -3463,7 +3272,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                 : null;
 
         return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream:
+            stream:
               _firestore.collection('settings').doc('zumreSchedule').snapshots(),
           builder: (context, scheduleSnapshot) {
             final scheduleData = scheduleSnapshot.data?.data() ?? {};
@@ -3483,26 +3292,26 @@ class _StatisticsPageState extends State<StatisticsPage> {
                 _smallStatusPill(
                   label: 'LGS Zümre',
                   value: suffix ?? (lgsOpen ? 'Aktif' : 'Kapalı'),
-                  color:
+                    color:
                       lgsOpen ? Colors.greenAccent : Colors.orangeAccent,
                 ),
                 _smallStatusPill(
                   label: 'YKS Zümre',
                   value: suffix ?? (yksOpen ? 'Aktif' : 'Kapalı'),
-                  color:
+                    color:
                       yksOpen ? Colors.greenAccent : Colors.orangeAccent,
                 ),
                 _smallStatusPill(
                   label: 'LGS Etüt',
                   value: suffix ?? (lgsStudyOpen ? 'Aktif' : 'Kapalı'),
-                  color: lgsStudyOpen
+                    color: lgsStudyOpen
                       ? Colors.greenAccent
                       : Colors.orangeAccent,
                 ),
                 _smallStatusPill(
                   label: 'YKS Etüt',
                   value: suffix ?? (yksStudyOpen ? 'Aktif' : 'Kapalı'),
-                  color: yksStudyOpen
+                    color: yksStudyOpen
                       ? Colors.greenAccent
                       : Colors.orangeAccent,
                 ),
@@ -5062,7 +4871,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         selectedCount == 0 || _isBulkDeleting || _isLoading
                             ? null
                             : () => _bulkDeleteUsers(allUsers),
-
                   ),
                 ),
                 SliverPadding(
@@ -5250,7 +5058,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                               ),
                                             ),
                                           )
-
                                       ],
                                     ),
                                   ],
@@ -5530,7 +5337,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
         ),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final isNarrow = constraints.maxWidth < 420;
+            final isNarrow = constraints.maxWidth < 460;
             final selectAll = Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -5594,7 +5401,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   Row(
                     children: [
                       Expanded(child: selectAll),
-                      countText,
+                      Flexible(
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: countText,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),

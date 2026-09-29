@@ -168,7 +168,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     if (daily is Map) {
       return {
         'closed':
-            daily['closed'] == true || daily['zumreClosed'] == true,
+          daily['closed'] == true || daily['zumreClosed'] == true,
         'zumreSlots': _scheduleSlotsFromRaw(daily['zumreSlots']),
       };
     }
@@ -1107,7 +1107,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                         ],
                                       ),
                                       const SizedBox(height: 8),
-
                                     ],
                                   );
                                 }),
@@ -2162,7 +2161,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                       'studentId': selectedId,
                                       'studentName': selectedStudentName,
                                       'teacherId': teacherId,
-                                      'teacherName':
+                                        'teacherName':
                                           _teacherName ?? 'Öğretmen',
                                       'subject': _teacherSubject ?? 'Ders',
                                       'status': 'waiting',
@@ -2170,10 +2169,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                       'questionCount': 1,
                                       'estimatedMinutes': 4,
                                       'extraMinutes': 0,
-                                      'createdAt':
+                                        'createdAt':
                                           FieldValue.serverTimestamp(),
                                       'startedAt': null,
-                                      'updatedAt':
+                                        'updatedAt':
                                           FieldValue.serverTimestamp(),
                                     });
                                   }
@@ -2232,7 +2231,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
   Future<void> _startWaitingQueueSafely({
     required QueryDocumentSnapshot queueDoc,
-    required int queueIndex,
   }) async {
     final teacherId = _auth.currentUser!.uid;
     final queueData = queueDoc.data() as Map<String, dynamic>;
@@ -2277,22 +2275,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         if (!finishCurrent) return;
 
         confirmedActiveQueueId = activeQueue.id;
-      }
-
-      if (queueIndex > 0) {
-        final skipCount = queueIndex;
-
-        final continueOutOfOrder = await _confirmAction(
-          title: 'Sıra önceliği uyarısı',
-          message: '$targetStudentName isimli öğrencinin önünde '
-              '$skipCount öğrenci bulunuyor. Buna rağmen bu öğrencinin '
-              'sorusunu önce başlatmak istiyor musunuz?',
-          confirmText: 'Yine de Başlat',
-          icon: Icons.low_priority_rounded,
-          color: Colors.orangeAccent,
-        );
-
-        if (!continueOutOfOrder) return;
       }
 
       final callable = _functions.httpsCallable('teacherStartQueue');
@@ -3595,7 +3577,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                               onPressed: () async {
                                 await _startWaitingQueueSafely(
                                   queueDoc: doc,
-                                  queueIndex: queues.indexOf(doc),
                                 );
                               },
                               style: ElevatedButton.styleFrom(
