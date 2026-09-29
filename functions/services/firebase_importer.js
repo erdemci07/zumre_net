@@ -56,6 +56,7 @@ async function importUsers({ validRows, type }) {
         userData.studentNo = user.studentNo || "";
         userData.department = user.department || "";
         userData.guardianName = user.guardianName || "";
+        userData.guardianSurname = user.guardianSurname || "";
         userData.guardianPhone = user.guardianPhone || "";
       }
 

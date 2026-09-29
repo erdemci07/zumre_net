@@ -12,6 +12,8 @@ import 'package:http/http.dart' as http;
 
 import '../models/education_scope.dart';
 import '../utils/class_name_display.dart';
+import '../utils/guidance_student_groups.dart';
+import '../utils/user_management_filters.dart';
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -1862,30 +1864,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
                               ),
                             ),
                             _reportCard(
-                              icon: Icons.groups_rounded,
-                              title: 'Sınıf Takip Raporu',
-                              subtitle:
-                                  'Öğrenci bazlı zümre ve etüt özetidir Whatsapp gruplarında paylaşmak içindir',
-                              color: Colors.greenAccent,
-                              compact: compact,
-                              onTap: () => _requestClassReportPdf(
-                                endpoint: '/reports/class-tracking',
-                                fallbackFileName: 'Sinif_Takip_Raporu.pdf',
-                                startDate: selectedRange.start,
-                                endDate: selectedRange.end,
-                              ),
-                            ),
-                            _reportCard(
                               icon: Icons.timeline_rounded,
-                              title: 'Sınıf Faaliyet Takip',
+                              title: 'Sınıf Faaliyet Özeti',
                               subtitle:
-                                  'Öğrenci faaliyetlerini tarih sırasıyla listeler Rehber öğretmenler için uygundur',
+                                  'Pano ve öğrenci/veli grupları için güvenli, toplu faaliyet özeti',
                               color: Colors.orangeAccent,
                               compact: compact,
                               onTap: () => _requestClassReportPdf(
-                                endpoint: '/reports/class-activity',
-                                fallbackFileName:
-                                    'Sinif_Faaliyet_Takip_Raporu.pdf',
+                                endpoint: '/reports/class-activity-summary',
+                                fallbackFileName: 'Sinif_Faaliyet_Ozeti.pdf',
                                 startDate: selectedRange.start,
                                 endDate: selectedRange.end,
                               ),
@@ -2378,7 +2365,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
     };
 
     if (type == 'student' && includeGuardian) {
-      for (final field in const ['guardianName', 'guardianPhone']) {
+      for (final field in const [
+        'guardianName',
+        'guardianSurname',
+        'guardianPhone',
+      ]) {
         if (!mappingDetails.any(
           (item) => Map<String, dynamic>.from(item)['field'] == field,
         )) {
@@ -2701,7 +2692,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
       'department': 'Bölüm',
       'phone': 'Telefon Numarası',
       'subjects': 'Branş',
-      'guardianName': 'Veli Adı Soyadı',
+      'guardianName': 'Veli Adı',
+      'guardianSurname': 'Veli Soyadı',
       'guardianPhone': 'Veli Telefon Numarası',
     };
     return labels[field] ?? 'Eşleştirilmemiş Alan';
@@ -3403,7 +3395,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     _buildTodayStatusSection(),
                     const SizedBox(height: 18),
                     _panelSection(
-                      title: 'Öğrenci & Rehberlik',
+                      title: 'Hızlı İşlemler',
                       children: [
                         _quickActionCard(
                           icon: Icons.manage_search_rounded,
@@ -3534,6 +3526,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
       barrierDismissible: false,
       builder: (ctx) {
         var isSaving = false;
+        var scopeFilter = 'LGS';
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Dialog(
@@ -3573,14 +3566,44 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       ),
                       const SizedBox(height: 6),
                       const Text(
-                        'Haftanın her günü için zümre ve etüt saatlerini yönetin',
+                        'LGS ve YKS için ayrı ayrı zümre ve etüt saatleri oluşturun.',
                         style: TextStyle(color: Colors.white60),
                       ),
                       const SizedBox(height: 16),
+                      Text(
+                        scopeFilter == 'LGS'
+                            ? 'LGS saatlerini düzenliyorsunuz.'
+                            : 'YKS saatlerini düzenliyorsunuz.',
+                        style: const TextStyle(
+                          color: Colors.lightBlueAccent,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ['LGS', 'LGS'],
+                          ['YKS', 'YKS'],
+                        ]
+                            .map(
+                              (item) => ChoiceChip(
+                                label: Text(item[1]),
+                                selected: scopeFilter == item[0],
+                                onSelected: (_) => setDialogState(
+                                  () => scopeFilter = item[0],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                      const SizedBox(height: 10),
                       ..._scheduleDays.map(
                         (day) => _dailyScheduleTile(
                           dayKey: day['key']!,
                           dayLabel: day['label']!,
+                          scopeFilter: scopeFilter,
                           setDialogState: setDialogState,
                         ),
                       ),
@@ -3711,9 +3734,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return raw
         .whereType<Map>()
         .map(
-          (slot) => {
-            'start': '${slot['start'] ?? ''}',
-            'end': '${slot['end'] ?? ''}',
+          (slot) {
+            final scope = timeSlotScopeFromData(slot);
+            return {
+              'start': '${slot['start'] ?? ''}',
+              'end': '${slot['end'] ?? ''}',
+              // Ortak tanımlanmış eski slotlar mevcut YKS programıdır.
+              // LGS, bundan sonra kendi bağımsız slotlarıyla oluşturulur.
+              'educationLevel': scope == 'BOTH' ? 'YKS' : scope,
+            };
           },
         )
         .where((slot) => slot['start']!.isNotEmpty && slot['end']!.isNotEmpty)
@@ -3803,6 +3832,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
           if (start < 0 || end < 0 || start >= end) {
             return '$label ${entry.key} saatlerinde başlangıç bitişten önce olmalı.';
           }
+          if (!educationLevels.contains(slot['educationLevel'])) {
+            return '$label ${entry.key} için LGS veya YKS kapsamı seçilmelidir.';
+          }
         }
       }
     }
@@ -3861,6 +3893,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Widget _dailyScheduleTile({
     required String dayKey,
     required String dayLabel,
+    required String scopeFilter,
     required StateSetter setDialogState,
   }) {
     final day = _weeklyScheduleDraft[dayKey]!;
@@ -3868,9 +3901,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
     final studyClosed = day['studyClosed'] == true || day['closed'] == true;
     final zumreSlots = day['zumreSlots'] as List<Map<String, String>>;
     final studySlots = day['studySlots'] as List<Map<String, String>>;
+    final visibleZumreSlots = zumreSlots
+        .where((slot) => timeSlotMatchesManagementFilter(slot, scopeFilter))
+        .length;
+    final visibleStudySlots = studySlots
+        .where((slot) => timeSlotMatchesManagementFilter(slot, scopeFilter))
+        .length;
     final summaryParts = <String>[
-      zumreClosed ? 'Zümre kapalı' : '${zumreSlots.length} zümre',
-      studyClosed ? 'Etüt kapalı' : '${studySlots.length} etüt',
+      zumreClosed ? 'Zümre kapalı' : '$visibleZumreSlots zümre',
+      studyClosed ? 'Etüt kapalı' : '$visibleStudySlots etüt',
     ];
 
     return Container(
@@ -3943,12 +3982,17 @@ class _StatisticsPageState extends State<StatisticsPage> {
               enabled: !zumreClosed,
               onAdd: () {
                 setDialogState(() {
-                  zumreSlots.add({'start': '09:00', 'end': '09:40'});
+                  zumreSlots.add({
+                    'start': '09:00',
+                    'end': '09:40',
+                    'educationLevel': scopeFilter,
+                  });
                 });
               },
               onDelete: (index) {
                 setDialogState(() => zumreSlots.removeAt(index));
               },
+              scopeFilter: scopeFilter,
             ),
             const SizedBox(height: 10),
             _scheduleSection(
@@ -3958,12 +4002,17 @@ class _StatisticsPageState extends State<StatisticsPage> {
               enabled: !studyClosed,
               onAdd: () {
                 setDialogState(() {
-                  studySlots.add({'start': '10:00', 'end': '10:45'});
+                  studySlots.add({
+                    'start': '10:00',
+                    'end': '10:45',
+                    'educationLevel': scopeFilter,
+                  });
                 });
               },
               onDelete: (index) {
                 setDialogState(() => studySlots.removeAt(index));
               },
+              scopeFilter: scopeFilter,
             ),
           ],
         ),
@@ -3977,8 +4026,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
     required Color color,
     required VoidCallback onAdd,
     required Function(int index) onDelete,
+    required String scopeFilter,
     bool enabled = true,
   }) {
+    final visibleSlotEntries = slots.asMap().entries.where(
+          (entry) =>
+              entry.value['educationLevel']?.toUpperCase() == scopeFilter,
+        );
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -4010,54 +4064,59 @@ class _StatisticsPageState extends State<StatisticsPage> {
             ],
           ),
           const SizedBox(height: 10),
-          if (slots.isEmpty)
+          if (visibleSlotEntries.isEmpty)
             const Text(
-              'Henüz saat eklenmedi.',
+              'Bu kademe için henüz saat eklenmedi.',
               style: TextStyle(color: Colors.white60),
             )
           else
-            ...List.generate(slots.length, (index) {
-              final slot = slots[index];
+            ...visibleSlotEntries.map((entry) {
+              final index = entry.key;
+              final slot = entry.value;
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: TextFormField(
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(4),
-                          _TimeTextInputFormatter(),
-                        ],
-                        initialValue: slot['start'],
-                        enabled: enabled,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: _timeInputDecoration('Başlangıç'),
-                        onChanged: (value) => slot['start'] = value,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextFormField(
-                        initialValue: slot['end'],
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(4),
-                          _TimeTextInputFormatter(),
-                        ],
-                        enabled: enabled,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: _timeInputDecoration('Bitiş'),
-                        onChanged: (value) => slot['end'] = value,
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: enabled ? () => onDelete(index) : null,
-                      icon: const Icon(Icons.delete_outline,
-                          color: Colors.redAccent),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(4),
+                              _TimeTextInputFormatter(),
+                            ],
+                            initialValue: slot['start'],
+                            enabled: enabled,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _timeInputDecoration('Başlangıç'),
+                            onChanged: (value) => slot['start'] = value,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            initialValue: slot['end'],
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(4),
+                              _TimeTextInputFormatter(),
+                            ],
+                            enabled: enabled,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _timeInputDecoration('Bitiş'),
+                            onChanged: (value) => slot['end'] = value,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: enabled ? () => onDelete(index) : null,
+                          icon: const Icon(Icons.delete_outline,
+                              color: Colors.redAccent),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -4449,6 +4508,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
   int _bulkDeleteTotal = 0;
   String _userSearchQuery = '';
   String _userRoleFilter = 'all';
+  String? _userEducationLevelFilter;
+  String? _userClassNameFilter;
+  String? _userBranchFilter;
+  String? _userDepartmentFilter;
+  String? _userSubjectFilter;
   final Set<String> _selectedUserIds = {};
 
   Future<_StudentFieldOptions> _loadStudentFieldOptions() async {
@@ -4516,44 +4580,32 @@ class _UserManagementPageState extends State<UserManagementPage> {
             }
 
             final allUsers = snapshot.data!.docs;
-            String normalizeForSearch(String str) {
-              return str
-                  .toLowerCase()
-                  .replaceAll('ı', 'i')
-                  .replaceAll('ğ', 'g')
-                  .replaceAll('ü', 'u')
-                  .replaceAll('ş', 's')
-                  .replaceAll('ö', 'o')
-                  .replaceAll('ç', 'c')
-                  .replaceAll('İ', 'i');
-            }
-
-            final users = allUsers.where((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-
-              final searchableRaw = [
-                data['fullName'],
-                data['name'],
-                data['surname'],
-                data['email'],
-                data['role'],
-                data['username'],
-                data['className'],
-                data['branch'],
-                data['department'],
-                if (data['subjects'] is List)
-                  (data['subjects'] as List).join(' '),
-              ].where((e) => e != null).join(' ');
-
-              final searchable = normalizeForSearch(searchableRaw);
-              final query = normalizeForSearch(_userSearchQuery);
-
-              final matchesSearch =
-                  _userSearchQuery.isEmpty || searchable.contains(query);
-              final matchesRole =
-                  _userRoleFilter == 'all' || data['role'] == _userRoleFilter;
-              return matchesSearch && matchesRole;
-            }).toList();
+            final allUserData = allUsers
+                .map((doc) => doc.data() as Map<String, dynamic>)
+                .toList();
+            final guidanceNamesById = <String, String>{
+              for (final doc in allUsers)
+                if ((doc.data() as Map<String, dynamic>)['role'] == 'guidance')
+                  doc.id:
+                      '${(doc.data() as Map<String, dynamic>)['fullName'] ?? (doc.data() as Map<String, dynamic>)['name'] ?? 'Rehberlik Servisi'}',
+            };
+            final filters = UserManagementFilters(
+              role: _userRoleFilter,
+              search: _userSearchQuery,
+              educationLevel: _userEducationLevelFilter,
+              className: _userClassNameFilter,
+              branch: _userBranchFilter,
+              department: _userDepartmentFilter,
+              subject: _userSubjectFilter,
+            );
+            final users = allUsers
+                .where(
+                  (doc) => userMatchesManagementFilters(
+                    doc.data() as Map<String, dynamic>,
+                    filters,
+                  ),
+                )
+                .toList();
 
             final roleCounts = <String, int>{'all': allUsers.length};
             for (final userDoc in allUsers) {
@@ -4561,6 +4613,22 @@ class _UserManagementPageState extends State<UserManagementPage> {
               final userRole = (userData['role'] ?? '').toString();
               roleCounts[userRole] = (roleCounts[userRole] ?? 0) + 1;
             }
+
+            final studentUsers =
+                allUserData.where((data) => data['role'] == 'student');
+            final teacherUsers =
+                allUserData.where((data) => data['role'] == 'teacher');
+            final studentClassNames =
+                distinctUserValues(studentUsers, (data) => data['className']);
+            final studentBranches =
+                distinctUserValues(studentUsers, (data) => data['branch']);
+            final studentDepartments =
+                distinctUserValues(studentUsers, (data) => data['department']);
+            final cascadingStudentOptions = cascadingStudentFilterOptions(
+              studentUsers,
+              filters,
+            );
+            final teacherSubjects = distinctTeacherSubjects(teacherUsers);
 
             final currentUid = FirebaseAuth.instance.currentUser?.uid;
             final selectableUids = users
@@ -4572,6 +4640,19 @@ class _UserManagementPageState extends State<UserManagementPage> {
             final allVisibleSelected = selectableUids.isNotEmpty &&
                 selectedVisibleCount == selectableUids.length;
             final selectedCount = _selectedUserIds.length;
+            final selectedStudentIds = users
+                .where((doc) =>
+                    _selectedUserIds.contains(doc.id) &&
+                    (doc.data() as Map<String, dynamic>)['role']?.toString() ==
+                        'student' &&
+                    ((doc.data() as Map<String, dynamic>)[
+                                'guidanceCounselorId'] ??
+                            '')
+                        .toString()
+                        .trim()
+                        .isEmpty)
+                .map((doc) => doc.id)
+                .toList();
 
             return CustomScrollView(
               physics: const ClampingScrollPhysics(),
@@ -4639,7 +4720,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                       ),
                       onChanged: (value) {
                         setState(() {
-                          _userSearchQuery = value.trim().toLowerCase();
+                          _userSearchQuery = value.trim();
                         });
                       },
                     ),
@@ -4667,25 +4748,30 @@ class _UserManagementPageState extends State<UserManagementPage> {
                             padding: const EdgeInsets.only(right: 8),
                             child: ChoiceChip(
                               selected: selected,
+                              showCheckmark: false,
                               onSelected: (_) => setState(() {
                                 _userRoleFilter = key;
+                                _clearUserDynamicFilters();
                                 _selectedUserIds.clear();
                               }),
                               label: Text('${item[1]}  $count'),
                               labelStyle: TextStyle(
-                                color: Colors.white,
+                                color: selected
+                                    ? const Color(0xFF071A3A)
+                                    : Colors.white,
                                 fontWeight: selected
                                     ? FontWeight.w800
                                     : FontWeight.w600,
                               ),
-                              selectedColor:
-                                  Colors.white.withValues(alpha: 0.22),
-                              backgroundColor:
-                                  Colors.white.withValues(alpha: 0.08),
+                              selectedColor: const Color(0xFF7DD3FC),
+                              backgroundColor: const Color(0xFF173B73),
+                              elevation: selected ? 3 : 0,
+                              pressElevation: 0,
                               side: BorderSide(
-                                color: Colors.white.withValues(
-                                  alpha: selected ? 0.38 : 0.14,
-                                ),
+                                color: selected
+                                    ? const Color(0xFFB8ECFF)
+                                    : const Color(0xFF5A87C8),
+                                width: selected ? 1.4 : 1,
                               ),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14),
@@ -4697,9 +4783,30 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     ),
                   ),
                 ),
+                if (_userRoleFilter == 'student' ||
+                    _userRoleFilter == 'teacher')
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    sliver: SliverToBoxAdapter(
+                      child: _userDynamicFilterPanel(
+                        role: _userRoleFilter,
+                        classNames: _userRoleFilter == 'student'
+                            ? cascadingStudentOptions.classNames
+                            : studentClassNames,
+                        branches: _userRoleFilter == 'student'
+                            ? cascadingStudentOptions.branches
+                            : studentBranches,
+                        departments: _userRoleFilter == 'student'
+                            ? cascadingStudentOptions.departments
+                            : studentDepartments,
+                        teacherSubjects: teacherSubjects,
+                      ),
+                    ),
+                  ),
                 SliverToBoxAdapter(
                   child: _bulkSelectionBar(
                     selectedCount: selectedCount,
+                    selectedStudentCount: selectedStudentIds.length,
                     visibleCount: selectableUids.length,
                     progressCount: _bulkDeleteProcessed,
                     progressTotal: _bulkDeleteTotal,
@@ -4719,6 +4826,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         selectedCount == 0 || _isBulkDeleting || _isLoading
                             ? null
                             : () => _bulkDeleteUsers(allUsers),
+                    onAssignGuidance: selectedStudentIds.isEmpty ||
+                            _isBulkDeleting ||
+                            _isLoading
+                        ? null
+                        : () => _showBulkGuidanceCounselorAssignment(
+                              selectedStudentIds,
+                            ),
                   ),
                 ),
                 SliverPadding(
@@ -4736,6 +4850,14 @@ class _UserManagementPageState extends State<UserManagementPage> {
                             data['email'] ??
                             'İsimsiz';
                         final email = data['email'] ?? 'Email yok';
+                        final guidanceCounselorId =
+                            data['guidanceCounselorId']?.toString().trim() ??
+                                '';
+                        final guidanceCounselorName =
+                            guidanceCounselorId.isEmpty
+                                ? null
+                                : guidanceNamesById[guidanceCounselorId] ??
+                                    'Atanmış rehberlikçi';
                         final roleColor = role == 'admin'
                             ? Colors.redAccent
                             : role == 'teacher'
@@ -4872,6 +4994,71 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
+                                        if (role == 'student' &&
+                                            guidanceCounselorName != null)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 9,
+                                              vertical: 5,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.purpleAccent
+                                                  .withValues(alpha: 0.14),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              border: Border.all(
+                                                color: Colors.purpleAccent
+                                                    .withValues(alpha: 0.42),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              'Rehber: $guidanceCounselorName',
+                                              style: const TextStyle(
+                                                color: Colors.purpleAccent,
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          )
+                                        else if (role == 'student')
+                                          TextButton.icon(
+                                            onPressed: _isBulkDeleting
+                                                ? null
+                                                : () =>
+                                                    _showGuidanceCounselorAssignment(
+                                                      uid,
+                                                      data,
+                                                    ),
+                                            icon: const Icon(
+                                              Icons.supervisor_account_rounded,
+                                              size: 16,
+                                            ),
+                                            label: const Text('Rehber Ata'),
+                                            style: TextButton.styleFrom(
+                                              foregroundColor:
+                                                  Colors.lightBlueAccent,
+                                              backgroundColor: Colors
+                                                  .lightBlueAccent
+                                                  .withValues(alpha: 0.12),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 9,
+                                                vertical: 5,
+                                              ),
+                                              minimumSize: Size.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                side: BorderSide(
+                                                  color: Colors.lightBlueAccent
+                                                      .withValues(alpha: 0.45),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ],
@@ -4886,6 +5073,34 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     ? null
                                     : () => _editUser(uid, data),
                               ),
+                              if (role == 'guidance')
+                                IconButton(
+                                  tooltip: 'Atanmış öğrenciler',
+                                  icon: const Icon(
+                                    Icons.groups_rounded,
+                                    color: Colors.lightBlueAccent,
+                                  ),
+                                  onPressed: _isBulkDeleting
+                                      ? null
+                                      : () => _showGuidanceCounselorStudents(
+                                            uid,
+                                            data,
+                                          ),
+                                ),
+                              if (role == 'guidance')
+                                IconButton(
+                                  tooltip: 'Veli görüşme saatleri',
+                                  icon: const Icon(
+                                    Icons.event_available_rounded,
+                                    color: Colors.amberAccent,
+                                  ),
+                                  onPressed: _isBulkDeleting
+                                      ? null
+                                      : () => _showGuidanceAvailabilityDialog(
+                                            uid,
+                                            data,
+                                          ),
+                                ),
                               IconButton(
                                 icon: const Icon(
                                   Icons.delete_outline,
@@ -4918,14 +5133,200 @@ class _UserManagementPageState extends State<UserManagementPage> {
     );
   }
 
+  void _clearUserDynamicFilters() {
+    _userEducationLevelFilter = null;
+    _userClassNameFilter = null;
+    _userBranchFilter = null;
+    _userDepartmentFilter = null;
+    _userSubjectFilter = null;
+  }
+
+  Widget _userFilterDropdown({
+    required String label,
+    required List<String> values,
+    required String? selectedValue,
+    required ValueChanged<String?> onChanged,
+  }) {
+    final value = values.contains(selectedValue) ? selectedValue : null;
+    final selected = value != null;
+    return SizedBox(
+      width: 180,
+      child: DropdownButtonFormField<String>(
+        initialValue: value,
+        isExpanded: true,
+        dropdownColor: const Color(0xFF10264C),
+        style: const TextStyle(color: Colors.white, fontSize: 13),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: TextStyle(
+            color: selected ? const Color(0xFFB8ECFF) : Colors.white70,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          ),
+          filled: true,
+          fillColor: selected
+              ? const Color(0xFF1F5D91)
+              : const Color(0xFF10264C).withValues(alpha: 0.72),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(
+              color:
+                  selected ? const Color(0xFF8EDBFF) : const Color(0xFF4D78B5),
+              width: selected ? 1.4 : 1,
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Colors.lightBlueAccent),
+          ),
+        ),
+        items: [
+          DropdownMenuItem<String>(
+            value: null,
+            child: Text('Tüm $label', overflow: TextOverflow.ellipsis),
+          ),
+          ...values.map(
+            (item) => DropdownMenuItem<String>(
+              value: item,
+              child: Text(item, overflow: TextOverflow.ellipsis),
+            ),
+          ),
+        ],
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  Widget _userDynamicFilterPanel({
+    required String role,
+    required List<String> classNames,
+    required List<String> branches,
+    required List<String> departments,
+    required List<String> teacherSubjects,
+  }) {
+    final student = role == 'student';
+    final hasFilters = _userEducationLevelFilter != null ||
+        _userClassNameFilter != null ||
+        _userBranchFilter != null ||
+        _userDepartmentFilter != null ||
+        _userSubjectFilter != null;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.tune_rounded, color: Colors.white70, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  student ? 'Öğrenci filtreleri' : 'Öğretmen filtreleri',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (hasFilters)
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    _clearUserDynamicFilters();
+                    _selectedUserIds.clear();
+                  }),
+                  icon: const Icon(Icons.clear_rounded, size: 16),
+                  label: const Text('Temizle'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.lightBlueAccent,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _userFilterDropdown(
+                label: 'Kademe',
+                values: educationLevels.toList()..sort(),
+                selectedValue: _userEducationLevelFilter,
+                onChanged: (value) => setState(() {
+                  _userEducationLevelFilter = value;
+                  if (student) {
+                    _userClassNameFilter = null;
+                    _userBranchFilter = null;
+                    _userDepartmentFilter = null;
+                  }
+                  _selectedUserIds.clear();
+                }),
+              ),
+              if (student) ...[
+                _userFilterDropdown(
+                  label: 'Sınıf',
+                  values: classNames,
+                  selectedValue: _userClassNameFilter,
+                  onChanged: (value) => setState(() {
+                    _userClassNameFilter = value;
+                    _userBranchFilter = null;
+                    _userDepartmentFilter = null;
+                    _selectedUserIds.clear();
+                  }),
+                ),
+                _userFilterDropdown(
+                  label: 'Şube',
+                  values: branches,
+                  selectedValue: _userBranchFilter,
+                  onChanged: (value) => setState(() {
+                    _userBranchFilter = value;
+                    _userDepartmentFilter = null;
+                    _selectedUserIds.clear();
+                  }),
+                ),
+                _userFilterDropdown(
+                  label: 'Alan / Bölüm',
+                  values: departments,
+                  selectedValue: _userDepartmentFilter,
+                  onChanged: (value) => setState(() {
+                    _userDepartmentFilter = value;
+                    _selectedUserIds.clear();
+                  }),
+                ),
+              ] else
+                _userFilterDropdown(
+                  label: 'Branş',
+                  values: teacherSubjects,
+                  selectedValue: _userSubjectFilter,
+                  onChanged: (value) => setState(() {
+                    _userSubjectFilter = value;
+                    _selectedUserIds.clear();
+                  }),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _bulkSelectionBar({
     required int selectedCount,
+    required int selectedStudentCount,
     required int visibleCount,
     required int progressCount,
     required int progressTotal,
     required bool allVisibleSelected,
     required ValueChanged<bool?>? onSelectAllChanged,
     required VoidCallback? onDeleteSelected,
+    required VoidCallback? onAssignGuidance,
   }) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -4962,7 +5363,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
             final countText = Text(
               _isBulkDeleting
                   ? '$progressCount / $progressTotal kullanıcı işlendi'
-                  : '$selectedCount seçili',
+                  : selectedStudentCount > 0
+                      ? '$selectedStudentCount öğrenci seçili'
+                      : selectedCount > 0
+                          ? '$selectedCount seçili • Rehber ataması yalnız öğrenciler için'
+                          : 'Rehber atamak için öğrenci seçin',
               style: const TextStyle(color: Colors.white60, fontSize: 12),
             );
             final deleteButton = ElevatedButton.icon(
@@ -4994,6 +5399,22 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 ),
               ),
             );
+            final assignButton = ElevatedButton.icon(
+              onPressed: onAssignGuidance,
+              icon: const Icon(Icons.supervisor_account_rounded, size: 18),
+              label: const Text('Rehber Öğretmen Ata'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF0B3D78),
+                disabledBackgroundColor: Colors.white.withValues(alpha: 0.18),
+                disabledForegroundColor: Colors.white60,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+            );
 
             if (isNarrow) {
               return Column(
@@ -5006,6 +5427,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     ],
                   ),
                   const SizedBox(height: 10),
+                  assignButton,
+                  const SizedBox(height: 8),
                   deleteButton,
                 ],
               );
@@ -5017,6 +5440,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 const SizedBox(width: 10),
                 countText,
                 const Spacer(),
+                assignButton,
+                const SizedBox(width: 8),
                 deleteButton,
               ],
             );
@@ -5031,7 +5456,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
     Map<String, dynamic>? existingData,
   }) async {
     final studentFieldOptions = await _loadStudentFieldOptions();
+    final guidanceSnapshot = await _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'guidance')
+        .get();
     if (!mounted) return;
+    final guidanceCounselors = guidanceSnapshot.docs;
     final isEditing = editingUid != null;
     final formKey = GlobalKey<FormState>();
     const String domain = '@bilimkalesi.com';
@@ -5050,7 +5480,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
     String branch = existingData?['branch']?.toString() ?? '';
     String department = existingData?['department']?.toString() ?? '';
     String guardianName = existingData?['guardianName']?.toString() ?? '';
+    String guardianSurname = existingData?['guardianSurname']?.toString() ?? '';
     String guardianPhone = existingData?['guardianPhone']?.toString() ?? '';
+    String? guidanceCounselorId =
+        existingData?['guidanceCounselorId']?.toString().trim();
     String username = existingData?['username']?.toString() ?? '';
 
     String role = existingData?['role']?.toString().trim() ?? 'student';
@@ -5359,9 +5792,17 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     TextFormField(
                                       initialValue: guardianName,
                                       decoration: const InputDecoration(
-                                          labelText: 'Veli Adı Soyadı'),
+                                          labelText: 'Veli Adı'),
                                       onChanged: (val) =>
                                           guardianName = val.trim(),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextFormField(
+                                      initialValue: guardianSurname,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Veli Soyadı'),
+                                      onChanged: (val) =>
+                                          guardianSurname = val.trim(),
                                     ),
                                     const SizedBox(height: 8),
                                     TextFormField(
@@ -5371,6 +5812,37 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                           labelText: 'Veli Telefon Numarası'),
                                       onChanged: (val) =>
                                           guardianPhone = val.trim(),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    DropdownButtonFormField<String>(
+                                      initialValue: guidanceCounselors.any(
+                                        (doc) => doc.id == guidanceCounselorId,
+                                      )
+                                          ? guidanceCounselorId
+                                          : null,
+                                      isExpanded: true,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Rehber Öğretmen',
+                                        helperText:
+                                            'Veli randevusu için öğrencinin rehber öğretmeni seçilir.',
+                                      ),
+                                      items: [
+                                        const DropdownMenuItem<String>(
+                                          value: null,
+                                          child: Text('Henüz atanmadı'),
+                                        ),
+                                        ...guidanceCounselors.map(
+                                          (doc) => DropdownMenuItem<String>(
+                                            value: doc.id,
+                                            child: Text(
+                                              '${doc.data()['fullName'] ?? doc.data()['name'] ?? 'Rehberlik Servisi'}',
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                      onChanged: (value) => setStateDialog(
+                                        () => guidanceCounselorId = value,
+                                      ),
                                     ),
                                     const SizedBox(height: 8),
                                     DropdownButtonFormField<String>(
@@ -5600,7 +6072,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                             selectedEducationLevels.toList(),
                                         teachingScopes: teachingScopes,
                                         guardianName: guardianName,
+                                        guardianSurname: guardianSurname,
                                         guardianPhone: guardianPhone,
+                                        guidanceCounselorId:
+                                            guidanceCounselorId,
                                       );
 
                                       if (newPassword.trim().isNotEmpty) {
@@ -5627,7 +6102,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                             selectedEducationLevels.toList(),
                                         teachingScopes: teachingScopes,
                                         guardianName: guardianName,
+                                        guardianSurname: guardianSurname,
                                         guardianPhone: guardianPhone,
+                                        guidanceCounselorId:
+                                            guidanceCounselorId,
                                       );
                                     }
                                     if (ctx.mounted) Navigator.pop(ctx);
@@ -5747,7 +6225,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
     List<String> educationLevels = const [],
     List<Map<String, String?>> teachingScopes = const [],
     String guardianName = '',
+    String guardianSurname = '',
     String guardianPhone = '',
+    String? guidanceCounselorId,
   }) async {
     final callable = _functions.httpsCallable('adminCreateUser');
 
@@ -5766,7 +6246,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
       if (educationLevels.isNotEmpty) 'educationLevels': educationLevels,
       if (teachingScopes.isNotEmpty) 'teachingScopes': teachingScopes,
       'guardianName': guardianName,
+      'guardianSurname': guardianSurname,
       'guardianPhone': guardianPhone,
+      'guidanceCounselorId': guidanceCounselorId ?? '',
       'password': password,
     });
   }
@@ -5787,7 +6269,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
     List<String> educationLevels = const [],
     List<Map<String, String?>> teachingScopes = const [],
     String guardianName = '',
+    String guardianSurname = '',
     String guardianPhone = '',
+    String? guidanceCounselorId,
   }) async {
     final callable = _functions.httpsCallable('adminUpdateUser');
 
@@ -5807,7 +6291,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
       if (educationLevels.isNotEmpty) 'educationLevels': educationLevels,
       if (teachingScopes.isNotEmpty) 'teachingScopes': teachingScopes,
       'guardianName': guardianName,
+      'guardianSurname': guardianSurname,
       'guardianPhone': guardianPhone,
+      'guidanceCounselorId': guidanceCounselorId ?? '',
     });
   }
 
@@ -6387,6 +6873,422 @@ class _UserManagementPageState extends State<UserManagementPage> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _showGuidanceCounselorAssignment(
+    String studentId,
+    Map<String, dynamic> student,
+  ) async {
+    final snapshot = await _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'guidance')
+        .get();
+    if (!mounted) return;
+    final counselors = snapshot.docs;
+    if (counselors.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Atanabilecek rehberlikçi bulunamadı.'),
+      ));
+      return;
+    }
+    var selected = student['guidanceCounselorId']?.toString();
+    if (!counselors.any((doc) => doc.id == selected)) selected = null;
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Rehberlikçi Ata'),
+          content: DropdownButtonFormField<String>(
+            initialValue: selected,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Rehber öğretmen'),
+            items: counselors
+                .map((doc) => DropdownMenuItem(
+                      value: doc.id,
+                      child: Text(
+                          '${doc.data()['fullName'] ?? doc.data()['name'] ?? 'Rehberlik Servisi'}'),
+                    ))
+                .toList(),
+            onChanged: (value) => setDialogState(() => selected = value),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Vazgeç')),
+            FilledButton(
+                onPressed: selected == null
+                    ? null
+                    : () async {
+                        await _functions
+                            .httpsCallable('adminAssignGuidanceCounselor')
+                            .call({
+                          'counselorId': selected,
+                          'studentIds': [studentId],
+                        });
+                        if (context.mounted) Navigator.pop(context);
+                      },
+                child: const Text('Ata')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showBulkGuidanceCounselorAssignment(
+    List<String> studentIds,
+  ) async {
+    if (studentIds.isEmpty) return;
+    final snapshot = await _firestore
+        .collection('users')
+        .where('role', isEqualTo: 'guidance')
+        .get();
+    if (!mounted) return;
+    if (snapshot.docs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Atanabilecek rehber öğretmen bulunamadı.'),
+      ));
+      return;
+    }
+    String? selected;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Rehber Öğretmen Ata'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(
+                '${studentIds.length} seçili öğrenciye aynı rehber öğretmen atanacak.'),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: selected,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Rehber öğretmen'),
+              items: snapshot.docs
+                  .map((doc) => DropdownMenuItem(
+                        value: doc.id,
+                        child: Text(
+                          '${doc.data()['fullName'] ?? doc.data()['name'] ?? 'Rehberlik Servisi'}',
+                        ),
+                      ))
+                  .toList(),
+              onChanged: (value) => setDialogState(() => selected = value),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Vazgeç'),
+            ),
+            FilledButton(
+              onPressed: selected == null
+                  ? null
+                  : () => Navigator.pop(dialogContext, true),
+              child: const Text('Onayla ve Ata'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || selected == null || !mounted) return;
+
+    setState(() => _isLoading = true);
+    try {
+      final response = await _functions
+          .httpsCallable('adminAssignGuidanceCounselor')
+          .call({'counselorId': selected, 'studentIds': studentIds});
+      final data = Map<String, dynamic>.from(response.data as Map);
+      final assigned = (data['assignedCount'] as num?)?.toInt() ?? 0;
+      final skipped = (data['skippedCount'] as num?)?.toInt() ?? 0;
+      if (!mounted) return;
+      setState(() => _selectedUserIds.removeAll(studentIds));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          skipped == 0
+              ? '$assigned öğrenciye rehber öğretmen atandı.'
+              : '$assigned öğrenci atandı, $skipped kayıt atlandı.',
+        ),
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Atama hatası: ${_adminFunctionErrorMessage(error)}'),
+      ));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _showGuidanceAvailabilityDialog(
+    String counselorId,
+    Map<String, dynamic> data,
+  ) async {
+    const days = [
+      ['monday', 'Pazartesi'],
+      ['tuesday', 'Salı'],
+      ['wednesday', 'Çarşamba'],
+      ['thursday', 'Perşembe'],
+      ['friday', 'Cuma'],
+      ['saturday', 'Cumartesi'],
+      ['sunday', 'Pazar'],
+    ];
+    final raw = Map<String, dynamic>.from(data['guidanceAvailability'] ?? {});
+    final weekly = Map<String, dynamic>.from(raw['weekly'] ?? {});
+    final controllers = <String, TextEditingController>{
+      for (final day in days)
+        day[0]: TextEditingController(
+          text: ((weekly[day[0]] as List? ?? const [])
+              .map((slot) => '${slot['start']}-${slot['end']}')
+              .join(', ')),
+        ),
+    };
+    var slotMinutes = (raw['slotMinutes'] as num?)?.toInt() ?? 20;
+    InputDecoration availabilityFieldDecoration(String label) =>
+        InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(color: Colors.white70),
+          floatingLabelStyle: const TextStyle(
+            color: Color(0xFF8EDBFF),
+            fontWeight: FontWeight.w700,
+          ),
+          filled: true,
+          fillColor: const Color(0xFF071A3A).withValues(alpha: 0.7),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: Color(0xFF4D78B5)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: Color(0xFF8EDBFF), width: 1.4),
+          ),
+        );
+    try {
+      await showDialog(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            backgroundColor: const Color(0xFF0B234B),
+            elevation: 12,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+              side: const BorderSide(color: Color(0xFF4D78B5)),
+            ),
+            title: const Text(
+              'Veli Görüşme Saatleri',
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+            ),
+            content: SizedBox(
+              width: 430,
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Text(
+                    'Her aralığı 13:30-17:30 biçiminde, birden fazlasını virgülle yazın. Boş gün kapalıdır.',
+                    style: TextStyle(color: Colors.white70, height: 1.35),
+                  ),
+                  const SizedBox(height: 10),
+                  ...days.map((day) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: TextField(
+                          controller: controllers[day[0]],
+                          style: const TextStyle(color: Colors.white),
+                          decoration: availabilityFieldDecoration(day[1]),
+                        ),
+                      )),
+                  DropdownButtonFormField<int>(
+                    initialValue:
+                        [15, 20, 30].contains(slotMinutes) ? slotMinutes : 20,
+                    dropdownColor: const Color(0xFF10264C),
+                    iconEnabledColor: const Color(0xFFB8ECFF),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: availabilityFieldDecoration('Randevu süresi'),
+                    items: const [15, 20, 30]
+                        .map((value) => DropdownMenuItem(
+                            value: value,
+                            child: Text('$value dakika',
+                                style: const TextStyle(color: Colors.white))))
+                        .toList(),
+                    onChanged: (value) =>
+                        setDialogState(() => slotMinutes = value ?? 20),
+                  ),
+                ]),
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                  child: const Text('Vazgeç')),
+              FilledButton(
+                  onPressed: () async {
+                    final weeklyPayload = <String, List<Map<String, String>>>{};
+                    for (final day in days) {
+                      weeklyPayload[day[0]] = controllers[day[0]]!
+                          .text
+                          .split(',')
+                          .map((part) {
+                            final pieces = part.trim().split('-');
+                            return pieces.length == 2
+                                ? {
+                                    'start': pieces[0].trim(),
+                                    'end': pieces[1].trim()
+                                  }
+                                : <String, String>{};
+                          })
+                          .where((slot) => slot.isNotEmpty)
+                          .toList();
+                    }
+                    try {
+                      await _functions
+                          .httpsCallable('saveGuidanceAvailability')
+                          .call({
+                        'counselorId': counselorId,
+                        'guidanceAvailability': {
+                          'weekly': weeklyPayload,
+                          'closedDates': const <String>[],
+                          'slotMinutes': slotMinutes,
+                        },
+                      });
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                      }
+                    } catch (error) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(_adminFunctionErrorMessage(error))));
+                      }
+                    }
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF7DD3FC),
+                    foregroundColor: const Color(0xFF071A3A),
+                  ),
+                  child: const Text('Kaydet')),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      for (final controller in controllers.values) {
+        controller.dispose();
+      }
+    }
+  }
+
+  Future<void> _showGuidanceCounselorStudents(
+    String counselorId,
+    Map<String, dynamic> counselor,
+  ) async {
+    final counselorName =
+        '${counselor['fullName'] ?? counselor['name'] ?? 'Rehberlikçi'}';
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF0B234B),
+        elevation: 12,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(28),
+          side: const BorderSide(color: Color(0xFF4D78B5)),
+        ),
+        title: Text(
+          '$counselorName • Öğrenciler',
+          style:
+              const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+        ),
+        content: SizedBox(
+          width: 540,
+          height: 520,
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _firestore
+                .collection('users')
+                .where('role', isEqualTo: 'student')
+                .where('guidanceCounselorId', isEqualTo: counselorId)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final students = snapshot.data!.docs
+                  .map((doc) => {...doc.data(), '_id': doc.id})
+                  .toList();
+              final groups = groupGuidanceStudents(students);
+              if (groups.isEmpty) {
+                return const Center(
+                  child: Text(
+                    'Atanmış öğrenci bulunmuyor.',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                );
+              }
+              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _firestore
+                    .collection('guidanceTasks')
+                    .where('counselorId', isEqualTo: counselorId)
+                    .snapshots(),
+                builder: (context, tasksSnapshot) {
+                  final activeStudentIds =
+                      (tasksSnapshot.data?.docs ?? const [])
+                          .where((task) => task.data()['active'] != false)
+                          .map((task) => task.data()['studentId']?.toString())
+                          .whereType<String>()
+                          .toSet();
+                  return ListView(
+                    children: groups
+                        .map((group) => ExpansionTile(
+                              collapsedTextColor: Colors.white,
+                              textColor: const Color(0xFF8EDBFF),
+                              iconColor: const Color(0xFF8EDBFF),
+                              collapsedIconColor: Colors.white70,
+                              title: Text(group.label),
+                              subtitle: Text(
+                                '${group.students.length} öğrenci',
+                                style: const TextStyle(color: Colors.white60),
+                              ),
+                              children: group.students
+                                  .map((student) => ListTile(
+                                        title:
+                                            Text(guidanceStudentName(student)),
+                                        subtitle: Text(
+                                          activeStudentIds
+                                                  .contains(student['_id'])
+                                              ? 'Haftalık takip aktif'
+                                              : 'Aktif haftalık takip yok',
+                                          style: const TextStyle(
+                                            color: Colors.white60,
+                                          ),
+                                        ),
+                                        trailing: IconButton(
+                                          tooltip: 'Rehber öğretmeni değiştir',
+                                          icon: const Icon(
+                                              Icons.assignment_ind_rounded),
+                                          onPressed: () =>
+                                              _showGuidanceCounselorAssignment(
+                                            student['_id']?.toString() ?? '',
+                                            student,
+                                          ),
+                                        ),
+                                      ))
+                                  .toList(),
+                            ))
+                        .toList(),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFB8ECFF),
+            ),
+            child: const Text('Kapat'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _editUser(String uid, Map<String, dynamic> data) {

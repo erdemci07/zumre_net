@@ -164,6 +164,8 @@ def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin
                 if request.includeGuardian:
                     if "guardianName" in row:
                         user_data["guardianName"] = row["guardianName"]
+                    if "guardianSurname" in row:
+                        user_data["guardianSurname"] = row["guardianSurname"]
                     if "guardianPhone" in row:
                         user_data["guardianPhone"] = row["guardianPhone"]
 

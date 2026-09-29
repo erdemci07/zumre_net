@@ -138,7 +138,37 @@ def normalize_queue_doc(doc) -> QueueActivity | None:
         ),
         subject=_clean(data.get("subject"), "Bilinmeyen"),
         completed_at=completed_at,
+        teacher_name=_clean(data.get("teacherName")) or None,
+        teacher_id=_clean(data.get("teacherId")) or None,
     )
+
+
+def _hydrate_queue_teacher_names(db, queues: list[QueueActivity]) -> None:
+    """Resolve only a recorded teacher id; never infer a teacher from subject."""
+    teacher_ids = sorted({
+        queue.teacher_id for queue in queues
+        if queue.teacher_id and not queue.teacher_name
+    })
+    if not teacher_ids:
+        return
+
+    teacher_names = {}
+    for teacher_id in teacher_ids:
+        try:
+            teacher_doc = db.collection("users").document(teacher_id).get()
+            teacher_data = teacher_doc.to_dict() if teacher_doc.exists else None
+            if teacher_data and teacher_data.get("role") == "teacher":
+                teacher_names[teacher_id] = _teacher_name_from_data(teacher_data)
+        except Exception as exc:
+            LOGGER.warning(
+                "Failed to resolve completed queue teacher: teacherId=%s exceptionType=%s",
+                teacher_id,
+                type(exc).__name__,
+            )
+
+    for queue in queues:
+        if not queue.teacher_name and queue.teacher_id:
+            queue.teacher_name = teacher_names.get(queue.teacher_id) or None
 
 
 def fetch_completed_queues(db, date_range: DateRange) -> list[QueueActivity]:
@@ -163,6 +193,7 @@ def fetch_completed_queues(db, date_range: DateRange) -> list[QueueActivity]:
         raise
 
     activities.sort(key=lambda item: item.completed_at)
+    _hydrate_queue_teacher_names(db, activities)
     return activities
 
 

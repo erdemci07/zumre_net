@@ -46,3 +46,25 @@ def class_totals(data: ClassReportData):
             len(student.study_attendances) for student in data.students
         ),
     }
+
+
+def class_activity_summary(data: ClassReportData):
+    """Return only class-level, share-safe completed-question aggregates."""
+    subjects = defaultdict(lambda: {"question_count": 0, "teacher_names": set()})
+    for student in data.students:
+        for queue in student.question_timeline:
+            item = subjects[queue.subject]
+            item["question_count"] += 1
+            if queue.teacher_name:
+                item["teacher_names"].add(queue.teacher_name)
+
+    return [
+        {
+            "subject": subject,
+            "question_count": values["question_count"],
+            "teacher_names": sorted(values["teacher_names"], key=str.casefold),
+        }
+        for subject, values in sorted(
+            subjects.items(), key=lambda item: (-item[1]["question_count"], item[0])
+        )
+    ]

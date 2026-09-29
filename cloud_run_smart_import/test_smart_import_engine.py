@@ -17,12 +17,13 @@ class SmartImportEngineTest(unittest.TestCase):
         self,
         class_header="ŞUBE",
         class_value="11A",
+        guardian_surname="Yılmaz",
         guardian_phone="0532 123 45 67",
     ):
         rows = [
-            ["Öğrenci aktarımı raporu", "", "", "", "", "", "", ""],
-            ["AD", "SOYAD", "KULLANICI ADI", "ŞİFRE", class_header, "VELİ ADI", "VELİ TELEFON", "TELEFON"],
-            ["Ayşe", "Yılmaz", "ayse.yilmaz", "123456", class_value, "Murat Yılmaz", guardian_phone, "0532 999 00 11"],
+            ["Öğrenci aktarımı raporu", "", "", "", "", "", "", "", ""],
+            ["AD", "SOYAD", "KULLANICI ADI", "ŞİFRE", class_header, "VELİ ADI", "VELİ SOYADI", "VELİ TELEFON", "TELEFON"],
+            ["Ayşe", "Yılmaz", "ayse.yilmaz", "123456", class_value, "Murat", guardian_surname, guardian_phone, "0532 999 00 11"],
         ]
         handle = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
         handle.close()
@@ -56,6 +57,7 @@ class SmartImportEngineTest(unittest.TestCase):
         self.assertEqual(result["headerRow"], 2)
         self.assertEqual(result["validCount"], 1)
         self.assertNotIn("guardianName", result["validRows"][0])
+        self.assertNotIn("guardianSurname", result["validRows"][0])
         self.assertNotIn("guardianPhone", result["validRows"][0])
         self.assertNotIn("phone", result["validRows"][0])
         self.assertEqual(result["warnings"], [])
@@ -144,7 +146,8 @@ class SmartImportEngineTest(unittest.TestCase):
 
         self.assertEqual(result["validCount"], 1)
         self.assertEqual(result["invalidCount"], 0)
-        self.assertEqual(result["validRows"][0]["guardianName"], "Murat Yılmaz")
+        self.assertEqual(result["validRows"][0]["guardianName"], "Murat")
+        self.assertEqual(result["validRows"][0]["guardianSurname"], "Yılmaz")
         self.assertNotIn("guardianPhone", result["validRows"][0])
         self.assertEqual(result["reviewCount"], 1)
 

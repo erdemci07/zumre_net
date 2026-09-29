@@ -44,6 +44,7 @@ STUDENT_ALIASES = {
     "branch": ["sube", "şube", "branch", "sinif sube", "sınıf şube", "sinif şube", "sınıf sube", "derslik"],
     "department": ["bolum", "bölüm", "alan", "alan bolum", "alan bölüm", "alan/bolum", "alan/bölüm", "program", "alan*", "program*"],
     "guardianName": ["veli", "veli adi", "veli adı", "veli ad soyad", "veli ad soyadı", "anne baba adi", "anne baba adı", "yakin adi", "yakın adı"],
+    "guardianSurname": ["veli soyad", "veli soyadı", "veli soyadi", "anne baba soyad", "anne baba soyadı", "yakin soyad", "yakın soyadı"],
     "guardianPhone": ["veli telefon", "veli telefonu", "veli gsm", "veli cep", "guardian phone"],
 }
 
@@ -95,7 +96,8 @@ FIELD_LABELS = {
     "className": "Sınıf/şube",
     "department": "Bölüm",
     "subjects": "Branş",
-    "guardianName": "Veli adı soyadı",
+    "guardianName": "Veli adı",
+    "guardianSurname": "Veli soyadı",
     "guardianPhone": "Veli telefon numarası",
 }
 
@@ -494,6 +496,7 @@ def normalize_student(
 
     department = get_value(row, mapping, "department")
     guardian_name = get_value(row, mapping, "guardianName") if include_guardian else ""
+    guardian_surname = get_value(row, mapping, "guardianSurname") if include_guardian else ""
     guardian_raw_phone = get_value(row, mapping, "guardianPhone") if include_guardian else ""
     guardian_phone = normalize_guardian_phone(guardian_raw_phone) if guardian_raw_phone else ""
 
@@ -517,6 +520,7 @@ def normalize_student(
 
     if include_guardian:
         record["guardianName"] = guardian_name
+        record["guardianSurname"] = guardian_surname
         if guardian_phone:
             record["guardianPhone"] = guardian_phone
 
@@ -638,10 +642,11 @@ def analyze_excel(file_path: str, file_type: str, overrides: Optional[Dict[str, 
     # This makes the analysis payload itself safe to forward to /import.
     if file_type == "student" and not include_guardian:
         mapping.pop("guardianName", None)
+        mapping.pop("guardianSurname", None)
         mapping.pop("guardianPhone", None)
         mapping_details = [
             item for item in mapping_details
-            if item["field"] not in {"guardianName", "guardianPhone"}
+            if item["field"] not in {"guardianName", "guardianSurname", "guardianPhone"}
         ]
 
     data_df = df_raw.iloc[header_row + 1:].copy()

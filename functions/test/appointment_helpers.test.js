@@ -52,6 +52,7 @@ test("question count maps to existing estimated minutes", () => {
   assert.equal(helpers.estimatedMinutesForQuestionCount(2), 7);
   assert.equal(helpers.estimatedMinutesForQuestionCount(3), 10);
   assert.equal(helpers.estimatedMinutesForQuestionCount(4), 13);
+  assert.equal(helpers.normalizeRequestedQuestionCount(4), 3);
 });
 
 test("appointment id is deterministic per student and idempotency key", () => {

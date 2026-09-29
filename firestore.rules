@@ -52,6 +52,14 @@ service cloud.firestore {
           == roleName;
     }
 
+    function isAssignedGuidanceStudent(studentId) {
+      return exists(/databases/$(database)/documents/users/$(studentId))
+        && get(/databases/$(database)/documents/users/$(studentId)).data.role
+          == "student"
+        && get(/databases/$(database)/documents/users/$(studentId))
+          .data.guidanceCounselorId == request.auth.uid;
+    }
+
     function isGuidanceAppointmentText(fieldName, maxLength) {
       return request.resource.data[fieldName] is string
         && request.resource.data[fieldName].size() > 0
@@ -187,7 +195,16 @@ service cloud.firestore {
     // =========================================================
 
     match /settings/{documentId} {
-      allow read: if isSignedIn();
+      // Rehberlikçi öğrenci PII'sini yalnız kendi atandığı öğrenciler için
+      // okuyabilir. Diğer personel erişimleri mevcut iş akışları için korunur.
+      allow read: if isAdmin()
+        || isTeacher()
+        || isStudyGuard()
+        || (isStudent() && isOwner(userId))
+        || (isGuidance()
+          && (isOwner(userId)
+            || (resource.data.role == "student"
+              && resource.data.guidanceCounselorId == request.auth.uid)));
       allow create, update, delete: if isAdmin();
     }
 
@@ -206,7 +223,6 @@ service cloud.firestore {
           .affectedKeys()
           .hasOnly([
             "teacherStatus",
-            "weeklyAvailability",
             "manualAbsentDate",
             "breakUntil",
             "updatedAt"
@@ -258,7 +274,7 @@ service cloud.firestore {
           && request.resource.data.status == "pending")
         || (isGuidance()
           && request.resource.data.counselorId == request.auth.uid
-          && userHasRole(request.resource.data.studentId, "student")
+          && isAssignedGuidanceStudent(request.resource.data.studentId)
           && request.resource.data.status == "approved"));
 
       allow update: if isStudent()
@@ -285,8 +301,14 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (isStudent() && resource.data.studentId == request.auth.uid)
         || (isGuidance() && resource.data.counselorId == request.auth.uid);
-      allow create, update: if isGuidance()
-        && request.resource.data.counselorId == request.auth.uid;
+      allow create: if isGuidance()
+        && request.resource.data.counselorId == request.auth.uid
+        && isAssignedGuidanceStudent(request.resource.data.studentId);
+      allow update: if isGuidance()
+        && resource.data.counselorId == request.auth.uid
+        && request.resource.data.counselorId == request.auth.uid
+        && request.resource.data.studentId == resource.data.studentId
+        && isAssignedGuidanceStudent(resource.data.studentId);
       allow delete: if isGuidance()
         && resource.data.counselorId == request.auth.uid;
       allow create, update, delete: if isAdmin();

@@ -81,3 +81,76 @@ bool teacherMatchesEducationScope(
             normalizeEducationSubject(subject),
   );
 }
+
+const timeSlotScopes = {'LGS', 'YKS', 'BOTH'};
+
+String timeSlotScopeFromData(Map<Object?, Object?> data) {
+  final scope = data['educationLevel']?.toString().trim().toUpperCase() ??
+      data['scope']?.toString().trim().toUpperCase() ??
+      '';
+  return timeSlotScopes.contains(scope) ? scope : 'BOTH';
+}
+
+bool timeSlotMatchesEducationLevel(
+  Map<Object?, Object?> data,
+  String? educationLevel,
+) {
+  final scope = timeSlotScopeFromData(data);
+  return scope == 'BOTH' || (educationLevel != null && scope == educationLevel);
+}
+
+bool timeSlotMatchesManagementFilter(
+  Map<Object?, Object?> data,
+  String scopeFilter,
+) {
+  if (scopeFilter == 'ALL') return true;
+  return timeSlotMatchesEducationLevel(data, scopeFilter);
+}
+
+bool teacherCanUseTimeSlotScope(
+  Map<String, dynamic> teacher,
+  String scope,
+) {
+  if (scope == 'BOTH') {
+    final scopes = teachingScopesFromData(teacher);
+    if (scopes.isEmpty) return true;
+    final levels = scopes.map((item) => item['level']).toSet();
+    return levels.contains('LGS') && levels.contains('YKS');
+  }
+
+  if (!educationLevels.contains(scope)) return false;
+  final scopes = teachingScopesFromData(teacher);
+  return scopes.isEmpty || scopes.any((item) => item['level'] == scope);
+}
+
+bool timeIntervalsOverlap({
+  required String firstStart,
+  required String firstEnd,
+  required String secondStart,
+  required String secondEnd,
+}) {
+  int? minutes(String value) {
+    final parts = value.split(':');
+    if (parts.length != 2) return null;
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null ||
+        minute == null ||
+        hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59) {
+      return null;
+    }
+    return hour * 60 + minute;
+  }
+
+  final aStart = minutes(firstStart);
+  final aEnd = minutes(firstEnd);
+  final bStart = minutes(secondStart);
+  final bEnd = minutes(secondEnd);
+  if (aStart == null || aEnd == null || bStart == null || bEnd == null) {
+    return false;
+  }
+  return aStart < bEnd && bStart < aEnd;
+}

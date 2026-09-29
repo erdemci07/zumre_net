@@ -12,7 +12,7 @@ from models import (
     StudyAttendance,
     StudySession,
 )
-from report_metrics import class_totals, institution_metrics
+from report_metrics import class_activity_summary, class_totals, institution_metrics
 
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
@@ -78,3 +78,15 @@ def test_class_report_keeps_zero_activity_students():
         "question_count": 1,
         "study_attendance_count": 0,
     }
+
+
+def test_class_activity_summary_keeps_recorded_teacher_and_omits_legacy_teacher():
+    student = StudentReportRow("s1", "Ayşe Yılmaz", "11-A", "", "")
+    student.question_timeline.extend([
+        QueueActivity("s1", "Ayşe Yılmaz", "Matematik", datetime(2026, 9, 1, 13, tzinfo=ISTANBUL), teacher_name="Ahmet Yılmaz"),
+        QueueActivity("s1", "Ayşe Yılmaz", "Matematik", datetime(2026, 9, 1, 14, tzinfo=ISTANBUL)),
+    ])
+
+    summary = class_activity_summary(ClassReportData("11-A", _range(), [student]))
+
+    assert summary == [{"subject": "Matematik", "question_count": 2, "teacher_names": ["Ahmet Yılmaz"]}]

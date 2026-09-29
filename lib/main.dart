@@ -12,6 +12,7 @@ import 'package:zumre_net/screens/login_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:zumre_net/screens/study_guard_home_screen.dart';
 import 'package:zumre_net/screens/guidance_home_screen.dart';
+import 'package:zumre_net/screens/parent_guidance_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,92 +65,100 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isParentPublicRoute =
+        kIsWeb && Uri.base.path.replaceAll(RegExp(r'/+$'), '') == '/veli';
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthService()),
       ],
-child: MaterialApp(
-  locale: const Locale('tr', 'TR'),
-supportedLocales: const [
-  Locale('tr', 'TR'),
-  Locale('en', 'US'),
-],
-localizationsDelegates: const [
-  GlobalMaterialLocalizations.delegate,
-  GlobalWidgetsLocalizations.delegate,
-  GlobalCupertinoLocalizations.delegate,
-],
-  title: 'ZümreNet',
-  theme: AppTheme.theme,        debugShowCheckedModeBanner: false,
+      child: MaterialApp(
+        locale: const Locale('tr', 'TR'),
+        supportedLocales: const [
+          Locale('tr', 'TR'),
+          Locale('en', 'US'),
+        ],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        title: 'ZümreNet',
+        theme: AppTheme.theme,
+        debugShowCheckedModeBanner: false,
+        home: isParentPublicRoute
+            ? const ParentGuidanceScreen()
+            : StreamBuilder<User?>(
+                stream: FirebaseAuth.instance.authStateChanges(),
+                builder: (context, authSnapshot) {
+                  if (authSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Scaffold(
+                      body: Center(child: CircularProgressIndicator()),
+                    );
+                  }
 
-        home: StreamBuilder<User?>(
-          stream: FirebaseAuth.instance.authStateChanges(),
-          builder: (context, authSnapshot) {
-            if (authSnapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              );
-            }
+                  if (!authSnapshot.hasData) {
+                    return const LoginScreen();
+                  }
 
-            if (!authSnapshot.hasData) {
-              return const LoginScreen();
-            }
+                  return FutureBuilder<Widget>(
+                    future: _getHomeScreen(context, authSnapshot.data!),
+                    builder: (context, roleSnapshot) {
+                      if (roleSnapshot.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Scaffold(
+                          body: Center(child: CircularProgressIndicator()),
+                        );
+                      }
 
-            return FutureBuilder<Widget>(
-              future: _getHomeScreen(context, authSnapshot.data!),
-              builder: (context, roleSnapshot) {
-                if (roleSnapshot.connectionState == ConnectionState.waiting) {
-                  return const Scaffold(
-                    body: Center(child: CircularProgressIndicator()),
+                      if (roleSnapshot.hasError) {
+                        return Scaffold(
+                          body: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.error_outline,
+                                      size: 48, color: Colors.red),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'Giriş başarılı ancak kullanıcı rolü okunamadı.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    '${roleSnapshot.error}',
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 20),
+                                  ElevatedButton(
+                                    onPressed: () async {
+                                      await FirebaseAuth.instance.signOut();
+                                    },
+                                    child: const Text('Tekrar Giriş Yap'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+
+                      return roleSnapshot.data ?? const LoginScreen();
+                    },
                   );
-                }
-
-                if (roleSnapshot.hasError) {
-  return Scaffold(
-    body: Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
-            const SizedBox(height: 16),
-            const Text(
-              'Giriş başarılı ancak kullanıcı rolü okunamadı.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '${roleSnapshot.error}',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () async {
-                await FirebaseAuth.instance.signOut();
-              },
-              child: const Text('Tekrar Giriş Yap'),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-                return roleSnapshot.data ?? const LoginScreen();
-              },
-            );
-          },
-        ),
-
+                },
+              ),
         routes: {
           '/login': (context) => const LoginScreen(),
           '/student': (context) => const StudentHomeScreen(),
           '/teacher': (context) => const TeacherHomeScreen(),
           '/admin': (context) => const AdminHomeScreen(),
           '/guidance': (context) => const GuidanceHomeScreen(),
+          '/veli': (context) => const ParentGuidanceScreen(),
         },
       ),
     );

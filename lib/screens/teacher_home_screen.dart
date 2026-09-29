@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../utils/queue_priority.dart';
 import '../utils/class_name_display.dart';
+import '../models/education_scope.dart';
 
 class TeacherHomeScreen extends StatefulWidget {
   const TeacherHomeScreen({super.key});
@@ -801,6 +802,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           (e) => {
             'start': e['start'] ?? '09:00',
             'end': e['end'] ?? '17:00',
+            'educationLevel': e['educationLevel'] ?? e['scope'] ?? 'BOTH',
           },
         ),
       );
@@ -877,6 +879,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                         temp[day.key]!.add({
                                           'start': '09:00',
                                           'end': '17:00',
+                                          'educationLevel': 'BOTH',
                                         });
                                       });
                                     },
@@ -899,173 +902,230 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                 ...List.generate(slots.length, (index) {
                                   final slot = slots[index];
 
-                                  return Row(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                  return Column(
                                     children: [
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            const Padding(
-                                              padding: EdgeInsets.only(
-                                                  left: 14, bottom: 6),
-                                              child: Text(
-                                                'Başlangıç',
-                                                style: TextStyle(
-                                                  color: Colors.white60,
-                                                  fontSize: 12,
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                const Padding(
+                                                  padding: EdgeInsets.only(
+                                                      left: 14, bottom: 6),
+                                                  child: Text(
+                                                    'Başlangıç',
+                                                    style: TextStyle(
+                                                      color: Colors.white60,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
                                                 ),
-                                              ),
-                                            ),
-                                            TextFormField(
-                                              initialValue: slot['start'],
-                                              keyboardType:
-                                                  TextInputType.number,
-                                              inputFormatters: [
-                                                FilteringTextInputFormatter
-                                                    .digitsOnly,
-                                                LengthLimitingTextInputFormatter(
-                                                    4),
-                                                _TimeTextInputFormatter(),
-                                              ],
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 17,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                              decoration: InputDecoration(
-                                                hintText: '09:00',
-                                                hintStyle: const TextStyle(
-                                                    color: Colors.white38),
-                                                filled: true,
-                                                fillColor: Colors.white
-                                                    .withValues(alpha: 0.09),
-                                                contentPadding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 16,
-                                                  vertical: 17,
-                                                ),
-                                                border: OutlineInputBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(18),
-                                                  borderSide: BorderSide.none,
-                                                ),
-                                                enabledBorder:
-                                                    OutlineInputBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(18),
-                                                  borderSide: BorderSide(
-                                                    color: Colors.white
+                                                TextFormField(
+                                                  initialValue: slot['start'],
+                                                  keyboardType:
+                                                      TextInputType.number,
+                                                  inputFormatters: [
+                                                    FilteringTextInputFormatter
+                                                        .digitsOnly,
+                                                    LengthLimitingTextInputFormatter(
+                                                        4),
+                                                    _TimeTextInputFormatter(),
+                                                  ],
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 17,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                  decoration: InputDecoration(
+                                                    hintText: '09:00',
+                                                    hintStyle: const TextStyle(
+                                                        color: Colors.white38),
+                                                    filled: true,
+                                                    fillColor: Colors.white
                                                         .withValues(
-                                                            alpha: 0.08),
+                                                            alpha: 0.09),
+                                                    contentPadding:
+                                                        const EdgeInsets
+                                                            .symmetric(
+                                                      horizontal: 16,
+                                                      vertical: 17,
+                                                    ),
+                                                    border: OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              18),
+                                                      borderSide:
+                                                          BorderSide.none,
+                                                    ),
+                                                    enabledBorder:
+                                                        OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              18),
+                                                      borderSide: BorderSide(
+                                                        color: Colors.white
+                                                            .withValues(
+                                                                alpha: 0.08),
+                                                      ),
+                                                    ),
+                                                    focusedBorder:
+                                                        OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              18),
+                                                      borderSide:
+                                                          const BorderSide(
+                                                        color:
+                                                            Colors.greenAccent,
+                                                        width: 1.3,
+                                                      ),
+                                                    ),
                                                   ),
+                                                  onChanged: (value) {
+                                                    slot['start'] = value;
+                                                  },
                                                 ),
-                                                focusedBorder:
-                                                    OutlineInputBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(18),
-                                                  borderSide: const BorderSide(
-                                                    color: Colors.greenAccent,
-                                                    width: 1.3,
-                                                  ),
-                                                ),
-                                              ),
-                                              onChanged: (value) {
-                                                slot['start'] = value;
-                                              },
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            const Padding(
-                                              padding: EdgeInsets.only(
-                                                  left: 14, bottom: 6),
-                                              child: Text(
-                                                'Bitiş',
-                                                style: TextStyle(
-                                                  color: Colors.white60,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ),
-                                            TextFormField(
-                                              initialValue: slot['end'],
-                                              keyboardType:
-                                                  TextInputType.number,
-                                              inputFormatters: [
-                                                FilteringTextInputFormatter
-                                                    .digitsOnly,
-                                                LengthLimitingTextInputFormatter(
-                                                    4),
-                                                _TimeTextInputFormatter(),
                                               ],
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 17,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                              decoration: InputDecoration(
-                                                hintText: '17:00',
-                                                hintStyle: const TextStyle(
-                                                    color: Colors.white38),
-                                                filled: true,
-                                                fillColor: Colors.white
-                                                    .withValues(alpha: 0.09),
-                                                contentPadding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 16,
-                                                  vertical: 17,
-                                                ),
-                                                border: OutlineInputBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(18),
-                                                  borderSide: BorderSide.none,
-                                                ),
-                                                enabledBorder:
-                                                    OutlineInputBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(18),
-                                                  borderSide: BorderSide(
-                                                    color: Colors.white
-                                                        .withValues(
-                                                            alpha: 0.08),
-                                                  ),
-                                                ),
-                                                focusedBorder:
-                                                    OutlineInputBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(18),
-                                                  borderSide: const BorderSide(
-                                                    color: Colors.greenAccent,
-                                                    width: 1.3,
-                                                  ),
-                                                ),
-                                              ),
-                                              onChanged: (value) {
-                                                slot['end'] = value;
-                                              },
                                             ),
-                                          ],
-                                        ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                const Padding(
+                                                  padding: EdgeInsets.only(
+                                                      left: 14, bottom: 6),
+                                                  child: Text(
+                                                    'Bitiş',
+                                                    style: TextStyle(
+                                                      color: Colors.white60,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ),
+                                                TextFormField(
+                                                  initialValue: slot['end'],
+                                                  keyboardType:
+                                                      TextInputType.number,
+                                                  inputFormatters: [
+                                                    FilteringTextInputFormatter
+                                                        .digitsOnly,
+                                                    LengthLimitingTextInputFormatter(
+                                                        4),
+                                                    _TimeTextInputFormatter(),
+                                                  ],
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 17,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                  decoration: InputDecoration(
+                                                    hintText: '17:00',
+                                                    hintStyle: const TextStyle(
+                                                        color: Colors.white38),
+                                                    filled: true,
+                                                    fillColor: Colors.white
+                                                        .withValues(
+                                                            alpha: 0.09),
+                                                    contentPadding:
+                                                        const EdgeInsets
+                                                            .symmetric(
+                                                      horizontal: 16,
+                                                      vertical: 17,
+                                                    ),
+                                                    border: OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              18),
+                                                      borderSide:
+                                                          BorderSide.none,
+                                                    ),
+                                                    enabledBorder:
+                                                        OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              18),
+                                                      borderSide: BorderSide(
+                                                        color: Colors.white
+                                                            .withValues(
+                                                                alpha: 0.08),
+                                                      ),
+                                                    ),
+                                                    focusedBorder:
+                                                        OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              18),
+                                                      borderSide:
+                                                          const BorderSide(
+                                                        color:
+                                                            Colors.greenAccent,
+                                                        width: 1.3,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  onChanged: (value) {
+                                                    slot['end'] = value;
+                                                  },
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          IconButton(
+                                            onPressed: () {
+                                              setDialogState(() {
+                                                temp[day.key]!.removeAt(index);
+                                              });
+                                            },
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                              color: Colors.redAccent,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      IconButton(
-                                        onPressed: () {
-                                          setDialogState(() {
-                                            temp[day.key]!.removeAt(index);
-                                          });
+                                      const SizedBox(height: 8),
+                                      DropdownButtonFormField<String>(
+                                        initialValue: timeSlotScopes.contains(
+                                                slot['educationLevel'])
+                                            ? slot['educationLevel']
+                                            : 'BOTH',
+                                        isExpanded: true,
+                                        dropdownColor: const Color(0xFF06312E),
+                                        style: const TextStyle(
+                                            color: Colors.white),
+                                        decoration: const InputDecoration(
+                                          labelText: 'Eğitim Kapsamı',
+                                          labelStyle:
+                                              TextStyle(color: Colors.white60),
+                                        ),
+                                        items: const [
+                                          DropdownMenuItem(
+                                            value: 'BOTH',
+                                            child: Text('LGS + YKS'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'LGS',
+                                            child: Text('Yalnız LGS'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'YKS',
+                                            child: Text('Yalnız YKS'),
+                                          ),
+                                        ],
+                                        onChanged: (value) {
+                                          if (value != null) {
+                                            slot['educationLevel'] = value;
+                                          }
                                         },
-                                        icon: const Icon(
-                                          Icons.delete_outline,
-                                          color: Colors.redAccent,
-                                        ),
                                       ),
+                                      const SizedBox(height: 10),
                                     ],
                                   );
                                 }),
@@ -1086,7 +1146,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                           Expanded(
                             child: ElevatedButton(
                               onPressed: () async {
-                                final uid = _auth.currentUser!.uid;
                                 final nextStatus =
                                     _resolveEffectiveTeacherStatus(
                                   weeklyAvailability: temp,
@@ -1094,27 +1153,23 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                   manualAbsentDate: _manualAbsentDate,
                                   breakUntil: _breakUntil,
                                 );
-                                final updateData = <String, dynamic>{
-                                  'weeklyAvailability': temp,
-                                  'updatedAt': FieldValue.serverTimestamp(),
-                                };
-
-                                if (nextStatus != 'studyGuard') {
-                                  updateData['teacherStatus'] = nextStatus;
+                                try {
+                                  await _functions
+                                      .httpsCallable('saveTeacherAvailability')
+                                      .call({'weeklyAvailability': temp});
+                                } on FirebaseFunctionsException catch (error) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(this.context)
+                                      .showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        error.message ??
+                                            'Kurum saatleri kaydedilemedi.',
+                                      ),
+                                    ),
+                                  );
+                                  return;
                                 }
-
-                                if (_breakUntil != null &&
-                                    !_breakUntil!
-                                        .toDate()
-                                        .isAfter(DateTime.now())) {
-                                  updateData['breakUntil'] =
-                                      FieldValue.delete();
-                                }
-
-                                await _firestore
-                                    .collection('users')
-                                    .doc(uid)
-                                    .update(updateData);
 
                                 if (!mounted) return;
 
@@ -1168,6 +1223,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         return {
           'start': '${item['start']}',
           'end': '${item['end']}',
+          'educationLevel':
+              '${item['educationLevel'] ?? item['scope'] ?? 'BOTH'}',
         };
       }).toList();
     }
@@ -3872,7 +3929,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              _teacherName ?? 'Öğretmen',
+                              '${_teacherName ?? 'Öğretmen'} HOCA',
                               maxLines: 1,
                               style: const TextStyle(
                                 color: Colors.white,

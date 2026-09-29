@@ -10,9 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from auth import require_admin
+from auth import require_admin, require_reporter
 from firestore_queries import build_class_report, build_institution_summary
-from reports import class_activity, class_tracking, institution_summary
+from reports import class_activity, class_activity_summary, class_tracking, institution_summary
 
 
 if not firebase_admin._apps:
@@ -144,5 +144,18 @@ def class_activity_report(
         request,
         class_activity,
         "Sinif_Faaliyet_Takip_Raporu",
+        class_required=True,
+    )
+
+
+@app.post("/reports/class-activity-summary")
+def class_activity_summary_report(
+    request: ReportRequest,
+    _: dict = Depends(require_reporter),
+):
+    return _build_pdf(
+        request,
+        class_activity_summary,
+        "Sinif_Faaliyet_Ozeti",
         class_required=True,
     )

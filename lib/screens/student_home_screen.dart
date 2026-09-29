@@ -265,6 +265,26 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         );
   }
 
+  bool _teacherIsAvailableForEducationLevel(
+    Map<String, dynamic> data,
+    String? educationLevel,
+  ) {
+    final rawAvailability = data['weeklyAvailability'];
+    if (rawAvailability is! Map) return false;
+    final slots = rawAvailability[_dayKey(DateTime.now())];
+    if (slots is! List) return false;
+    final now = DateTime.now();
+    final nowMinutes = now.hour * 60 + now.minute;
+    return slots.whereType<Map>().any((slot) {
+      final start = _timeToMinutes(slot['start']?.toString() ?? '');
+      final end = _timeToMinutes(slot['end']?.toString() ?? '');
+      return start < end &&
+          nowMinutes >= start &&
+          nowMinutes < end &&
+          timeSlotMatchesEducationLevel(slot, educationLevel);
+    });
+  }
+
   String _teacherDisplayName(Map<String, dynamic> data) {
     final name = data['fullName'] ?? data['name'] ?? data['email'];
     final value = name?.toString().trim() ?? '';
@@ -286,7 +306,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         .get();
 
     final teachers = snapshot.docs
-        .where((doc) => _teacherMatchesSelectedSubject(doc.data(), level))
+        .where(
+      (doc) =>
+          _teacherMatchesSelectedSubject(doc.data(), level) &&
+          _teacherIsAvailableForEducationLevel(doc.data(), level),
+    )
         .map((doc) {
       final data = doc.data();
       return _TeacherChoice(
@@ -1583,7 +1607,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   Widget _buildQuestionCountSelector() {
-    final options = [1, 2, 3, 4];
+    const options = [1, 2, 3];
 
     return Container(
       width: double.infinity,
@@ -1608,7 +1632,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           Row(
             children: options.map((questionCount) {
               final selected = _selectedQuestionCount == questionCount;
-              final label = questionCount == 4 ? '4+' : '$questionCount';
+              final label = '$questionCount';
 
               return Expanded(
                 child: Padding(
@@ -2653,14 +2677,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                             const SizedBox(height: 14),
                             _planningSectionTitle('Soru'),
                             Row(
-                              children: [1, 2, 3, 4].map((questionCount) {
+                              children: [1, 2, 3].map((questionCount) {
                                 return Expanded(
                                   child: Padding(
                                     padding: const EdgeInsets.only(right: 7),
                                     child: _planningChoiceChip(
-                                      label: questionCount == 4
-                                          ? '4+'
-                                          : '$questionCount',
+                                      label: '$questionCount',
                                       selected: selectedQuestionCount ==
                                           questionCount,
                                       enabled:

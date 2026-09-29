@@ -19,6 +19,9 @@ class QueueActivity:
     student_name: str
     subject: str
     completed_at: datetime
+    # Captured from the completed queue when available. Legacy rows remain safe.
+    teacher_name: str | None = None
+    teacher_id: str | None = None
 
 
 @dataclass

@@ -2,11 +2,17 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
+const { createSmsService } = require("./services/sms_service");
+const { confirmationMessage, otpMessage } = require("./services/sms_templates");
+const publicGuidance = require("./services/public_guidance");
 const {
   educationLevel: validEducationLevel,
   studentEducationLevel,
   teachingScopes,
   teacherMatchesEducationScope,
+  timeSlotScope,
+  timeSlotMatchesEducationScope,
+  teacherCanUseTimeSlotScope,
 } = require("./utils/education_scope");
 
 admin.initializeApp();
@@ -16,6 +22,11 @@ const fieldValue = admin.firestore.FieldValue;
 
 const REGION = "us-central1";
 const TIME_ZONE = "Europe/Istanbul";
+const PUBLIC_GUIDANCE_SESSION_COLLECTION = "publicGuidanceSessions";
+const PUBLIC_GUIDANCE_OTP_COLLECTION = "publicGuidanceOtpChallenges";
+const PUBLIC_GUIDANCE_LIMIT_COLLECTION = "publicGuidanceOtpLimits";
+const PUBLIC_GUIDANCE_SELECTION_COLLECTION = "publicGuidanceSelections";
+const PUBLIC_GUIDANCE_SEARCH_LIMIT_COLLECTION = "publicGuidanceSearchLimits";
 const BULK_DELETE_LIMIT = 500;
 const BULK_DELETE_CHUNK_SIZE = 25;
 const AUTH_DELETE_RETRY_DELAYS_MS = [750, 1500, 3000];
@@ -129,6 +140,7 @@ function normalizeScheduleSlots(rawSlots) {
     .map((slot) => ({
       start: String(slot?.start ?? ""),
       end: String(slot?.end ?? ""),
+      educationLevel: timeSlotScope(slot),
       startMinutes: timeToMinutes(String(slot?.start ?? "")),
       endMinutes: timeToMinutes(String(slot?.end ?? "")),
     }))
@@ -177,9 +189,13 @@ function getStudySlots(scheduleData, weekday) {
   return daily.studyClosed ? [] : daily.studySlots;
 }
 
-function getZumreSlots(scheduleData, weekday) {
+function getZumreSlots(scheduleData, weekday, educationLevel) {
   const daily = getDailySchedule(scheduleData, weekday);
-  return daily.zumreClosed ? [] : daily.zumreSlots;
+  if (daily.zumreClosed) return [];
+  if (educationLevel === undefined) return daily.zumreSlots;
+  return daily.zumreSlots.filter((slot) =>
+    timeSlotMatchesEducationScope(slot, educationLevel)
+  );
 }
 
 function weekdayKeyFromDate(date) {
@@ -236,7 +252,7 @@ function scheduleWithWeekly(scheduleData = {}, weeklySchedule = {}) {
 
 function slotsSignature(slots) {
   return normalizeScheduleSlots(slots)
-    .map((slot) => `${slot.start}-${slot.end}`)
+    .map((slot) => `${slot.start}-${slot.end}-${slot.educationLevel}`)
     .join("|");
 }
 
@@ -272,6 +288,7 @@ function getTeacherAvailabilitySlots(teacherData, weekday) {
     .map((slot) => ({
       start: String(slot?.start ?? ""),
       end: String(slot?.end ?? ""),
+      educationLevel: timeSlotScope(slot),
       startMinutes: timeToMinutes(String(slot?.start ?? "")),
       endMinutes: timeToMinutes(String(slot?.end ?? "")),
     }))
@@ -283,13 +300,16 @@ function getTeacherAvailabilitySlots(teacherData, weekday) {
     );
 }
 
-function isTeacherScheduledNow(teacherData, now = new Date()) {
+function isTeacherScheduledNow(teacherData, now = new Date(), educationLevel) {
   const nowParts = getIstanbulDateParts(now);
   const currentMinutes = nowParts.hour * 60 + nowParts.minute;
-  const slots = getTeacherAvailabilitySlots(
+  const allSlots = getTeacherAvailabilitySlots(
     teacherData,
     nowParts.weekday
   );
+  const slots = educationLevel === undefined
+    ? allSlots
+    : allSlots.filter((slot) => timeSlotMatchesEducationScope(slot, educationLevel));
 
   return isNowInSlots(currentMinutes, slots);
 }
@@ -859,6 +879,12 @@ function normalizeQuestionCount(value) {
   return Math.min(Math.max(Math.trunc(parsed), 1), 4);
 }
 
+// Legacy 4-question records keep their historical workload for rotation.
+// New student requests are limited to the three choices shown in the UI.
+function normalizeRequestedQuestionCount(value) {
+  return Math.min(normalizeQuestionCount(value), 3);
+}
+
 function estimatedMinutesForQuestionCount(questionCount) {
   if (questionCount === 1) return 4;
   if (questionCount === 2) return 7;
@@ -1197,14 +1223,21 @@ function publicDisplayName(userData, fallback) {
   );
 }
 
-function findContainingZumreSlot(scheduleData, startDate, endDate) {
+function findContainingZumreSlot(
+  scheduleData,
+  startDate,
+  endDate,
+  educationLevel
+) {
   const parts = getIstanbulDateParts(startDate);
   const startMinutes = parts.hour * 60 + parts.minute;
   const durationMinutes = Math.ceil(
     (endDate.getTime() - startDate.getTime()) / 60000
   );
   const endMinutes = startMinutes + durationMinutes;
-  const slots = getZumreSlots(scheduleData, parts.weekday);
+  const slots = educationLevel === undefined
+    ? getZumreSlots(scheduleData, parts.weekday)
+    : getZumreSlots(scheduleData, parts.weekday, educationLevel);
 
   return slots.find(
     (slot) =>
@@ -1213,28 +1246,109 @@ function findContainingZumreSlot(scheduleData, startDate, endDate) {
   ) || null;
 }
 
-function appointmentFitsZumreSchedule(scheduleData, startDate, endDate) {
-  return findContainingZumreSlot(scheduleData, startDate, endDate) !== null;
+function appointmentFitsZumreSchedule(
+  scheduleData,
+  startDate,
+  endDate,
+  educationLevel
+) {
+  return findContainingZumreSlot(
+    scheduleData,
+    startDate,
+    endDate,
+    educationLevel
+  ) !== null;
 }
 
 function buildSlotKey(dateKey, slot) {
   return `${dateKey}-${slot.start}-${slot.end}`;
 }
 
-function teacherScheduledForAppointment(teacherData, startDate, endDate) {
+function teacherScheduledForAppointment(
+  teacherData,
+  startDate,
+  endDate,
+  educationLevel
+) {
   const parts = getIstanbulDateParts(startDate);
   const startMinutes = parts.hour * 60 + parts.minute;
   const durationMinutes = Math.ceil(
     (endDate.getTime() - startDate.getTime()) / 60000
   );
   const endMinutes = startMinutes + durationMinutes;
-  const slots = getTeacherAvailabilitySlots(teacherData, parts.weekday);
+  const allSlots = getTeacherAvailabilitySlots(teacherData, parts.weekday);
+  const slots = educationLevel === undefined
+    ? allSlots
+    : allSlots.filter((slot) => timeSlotMatchesEducationScope(slot, educationLevel));
 
   return slots.some(
     (slot) =>
       startMinutes >= slot.startMinutes &&
       endMinutes <= slot.endMinutes
   );
+}
+
+function normalizeTeacherWeeklyAvailability(rawAvailability) {
+  const result = {};
+  if (!rawAvailability || typeof rawAvailability !== "object") return result;
+
+  for (const [day, rawSlots] of Object.entries(rawAvailability)) {
+    if (!Array.isArray(rawSlots)) continue;
+    result[day] = rawSlots.map((slot) => ({
+      start: cleanText(slot?.start),
+      end: cleanText(slot?.end),
+      educationLevel: timeSlotScope(slot),
+    }));
+  }
+  return result;
+}
+
+function validateTeacherWeeklyAvailability(teacherData, rawAvailability) {
+  if (!rawAvailability || typeof rawAvailability !== "object") {
+    return "Kurum saatleri geçersiz.";
+  }
+
+  for (const [day, rawSlots] of Object.entries(rawAvailability)) {
+    if (!Array.isArray(rawSlots)) {
+      return "Kurum saatleri geçersiz.";
+    }
+
+    const slots = [];
+    for (const rawSlot of rawSlots) {
+      const start = cleanText(rawSlot?.start);
+      const end = cleanText(rawSlot?.end);
+      const startMinutes = timeToMinutes(start);
+      const endMinutes = timeToMinutes(end);
+      const rawScope = cleanText(rawSlot?.educationLevel || rawSlot?.scope).toUpperCase();
+      const scope = timeSlotScope(rawSlot);
+
+      if (startMinutes < 0 || endMinutes <= startMinutes) {
+        return "Başlangıç saati bitiş saatinden önce olmalı.";
+      }
+      if (rawScope && !["LGS", "YKS", "BOTH"].includes(rawScope)) {
+        return "Eğitim kapsamı LGS, YKS veya LGS + YKS olmalı.";
+      }
+      if (!teacherCanUseTimeSlotScope(teacherData, scope)) {
+        return "Öğretmenin eğitim kapsamı seçilen zaman bloğuyla uyumlu değil.";
+      }
+      slots.push({ startMinutes, endMinutes });
+    }
+
+    for (let index = 0; index < slots.length; index += 1) {
+      for (let other = index + 1; other < slots.length; other += 1) {
+        const first = slots[index];
+        const second = slots[other];
+        if (
+          first.startMinutes < second.endMinutes &&
+          second.startMinutes < first.endMinutes
+        ) {
+          return "Bu öğretmenin seçilen saat aralığında başka bir programı bulunuyor.";
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 function appointmentOverlapsDocs(docs, startDate, endDate, options = {}) {
@@ -1430,6 +1544,7 @@ function appointmentTransferEligibility({
   const teacherData = destinationTeacherDoc.data() || {};
   const teacherId = destinationTeacherDoc.id;
   const subject = cleanText(appointmentData.subject);
+  const educationLevel = validEducationLevel(appointmentData.educationLevel);
   const dateKey = cleanText(appointmentData.dateKey);
   const scheduledStart = timestampToDate(appointmentData.scheduledStart);
   const scheduledEnd = timestampToDate(appointmentData.scheduledEnd);
@@ -1442,7 +1557,8 @@ function appointmentTransferEligibility({
     return { ok: false, reason: "Seçilen kullanıcı öğretmen değil." };
   }
 
-  if (!teacherHasSubject(teacherData, subject)) {
+  if (!teacherHasSubject(teacherData, subject) ||
+      !teacherMatchesEducationScope(teacherData, educationLevel, subject)) {
     return { ok: false, reason: "Seçilen öğretmen bu ders için uygun değil." };
   }
 
@@ -1450,12 +1566,22 @@ function appointmentTransferEligibility({
     return { ok: false, reason: "Seçilen öğretmen o gün kurumda değil görünüyor." };
   }
 
-  const slot = findContainingZumreSlot(scheduleData, scheduledStart, scheduledEnd);
+  const slot = findContainingZumreSlot(
+    scheduleData,
+    scheduledStart,
+    scheduledEnd,
+    educationLevel
+  );
   if (!slot) {
     return { ok: false, reason: "Seçilen saat tanımlı zümre saatleri içinde değil." };
   }
 
-  if (!teacherScheduledForAppointment(teacherData, scheduledStart, scheduledEnd)) {
+  if (!teacherScheduledForAppointment(
+    teacherData,
+    scheduledStart,
+    scheduledEnd,
+    educationLevel
+  )) {
     return { ok: false, reason: "Seçilen öğretmen bu saatte kurum programında uygun değil." };
   }
 
@@ -1630,7 +1756,12 @@ function scheduleConflictDocsForChange({
     if (!start || !end || start.getTime() <= now.getTime()) return false;
 
     if (!changedDays.has(weekdayKeyFromDate(start))) return false;
-    return !appointmentFitsZumreSchedule(nextSchedule, start, end);
+    return !appointmentFitsZumreSchedule(
+      nextSchedule,
+      start,
+      end,
+      validEducationLevel(data.educationLevel)
+    );
   });
 }
 
@@ -2179,7 +2310,9 @@ function validateUserPayload(data, options = {}) {
   const surname = cleanText(data?.surname);
   const fullName = cleanText(data?.fullName || `${firstName} ${surname}`);
   const guardianName = cleanText(data?.guardianName);
+  const guardianSurname = cleanText(data?.guardianSurname);
   const guardianPhone = data?.guardianPhone ? normalizeGuardianPhone(data.guardianPhone) : "";
+  const guidanceCounselorId = cleanText(data?.guidanceCounselorId);
   const educationLevels = cleanEducationLevels(data?.educationLevels);
   const teachingScopesValue = cleanTeachingScopes(data?.teachingScopes);
   const educationLevel = validEducationLevel(data?.educationLevel);
@@ -2226,7 +2359,9 @@ function validateUserPayload(data, options = {}) {
     branch: cleanText(data?.branch),
     department: cleanText(data?.department),
     guardianName,
+    guardianSurname,
     guardianPhone,
+    guidanceCounselorId,
     educationLevel,
     educationLevels,
     teachingScopes: teachingScopesValue,
@@ -2256,7 +2391,9 @@ function buildUserDocument(payload, options = {}) {
       branch: payload.branch,
       department: payload.department,
       guardianName: payload.guardianName,
+      guardianSurname: payload.guardianSurname,
       guardianPhone: payload.guardianPhone,
+      guidanceCounselorId: payload.guidanceCounselorId,
       isInStudySession: false,
       activeStudySessionId: null,
       ...(payload.educationLevel ? { educationLevel: payload.educationLevel } : {}),
@@ -2281,6 +2418,21 @@ function buildUserDocument(payload, options = {}) {
   return userData;
 }
 
+async function assertGuidanceCounselorAssignment(payload) {
+  if (payload.role !== "student" || !payload.guidanceCounselorId) return;
+
+  const counselor = await db
+    .collection("users")
+    .doc(payload.guidanceCounselorId)
+    .get();
+  if (!counselor.exists || counselor.data()?.role !== "guidance") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Seçilen rehber öğretmen artık kullanılamıyor."
+    );
+  }
+}
+
 function applyRoleCleanup(updateData, newRole) {
   if (newRole === "teacher") {
     updateData.className = fieldValue.delete();
@@ -2291,6 +2443,7 @@ function applyRoleCleanup(updateData, newRole) {
     updateData.manualAbsentDate = fieldValue.delete();
     updateData.breakUntil = fieldValue.delete();
     updateData.educationLevel = fieldValue.delete();
+    updateData.guidanceCounselorId = fieldValue.delete();
   } else if (newRole === "student") {
     updateData.subjects = fieldValue.delete();
     updateData.teacherStatus = fieldValue.delete();
@@ -2314,6 +2467,7 @@ function applyRoleCleanup(updateData, newRole) {
     updateData.educationLevel = fieldValue.delete();
     updateData.educationLevels = fieldValue.delete();
     updateData.teachingScopes = fieldValue.delete();
+    updateData.guidanceCounselorId = fieldValue.delete();
   }
 }
 
@@ -2649,6 +2803,7 @@ exports.adminCreateUser = onCall(
     const payload = validateUserPayload(request.data, {
       requirePassword: true,
     });
+    await assertGuidanceCounselorAssignment(payload);
 
     let authUser;
 
@@ -2734,6 +2889,7 @@ exports.adminUpdateUser = onCall(
 
     const existingData = userDoc.data() || {};
     const payload = validateUserPayload(request.data);
+    await assertGuidanceCounselorAssignment(payload);
     const roleChanged = payload.role !== existingData.role;
     const emailChanged = payload.email !== existingData.email;
     const oldEmail = existingData.email;
@@ -3641,6 +3797,45 @@ exports.ensureStudySession = onCall(
   }
 );
 
+exports.saveTeacherAvailability = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const teacher = await assertRoleCaller(request, "teacher");
+    const validationError = validateTeacherWeeklyAvailability(
+      teacher.data,
+      request.data?.weeklyAvailability
+    );
+    if (validationError) {
+      throw new HttpsError("invalid-argument", validationError);
+    }
+
+    const weeklyAvailability = normalizeTeacherWeeklyAvailability(
+      request.data?.weeklyAvailability
+    );
+
+    await db.runTransaction(async (transaction) => {
+      const teacherDoc = await transaction.get(teacher.ref);
+      const teacherData = teacherDoc.data() || {};
+      const nextStatus = resolveTeacherLifecycleStatus(
+        { ...teacherData, weeklyAvailability },
+        new Date()
+      ).status;
+      const update = {
+        weeklyAvailability,
+        updatedAt: fieldValue.serverTimestamp(),
+      };
+      if (teacherData.teacherStatus !== "studyGuard") {
+        update.teacherStatus = nextStatus;
+      }
+      transaction.update(teacher.ref, update);
+    });
+
+    return { ok: true, weeklyAvailability };
+  }
+);
+
 exports.getAppointmentAvailability = onCall(
   {
     region: REGION,
@@ -3650,7 +3845,7 @@ exports.getAppointmentAvailability = onCall(
     const subject = cleanText(request.data?.subject);
     const teacherIdFilter = cleanText(request.data?.teacherId);
     const dateKey = cleanText(request.data?.dateKey);
-    const questionCount = normalizeQuestionCount(request.data?.questionCount);
+    const questionCount = normalizeRequestedQuestionCount(request.data?.questionCount);
     const estimatedMinutes = estimatedMinutesForQuestionCount(questionCount);
     const date = parseDateKeyToIstanbulNoon(dateKey);
 
@@ -3702,7 +3897,12 @@ exports.getAppointmentAvailability = onCall(
     }
 
     const dayParts = getIstanbulDateParts(date);
-    const slots = getZumreSlots(scheduleData, dayParts.weekday);
+    const studentLevel = studentEducationLevel(student.data);
+    const slots = getZumreSlots(
+      scheduleData,
+      dayParts.weekday,
+      studentLevel
+    );
     if (slots.length === 0) {
       return {
         ok: true,
@@ -3757,7 +3957,12 @@ exports.getAppointmentAvailability = onCall(
             continue;
           }
 
-          if (!teacherScheduledForAppointment(teacherData, startDate, endDate)) {
+          if (!teacherScheduledForAppointment(
+            teacherData,
+            startDate,
+            endDate,
+            studentLevel
+          )) {
             continue;
           }
 
@@ -3806,7 +4011,7 @@ exports.createAppointment = onCall(
     const subject = cleanText(request.data?.subject);
     const teacherId = cleanText(request.data?.teacherId);
     const idempotencyKey = cleanIdempotencyKey(request.data?.idempotencyKey);
-    const questionCount = normalizeQuestionCount(request.data?.questionCount);
+    const questionCount = normalizeRequestedQuestionCount(request.data?.questionCount);
     const estimatedMinutes = estimatedMinutesForQuestionCount(questionCount);
     const scheduledStart = parseRequestedAppointmentStart(
       request.data?.scheduledStart ?? request.data?.requestedStart
@@ -3950,6 +4155,7 @@ exports.createAppointment = onCall(
 
       const studentData = studentDoc.data() || {};
       const teacherData = teacherDoc.data() || {};
+      const studentLevel = studentEducationLevel(studentData);
 
       if (studentData.isInStudySession === true) {
         throw new HttpsError(
@@ -3977,7 +4183,8 @@ exports.createAppointment = onCall(
       const slot = findContainingZumreSlot(
         scheduleData,
         scheduledStart,
-        scheduledEnd
+        scheduledEnd,
+        studentLevel
       );
 
       if (!slot) {
@@ -3987,7 +4194,12 @@ exports.createAppointment = onCall(
         );
       }
 
-      if (!teacherScheduledForAppointment(teacherData, scheduledStart, scheduledEnd)) {
+      if (!teacherScheduledForAppointment(
+        teacherData,
+        scheduledStart,
+        scheduledEnd,
+        studentLevel
+      )) {
         throw new HttpsError(
           "failed-precondition",
           "Seçilen öğretmen bu saatte kurum programında uygun değil."
@@ -4131,7 +4343,7 @@ exports.routeQueueRequest = onCall(
     const student = await assertRoleCaller(request, "student");
     const subject = cleanText(request.data?.subject);
     const requestedTeacherId = cleanText(request.data?.teacherId);
-    const questionCount = normalizeQuestionCount(request.data?.questionCount);
+    const questionCount = normalizeRequestedQuestionCount(request.data?.questionCount);
     const estimatedMinutes = estimatedMinutesForQuestionCount(questionCount);
 
     if (!subject) {
@@ -4199,8 +4411,10 @@ exports.routeQueueRequest = onCall(
         );
       }
 
+      const studentLevel = studentEducationLevel(studentData);
       const candidateTeachers = teachersSnapshot.docs.filter((doc) =>
-        teacherMatchesStudentScope(doc.data(), studentData, subject)
+        teacherMatchesStudentScope(doc.data(), studentData, subject) &&
+        isTeacherScheduledNow(doc.data(), new Date(), studentLevel)
       );
 
       if (candidateTeachers.length === 0) {
@@ -5658,6 +5872,348 @@ async function applyPlannedExamRuntime(now = new Date()) {
 // SUNUCU TARAFI GENEL ZAMAN DURUMU
 // ============================================================
 
+// ============================================================
+// PUBLIC VELİ REHBERLİK RANDEVUSU
+// Public callers only receive an opaque session and minimum display data.
+// All Firestore access and final booking remain server-side.
+// ============================================================
+
+function publicGuidanceError() {
+  return publicGuidance.genericVerificationError(HttpsError);
+}
+
+function publicTimestampExpired(value, now = new Date()) {
+  return !value || typeof value.toDate !== "function" || value.toDate() <= now;
+}
+
+async function loadPublicGuidanceSession(token) {
+  const sessionToken = String(token || "");
+  if (!/^[A-Za-z0-9_-]{32,}$/.test(sessionToken)) throw publicGuidanceError();
+  const doc = await db.collection(PUBLIC_GUIDANCE_SESSION_COLLECTION).doc(sessionToken).get();
+  if (!doc.exists || publicTimestampExpired(doc.data()?.expiresAt)) throw publicGuidanceError();
+  return { ref: doc.ref, data: doc.data() || {} };
+}
+
+async function counselorAppointments(counselorId) {
+  const snapshot = await db.collection("guidanceAppointments")
+    .where("counselorId", "==", counselorId).get();
+  return snapshot.docs.map((doc) => doc.data() || {});
+}
+
+async function availablePublicGuidanceSlots(sessionData, dateKey) {
+  if (!publicGuidance.validDateKey(dateKey)) throw publicGuidanceError();
+  const counselorDoc = await db.collection("users").doc(sessionData.counselorId).get();
+  if (!counselorDoc.exists || counselorDoc.data()?.role !== "guidance") return [];
+  const availability = publicGuidance.normalizeAvailability(counselorDoc.data()?.guidanceAvailability);
+  return publicGuidance.slotOptions(availability, dateKey, new Date(), await counselorAppointments(sessionData.counselorId));
+}
+
+function parentPhoneMatchFallbackEnabled(env = process.env) {
+  return String(env.PARENT_PHONE_MATCH_FALLBACK || "true") === "true" &&
+    String(env.NETGSM_ENABLED || "false") !== "true";
+}
+
+function publicClassLabel(student) {
+  const className = cleanText(student.className);
+  const branch = cleanText(student.branch);
+  const grade = /^(5|6|7|8|9|10|11|12)-(.*)$/.exec(className);
+  const base = grade ? `${grade[1]}. Sınıf${grade[2] ? ` • ${grade[2]}` : ""}` : className;
+  return [base, branch && branch !== className ? branch : ""].filter(Boolean).join(" • ");
+}
+
+async function loadPublicGuidanceSelection(token) {
+  const selectionToken = String(token || "");
+  if (!/^[A-Za-z0-9_-]{32,}$/.test(selectionToken)) throw publicGuidanceError();
+  const doc = await db.collection(PUBLIC_GUIDANCE_SELECTION_COLLECTION).doc(selectionToken).get();
+  if (!doc.exists || publicTimestampExpired(doc.data()?.expiresAt)) throw publicGuidanceError();
+  return { ref: doc.ref, data: doc.data() || {} };
+}
+
+exports.publicGuidanceSearchStudents = onCall({ region: REGION }, async (request) => {
+  const query = cleanText(request.data?.query);
+  if (query.length < 3) return { results: [] };
+  const normalizedQuery = query.toLocaleUpperCase("tr-TR");
+  const searchLimitRef = db.collection(PUBLIC_GUIDANCE_SEARCH_LIMIT_COLLECTION).doc(
+    crypto.createHash("sha256").update(normalizedQuery).digest("hex")
+  );
+  await db.runTransaction(async (transaction) => {
+    const limitDoc = await transaction.get(searchLimitRef);
+    if (limitDoc.data()?.nextAllowedAt?.toDate?.() > new Date()) {
+      throw new HttpsError("resource-exhausted", "Lütfen kısa süre sonra tekrar arayın.");
+    }
+    transaction.set(searchLimitRef, {
+      nextAllowedAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 1500)),
+      updatedAt: fieldValue.serverTimestamp(),
+    });
+  });
+  const snapshot = await db.collection("users")
+    .where("fullName", ">=", normalizedQuery)
+    .where("fullName", "<", `${normalizedQuery}\uf8ff`)
+    .limit(10)
+    .get();
+  const now = new Date();
+  const results = [];
+  for (const studentDoc of snapshot.docs) {
+    const student = studentDoc.data() || {};
+    if (student.role !== "student") continue;
+    const token = publicGuidance.opaqueToken();
+    await db.collection(PUBLIC_GUIDANCE_SELECTION_COLLECTION).doc(token).set({
+      studentId: studentDoc.id,
+      attempts: 0,
+      expiresAt: admin.firestore.Timestamp.fromDate(new Date(now.getTime() + 5 * 60 * 1000)),
+      createdAt: fieldValue.serverTimestamp(),
+    });
+    results.push({ selectionToken: token, studentName: cleanText(student.fullName || student.name) || "Öğrenci", classLabel: publicClassLabel(student) });
+  }
+  return { results };
+});
+
+exports.publicGuidanceSelectStudent = onCall({ region: REGION }, async (request) => {
+  const selection = await loadPublicGuidanceSelection(request.data?.selectionToken);
+  const studentDoc = await db.collection("users").doc(selection.data.studentId).get();
+  const phone = publicGuidance.normalizePhone(studentDoc.data()?.guardianPhone);
+  if (!studentDoc.exists || studentDoc.data()?.role !== "student") throw publicGuidanceError();
+  return { hasGuardianPhone: Boolean(phone), maskedPhone: phone ? publicGuidance.maskPhone(phone).replace(/^\*\*\* /, "5** ") : null };
+});
+
+exports.publicGuidanceVerifySelectedPhone = onCall({ region: REGION }, async (request) => {
+  const selection = await loadPublicGuidanceSelection(request.data?.selectionToken);
+  const suppliedPhone = publicGuidance.normalizePhone(request.data?.guardianPhone);
+  if (!suppliedPhone) throw new HttpsError("failed-precondition", "Telefon numarası kayıtlarımızla eşleşmedi.");
+  if (selection.data.lockedUntil?.toDate?.() > new Date()) throw new HttpsError("resource-exhausted", "Lütfen daha sonra tekrar deneyin.");
+  const studentDoc = await db.collection("users").doc(selection.data.studentId).get();
+  const student = studentDoc.data() || {};
+  const storedPhone = publicGuidance.normalizePhone(student.guardianPhone);
+  if (!studentDoc.exists || !storedPhone || !crypto.timingSafeEqual(Buffer.from(storedPhone), Buffer.from(suppliedPhone))) {
+    await selection.ref.update({ attempts: admin.firestore.FieldValue.increment(1), updatedAt: fieldValue.serverTimestamp() });
+    if (Number(selection.data.attempts || 0) >= 4) await selection.ref.update({ lockedUntil: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000)) });
+    throw new HttpsError("failed-precondition", "Telefon numarası kayıtlarımızla eşleşmedi.");
+  }
+  if (!parentPhoneMatchFallbackEnabled()) throw new HttpsError("failed-precondition", "Telefon doğrulaması için SMS kodu gereklidir.");
+  const counselorId = cleanText(student.guidanceCounselorId || student.counselorId);
+  const counselorDoc = counselorId ? await db.collection("users").doc(counselorId).get() : null;
+  if (!counselorDoc?.exists || counselorDoc.data()?.role !== "guidance") throw new HttpsError("failed-precondition", "Bu öğrenci için rehberlik randevusu şu anda tanımlı değil.");
+  const sessionToken = publicGuidance.opaqueToken();
+  await db.collection(PUBLIC_GUIDANCE_SESSION_COLLECTION).doc(sessionToken).set({ studentId: studentDoc.id, counselorId, verifiedAt: fieldValue.serverTimestamp(), expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + publicGuidance.PUBLIC_SESSION_TTL_MS)), createdAt: fieldValue.serverTimestamp() });
+  await selection.ref.update({ usedAt: fieldValue.serverTimestamp(), expiresAt: admin.firestore.Timestamp.fromDate(new Date()) });
+  const counselor = counselorDoc.data() || {};
+  return { sessionToken, studentName: cleanText(student.fullName || student.name) || "Öğrenci", counselorName: cleanText(counselor.fullName || counselor.name) || "Rehberlik Servisi" };
+});
+
+exports.saveGuidanceAvailability = onCall({ region: REGION }, async (request) => {
+  const counselorId = cleanText(request.data?.counselorId);
+  if (!counselorId) throw new HttpsError("invalid-argument", "Rehberlikçi seçimi zorunludur.");
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
+  }
+  const caller = await db.collection("users").doc(request.auth.uid).get();
+  const callerRole = caller.data()?.role;
+  if (callerRole !== "admin" &&
+      !(callerRole === "guidance" && request.auth.uid === counselorId)) {
+    throw new HttpsError("permission-denied", "Bu rehberlikçinin çalışma saatlerini değiştiremezsiniz.");
+  }
+  const counselorRef = db.collection("users").doc(counselorId);
+  const counselorDoc = await counselorRef.get();
+  if (!counselorDoc.exists || counselorDoc.data()?.role !== "guidance") {
+    throw new HttpsError("failed-precondition", "Seçilen kullanıcı rehberlikçi değil.");
+  }
+  const availability = publicGuidance.normalizeAvailability(request.data?.guidanceAvailability);
+  await counselorRef.update({ guidanceAvailability: availability, updatedAt: fieldValue.serverTimestamp() });
+  return { ok: true, guidanceAvailability: availability };
+});
+
+exports.adminAssignGuidanceCounselor = onCall({ region: REGION }, async (request) => {
+  await assertAdminCaller(request);
+  const counselorId = cleanText(request.data?.counselorId);
+  const studentIds = [...new Set(Array.isArray(request.data?.studentIds) ? request.data.studentIds.map(cleanText).filter(Boolean) : [])].slice(0, 400);
+  if (!counselorId || studentIds.length === 0) throw new HttpsError("invalid-argument", "Rehberlikçi ve öğrenci seçimi zorunludur.");
+  const counselor = await db.collection("users").doc(counselorId).get();
+  if (!counselor.exists || counselor.data()?.role !== "guidance") throw new HttpsError("failed-precondition", "Seçilen kullanıcı rehberlikçi değil.");
+  const docs = await db.getAll(...studentIds.map((id) => db.collection("users").doc(id)));
+  const students = docs.filter((doc) =>
+    doc.exists &&
+    doc.data()?.role === "student" &&
+    !cleanText(doc.data()?.guidanceCounselorId)
+  );
+  const batch = db.batch();
+  for (const student of students) batch.update(student.ref, { guidanceCounselorId: counselorId, updatedAt: fieldValue.serverTimestamp() });
+  await batch.commit();
+  return { assignedCount: students.length, skippedCount: studentIds.length - students.length };
+});
+
+exports.publicGuidanceVerifyStudent = onCall({ region: REGION }, async (request) => {
+  const username = publicGuidance.normalizeUsername(request.data?.username);
+  const phone = publicGuidance.normalizePhone(request.data?.guardianPhone);
+  if (!username || !phone) throw publicGuidanceError();
+  const snapshot = await db.collection("users").where("identityKey", "==", username).limit(1).get();
+  const studentDoc = snapshot.docs[0];
+  const student = studentDoc?.data() || {};
+  const storedPhone = publicGuidance.normalizePhone(student.guardianPhone);
+  if (!studentDoc || student.role !== "student" || !storedPhone || !crypto.timingSafeEqual(Buffer.from(storedPhone), Buffer.from(phone))) {
+    throw publicGuidanceError();
+  }
+  const counselorId = cleanText(student.guidanceCounselorId || student.counselorId);
+  const counselorDoc = counselorId ? await db.collection("users").doc(counselorId).get() : null;
+  if (!counselorDoc?.exists || counselorDoc.data()?.role !== "guidance") {
+    throw new HttpsError("failed-precondition", "Bu öğrenci için rehberlik randevusu şu anda tanımlı değil.");
+  }
+  const token = publicGuidance.opaqueToken();
+  const counselor = counselorDoc.data() || {};
+  await db.collection(PUBLIC_GUIDANCE_SESSION_COLLECTION).doc(token).set({
+    studentId: studentDoc.id,
+    counselorId,
+    expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + publicGuidance.PUBLIC_SESSION_TTL_MS)),
+    createdAt: fieldValue.serverTimestamp(),
+  });
+  return {
+    sessionToken: token,
+    studentName: cleanText(student.fullName || student.name) || "Öğrenci",
+    counselorName: cleanText(counselor.fullName || counselor.name) || "Rehberlik Servisi",
+  };
+});
+
+exports.publicGuidanceAvailableSlots = onCall({ region: REGION }, async (request) => {
+  const session = await loadPublicGuidanceSession(request.data?.sessionToken);
+  const dateKey = cleanText(request.data?.date);
+  const slots = await availablePublicGuidanceSlots(session.data, dateKey);
+  return { date: dateKey, slots };
+});
+
+exports.publicGuidanceExistingAppointments = onCall({ region: REGION }, async (request) => {
+  const session = await loadPublicGuidanceSession(request.data?.sessionToken);
+  const snapshot = await db.collection("guidanceAppointments")
+    .where("studentId", "==", session.data.studentId).get();
+  const appointments = publicGuidance.publicUpcomingAppointments(
+    snapshot.docs.map((doc) => doc.data() || {}),
+  );
+  // The session was created only after guardian-phone verification. Keep the
+  // response deliberately small: no student identifiers, internal notes, or
+  // operational appointment fields are disclosed.
+  return { appointments };
+});
+
+exports.publicGuidanceRequestOtp = onCall({ region: REGION }, async (request) => {
+  const session = await loadPublicGuidanceSession(request.data?.sessionToken);
+  const dateKey = cleanText(request.data?.date);
+  const time = cleanText(request.data?.time);
+  const slots = await availablePublicGuidanceSlots(session.data, dateKey);
+  if (!slots.includes(time)) throw new HttpsError("failed-precondition", "Seçilen saat artık uygun değil.");
+  if (parentPhoneMatchFallbackEnabled()) {
+    return { phoneMatchFallback: true };
+  }
+  const studentDoc = await db.collection("users").doc(session.data.studentId).get();
+  const phone = publicGuidance.normalizePhone(studentDoc.data()?.guardianPhone);
+  if (!phone) throw publicGuidanceError();
+  const phoneKey = crypto.createHash("sha256").update(phone).digest("hex");
+  const limitRef = db.collection(PUBLIC_GUIDANCE_LIMIT_COLLECTION).doc(phoneKey);
+  const challengeId = publicGuidance.opaqueToken();
+  const challengeRef = db.collection(PUBLIC_GUIDANCE_OTP_COLLECTION).doc(challengeId);
+  const code = publicGuidance.otpCode();
+  const salt = crypto.randomBytes(16).toString("hex");
+  const now = new Date();
+  const dayKey = getIstanbulDateParts(now).dateKey;
+  await db.runTransaction(async (transaction) => {
+    const limitDoc = await transaction.get(limitRef);
+    const limit = limitDoc.data() || {};
+    if (limit.dayKey === dayKey && limit.cooldownUntil?.toDate?.() > now) throw new HttpsError("resource-exhausted", "Lütfen kısa süre sonra tekrar deneyin.");
+    if (limit.dayKey === dayKey && Number(limit.count || 0) >= publicGuidance.OTP_DAILY_LIMIT) throw new HttpsError("resource-exhausted", "Bugün için kod gönderim sınırına ulaşıldı.");
+    transaction.set(limitRef, { dayKey, count: limit.dayKey === dayKey ? Number(limit.count || 0) + 1 : 1, cooldownUntil: admin.firestore.Timestamp.fromDate(new Date(now.getTime() + publicGuidance.OTP_COOLDOWN_MS)), updatedAt: fieldValue.serverTimestamp() });
+    transaction.set(challengeRef, { sessionToken: request.data.sessionToken, studentId: session.data.studentId, counselorId: session.data.counselorId, appointmentDate: dateKey, time, codeHash: publicGuidance.hashOtp(code, salt), salt, attempts: 0, usedAt: null, expiresAt: admin.firestore.Timestamp.fromDate(new Date(now.getTime() + publicGuidance.OTP_TTL_MS)), createdAt: fieldValue.serverTimestamp() });
+  });
+  const delivery = await createSmsService().sendOtp({ to: phone, message: otpMessage(code) });
+  return { challengeId, maskedPhone: publicGuidance.maskPhone(phone), expiresInSeconds: 180, deliveryAvailable: delivery.delivered === true };
+});
+
+exports.publicGuidanceConfirmPhoneMatchedBooking = onCall({ region: REGION }, async (request) => {
+  if (!parentPhoneMatchFallbackEnabled()) {
+    throw new HttpsError("failed-precondition", "Bu işlem için SMS doğrulaması gereklidir.");
+  }
+  const session = await loadPublicGuidanceSession(request.data?.sessionToken);
+  const dateKey = cleanText(request.data?.date);
+  const time = cleanText(request.data?.time);
+  if (!(await availablePublicGuidanceSlots(session.data, dateKey)).includes(time)) {
+    throw new HttpsError("failed-precondition", "Seçilen saat artık uygun değil.");
+  }
+  const appointmentRef = db.collection("guidanceAppointments").doc();
+  let confirmation;
+  await db.runTransaction(async (transaction) => {
+    const [studentDoc, counselorDoc, appointmentSnapshot] = await Promise.all([
+      transaction.get(db.collection("users").doc(session.data.studentId)),
+      transaction.get(db.collection("users").doc(session.data.counselorId)),
+      transaction.get(db.collection("guidanceAppointments").where("counselorId", "==", session.data.counselorId)),
+    ]);
+    const availability = publicGuidance.normalizeAvailability(counselorDoc.data()?.guidanceAvailability);
+    const slots = publicGuidance.slotOptions(availability, dateKey, new Date(), appointmentSnapshot.docs.map((doc) => doc.data() || {}));
+    if (!studentDoc.exists || !counselorDoc.exists || !slots.includes(time)) {
+      throw new HttpsError("failed-precondition", "Seçilen saat artık uygun değil.");
+    }
+    const student = studentDoc.data() || {};
+    const counselor = counselorDoc.data() || {};
+    transaction.set(appointmentRef, {
+      studentId: studentDoc.id,
+      studentName: cleanText(student.fullName || student.name) || "Öğrenci",
+      counselorId: counselorDoc.id,
+      counselorName: cleanText(counselor.fullName || counselor.name) || "Rehberlik Servisi",
+      reason: "Veli rehberlik görüşmesi",
+      dayLabel: dateKey,
+      appointmentDate: dateKey,
+      time,
+      participantType: "guardian",
+      status: "approved",
+      source: "parent_public_phone_match",
+      createdAt: fieldValue.serverTimestamp(),
+      updatedAt: fieldValue.serverTimestamp(),
+      approvedAt: fieldValue.serverTimestamp(),
+    });
+    confirmation = {
+      studentName: cleanText(student.fullName || student.name) || "Öğrenci",
+      counselorName: cleanText(counselor.fullName || counselor.name) || "Rehberlik Servisi",
+      date: dateKey,
+      time,
+    };
+  });
+  return confirmation;
+});
+
+exports.publicGuidanceConfirmOtp = onCall({ region: REGION }, async (request) => {
+  const session = await loadPublicGuidanceSession(request.data?.sessionToken);
+  const challengeId = String(request.data?.challengeId || "");
+  const code = String(request.data?.code || "");
+  if (!/^[A-Za-z0-9_-]{32,}$/.test(challengeId) || !/^\d{6}$/.test(code)) throw new HttpsError("invalid-argument", "Doğrulama kodu geçersiz.");
+  const challengeRef = db.collection(PUBLIC_GUIDANCE_OTP_COLLECTION).doc(challengeId);
+  const appointmentRef = db.collection("guidanceAppointments").doc();
+  let confirmation;
+  await db.runTransaction(async (transaction) => {
+    const challengeDoc = await transaction.get(challengeRef);
+    const challenge = challengeDoc.data() || {};
+    if (!challengeDoc.exists || challenge.sessionToken !== request.data.sessionToken || challenge.studentId !== session.data.studentId || challenge.usedAt || publicTimestampExpired(challenge.expiresAt)) throw new HttpsError("failed-precondition", "Doğrulama kodu geçersiz veya süresi dolmuş.");
+    if (Number(challenge.attempts || 0) >= publicGuidance.OTP_MAX_ATTEMPTS) throw new HttpsError("resource-exhausted", "Doğrulama deneme sınırına ulaşıldı.");
+    const submittedHash = publicGuidance.hashOtp(code, challenge.salt);
+    if (!crypto.timingSafeEqual(Buffer.from(submittedHash), Buffer.from(challenge.codeHash))) {
+      transaction.update(challengeRef, { attempts: Number(challenge.attempts || 0) + 1, updatedAt: fieldValue.serverTimestamp() });
+      throw new HttpsError("failed-precondition", "Doğrulama kodu geçersiz veya süresi dolmuş.");
+    }
+    const [studentDoc, counselorDoc, appointmentSnapshot] = await Promise.all([
+      transaction.get(db.collection("users").doc(session.data.studentId)),
+      transaction.get(db.collection("users").doc(session.data.counselorId)),
+      transaction.get(db.collection("guidanceAppointments").where("counselorId", "==", session.data.counselorId)),
+    ]);
+    const availability = publicGuidance.normalizeAvailability(counselorDoc.data()?.guidanceAvailability);
+    const appointments = appointmentSnapshot.docs.map((doc) => doc.data() || {});
+    const slots = publicGuidance.slotOptions(availability, challenge.appointmentDate, new Date(), appointments);
+    if (!studentDoc.exists || !counselorDoc.exists || !slots.includes(challenge.time)) throw new HttpsError("failed-precondition", "Seçilen saat artık uygun değil.");
+    const student = studentDoc.data() || {}; const counselor = counselorDoc.data() || {};
+    transaction.set(appointmentRef, { studentId: studentDoc.id, studentName: cleanText(student.fullName || student.name) || "Öğrenci", counselorId: counselorDoc.id, counselorName: cleanText(counselor.fullName || counselor.name) || "Rehberlik Servisi", reason: "Veli rehberlik görüşmesi", dayLabel: challenge.appointmentDate, appointmentDate: challenge.appointmentDate, time: challenge.time, participantType: "guardian", status: "approved", source: "parent_public", createdAt: fieldValue.serverTimestamp(), updatedAt: fieldValue.serverTimestamp(), approvedAt: fieldValue.serverTimestamp() });
+    transaction.update(challengeRef, { usedAt: fieldValue.serverTimestamp(), updatedAt: fieldValue.serverTimestamp() });
+    confirmation = { studentName: cleanText(student.fullName || student.name) || "Öğrenci", counselorName: cleanText(counselor.fullName || counselor.name) || "Rehberlik Servisi", date: challenge.appointmentDate, time: challenge.time };
+  });
+  await createSmsService().sendAppointmentConfirmation({
+    ...confirmation,
+    message: confirmationMessage(confirmation),
+  });
+  return confirmation;
+});
+
 exports.syncRuntimeSchedule = onSchedule(
   {
     schedule: "every 1 minutes",
@@ -5859,6 +6415,7 @@ if (process.env.NODE_ENV === "test") {
     transferEditUntilFor,
     dateKeyFromIstanbulDate,
     estimatedMinutesForQuestionCount,
+    normalizeRequestedQuestionCount,
     findContainingZumreSlot,
     generateAppointmentStartOptions,
     noShowVerificationUpdate,
@@ -5878,5 +6435,7 @@ if (process.env.NODE_ENV === "test") {
     studentEducationLevel,
     teacherMatchesEducationScope,
     teacherMatchesStudentScope,
+    timeSlotMatchesEducationScope,
+    validateTeacherWeeklyAvailability,
   };
 }

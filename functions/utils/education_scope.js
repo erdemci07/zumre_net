@@ -1,4 +1,5 @@
 const EDUCATION_LEVELS = ["LGS", "YKS"];
+const TIME_SLOT_SCOPES = ["LGS", "YKS", "BOTH"];
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -55,10 +56,33 @@ function teacherMatchesEducationScope(teacher, level, subject) {
   );
 }
 
+function timeSlotScope(slot = {}) {
+  const scope = cleanText(slot.educationLevel || slot.scope).toUpperCase();
+  return TIME_SLOT_SCOPES.includes(scope) ? scope : "BOTH";
+}
+
+function timeSlotMatchesEducationScope(slot, level) {
+  const scope = timeSlotScope(slot);
+  return scope === "BOTH" || (!!level && scope === level);
+}
+
+function teacherCanUseTimeSlotScope(teacher = {}, scope) {
+  const normalizedScope = timeSlotScope({ educationLevel: scope });
+  const scopes = teachingScopes(teacher);
+  if (scopes.length === 0) return true;
+  const levels = new Set(scopes.map((item) => item.level));
+  return normalizedScope === "BOTH"
+    ? levels.has("LGS") && levels.has("YKS")
+    : levels.has(normalizedScope);
+}
+
 module.exports = {
   EDUCATION_LEVELS,
   educationLevel,
   studentEducationLevel,
   teachingScopes,
   teacherMatchesEducationScope,
+  timeSlotScope,
+  timeSlotMatchesEducationScope,
+  teacherCanUseTimeSlotScope,
 };

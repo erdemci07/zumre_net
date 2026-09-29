@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from models import ClassReportData, DateRange, InstitutionSummaryData, StudentReportRow
 from pdf.pagination import student_chunks
-from reports import class_activity, class_tracking, institution_summary
+from reports import class_activity, class_activity_summary, class_tracking, institution_summary
 from pdf.styles import report_styles
 
 
@@ -28,6 +28,7 @@ def test_reports_render_valid_pdf_bytes_without_firebase():
     assert institution_summary.render(empty_summary).startswith(b"%PDF")
     assert class_tracking.render(class_data).startswith(b"%PDF")
     assert class_activity.render(class_data).startswith(b"%PDF")
+    assert class_activity_summary.render(class_data).startswith(b"%PDF")
 
 
 def test_student_chunks_adds_continuation_title_for_long_sections():

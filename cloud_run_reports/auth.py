@@ -24,3 +24,28 @@ def require_admin(authorization: str | None = Header(default=None)) -> str:
         raise HTTPException(status_code=403, detail="Bu işlem için yetkiniz yok.")
 
     return uid
+
+
+def require_reporter(authorization: str | None = Header(default=None)) -> str:
+    """Allow guidance only for the share-safe class activity summary."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Oturum doğrulanamadı.")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Oturum doğrulanamadı.")
+
+    try:
+        decoded = auth.verify_id_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Oturum doğrulanamadı.")
+
+    uid = decoded.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Oturum doğrulanamadı.")
+
+    user_doc = firestore.client().collection("users").document(uid).get()
+    if not user_doc.exists or user_doc.to_dict().get("role") not in {"admin", "guidance"}:
+        raise HTTPException(status_code=403, detail="Bu işlem için yetkiniz yok.")
+
+    return uid
