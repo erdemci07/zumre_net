@@ -1555,85 +1555,144 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
       _studentsById.values,
       query: _studentSearch,
     );
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      TextField(
-        onChanged: (value) => setState(() => _studentSearch = value),
-        style: const TextStyle(color: Colors.white),
-        decoration: InputDecoration(
-          hintText: 'Öğrenci veya sınıf ara',
-          hintStyle: const TextStyle(color: Colors.white54),
-          prefixIcon: const Icon(Icons.search_rounded, color: Colors.white70),
-          filled: true,
-          fillColor: Colors.white.withValues(alpha: .08),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide.none,
-          ),
-        ),
-      ),
-      const SizedBox(height: 12),
-      if (groups.isEmpty)
-        const Padding(
-          padding: EdgeInsets.all(20),
-          child: Center(
-            child: Text('Size atanmış öğrenci bulunmuyor.',
-                style: TextStyle(color: Colors.white70)),
-          ),
-        ),
-      ...groups.map((group) => Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: .07),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white12),
-            ),
-            child: Theme(
-              data:
-                  Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                tilePadding: const EdgeInsets.symmetric(horizontal: 14),
-                childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                iconColor: Colors.white70,
-                collapsedIconColor: Colors.white60,
-                title: Text(group.label,
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w800)),
-                subtitle: Text('${group.students.length} öğrenci',
-                    style: const TextStyle(color: Colors.white60)),
-                children: group.students.map((student) {
-                  final studentId = student['_id']?.toString() ?? '';
-                  return ListTile(
-                    onTap: () => _showStudentGuidanceDetail(
-                      studentId,
-                      student,
-                      appointments,
-                    ),
-                    leading: const CircleAvatar(
-                      child: Icon(Icons.person_outline_rounded),
-                    ),
-                    title: Text(guidanceStudentName(student),
-                        style: const TextStyle(color: Colors.white)),
-                    subtitle: const Text(
-                      'Takip durumu açmak için dokunun',
-                      style: TextStyle(color: Colors.white60, fontSize: 12),
-                    ),
-                    trailing: IconButton(
-                      tooltip: 'Haftalık Takip Ver',
-                      icon: const Icon(Icons.playlist_add_check_rounded,
-                          color: Color(0xFFFFB1C8)),
-                      onPressed: studentId.isEmpty
-                          ? null
-                          : () => addWeeklyTask(
-                                initialStudentId: studentId,
-                                initialStudent: student,
-                              ),
-                    ),
-                  );
-                }).toList(),
+    final uid = auth.currentUser!.uid;
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: db
+          .collection('guidanceTasks')
+          .where('counselorId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, taskSnap) {
+        final activeTasks = <String, Map<String, dynamic>>{};
+        for (final doc in taskSnap.data?.docs ??
+            const <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
+          final data = doc.data();
+          if (data['active'] != false) {
+            final studentId = '${data['studentId'] ?? ''}';
+            if (studentId.isNotEmpty) activeTasks[studentId] = data;
+          }
+        }
+
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          TextField(
+            onChanged: (value) => setState(() => _studentSearch = value),
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Öğrenci veya sınıf ara',
+              hintStyle: const TextStyle(color: Colors.white54),
+              prefixIcon:
+                  const Icon(Icons.search_rounded, color: Colors.white70),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: .08),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
               ),
             ),
-          )),
-    ]);
+          ),
+          const SizedBox(height: 12),
+          if (groups.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Center(
+                child: Text('Size atanmış öğrenci bulunmuyor.',
+                    style: TextStyle(color: Colors.white70)),
+              ),
+            ),
+          ...groups.map((group) => Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: .07),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Theme(
+                  data: Theme.of(context)
+                      .copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+                    childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    iconColor: Colors.white70,
+                    collapsedIconColor: Colors.white60,
+                    title: Text(group.label,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800)),
+                    subtitle: Text('${group.students.length} öğrenci',
+                        style: const TextStyle(color: Colors.white60)),
+                    children: group.students.map((student) {
+                      final studentId = student['_id']?.toString() ?? '';
+                      final task = activeTasks[studentId];
+                      final hasTask = task != null;
+                      final taskTitle = '${task?['title'] ?? ''}'.trim();
+                      final taskSchedule = '${task?['schedule'] ?? ''}'.trim();
+                      final subtitle = hasTask
+                          ? [
+                              if (taskTitle.isNotEmpty) taskTitle,
+                              if (taskSchedule.isNotEmpty) taskSchedule,
+                            ].join(' • ')
+                          : 'Henüz haftalık takip programı yok';
+
+                      return ListTile(
+                        onTap: () => _showStudentGuidanceDetail(
+                          studentId,
+                          student,
+                          appointments,
+                        ),
+                        leading: CircleAvatar(
+                          backgroundColor: hasTask
+                              ? const Color(0xFFFFB1C8)
+                                  .withValues(alpha: .18)
+                              : Colors.white10,
+                          child: Icon(
+                            hasTask
+                                ? Icons.event_repeat_rounded
+                                : Icons.person_outline_rounded,
+                            color: hasTask
+                                ? const Color(0xFFFFB1C8)
+                                : Colors.white70,
+                          ),
+                        ),
+                        title: Text(guidanceStudentName(student),
+                            style: const TextStyle(color: Colors.white)),
+                        subtitle: Text(
+                          subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: hasTask
+                                ? const Color(0xFFFFD7E4)
+                                : Colors.white60,
+                            fontSize: 12,
+                          ),
+                        ),
+                        trailing: IconButton(
+                          tooltip: hasTask
+                              ? 'Aktif haftalık takip mevcut'
+                              : 'Haftalık Takip Ver',
+                          icon: Icon(
+                            hasTask
+                                ? Icons.check_circle_rounded
+                                : Icons.playlist_add_check_rounded,
+                            color: hasTask
+                                ? Colors.white38
+                                : const Color(0xFFFFB1C8),
+                          ),
+                          onPressed: studentId.isEmpty || hasTask
+                              ? null
+                              : () => addWeeklyTask(
+                                    initialStudentId: studentId,
+                                    initialStudent: student,
+                                  ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              )),
+        ]);
+      },
+    );
   }
 
   Future<void> _showStudentGuidanceDetail(
@@ -1642,50 +1701,112 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
     List<QueryDocumentSnapshot<Map<String, dynamic>>> appointments,
   ) async {
     final guardian = guidanceGuardianLabel(student);
+    final classLabel = formatStudentClassDisplay(
+      className: student['className'],
+      branch: student['branch'],
+      department: student['department'],
+    );
     final upcoming = appointments.where((item) {
       final data = item.data();
       return data['studentId'] == studentId &&
           !_guidanceTerminalStatuses.contains(_guidanceStatus(data['status']));
     }).toList();
-    await showModalBottomSheet<void>(
+
+    await showDialog<void>(
       context: context,
-      backgroundColor: const Color(0xFF5A1C38),
-      isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-              mainAxisSize: MainAxisSize.min,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+        child: Container(
+          width: double.infinity,
+          constraints: BoxConstraints(
+            maxWidth: 520,
+            maxHeight: MediaQuery.of(dialogContext).size.height * .82,
+          ),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF4A102B), Color(0xFF7A2449)],
+            ),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: .28),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(guidanceStudentName(student),
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 21,
-                        fontWeight: FontWeight.w800)),
-                const SizedBox(height: 5),
-                Text(
-                    formatStudentClassDisplay(
-                        className: student['className'],
-                        branch: student['branch'],
-                        department: student['department']),
-                    style: const TextStyle(color: Colors.white70)),
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFB1C8).withValues(alpha: .14),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(Icons.person_rounded,
+                        color: Color(0xFFFFB1C8)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(guidanceStudentName(student),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 21,
+                                fontWeight: FontWeight.w800)),
+                        if (classLabel.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(classLabel,
+                              style: const TextStyle(color: Colors.white70)),
+                        ],
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close_rounded,
+                        color: Colors.white70),
+                  ),
+                ]),
                 if (guardian.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Text('Veli: $guardian',
-                      style: const TextStyle(color: Colors.white70)),
+                  const SizedBox(height: 16),
+                  _guidanceInfoRow(
+                    Icons.family_restroom_rounded,
+                    'Veli',
+                    guardian,
+                  ),
                 ],
-                const SizedBox(height: 14),
-                Text('Yaklaşan rehberlik randevuları: ${upcoming.length}',
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w700)),
-                ...upcoming.take(3).map((item) => Padding(
-                      padding: const EdgeInsets.only(top: 5),
-                      child: Text(
-                          '${item.data()['dayLabel'] ?? ''} • ${item.data()['time'] ?? ''}',
-                          style: const TextStyle(color: Colors.white70)),
-                    )),
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
+                _guidanceInfoRow(
+                  Icons.event_rounded,
+                  'Yaklaşan randevu',
+                  upcoming.isEmpty
+                      ? 'Planlanmış randevu yok'
+                      : '${upcoming.length} randevu',
+                ),
+                if (upcoming.isNotEmpty)
+                  ...upcoming.take(3).map(
+                        (item) => Padding(
+                          padding: const EdgeInsets.only(left: 46, top: 5),
+                          child: Text(
+                            '${item.data()['dayLabel'] ?? ''} • ${item.data()['time'] ?? ''}',
+                            style: const TextStyle(
+                                color: Colors.white60, fontSize: 12),
+                          ),
+                        ),
+                      ),
+                const SizedBox(height: 10),
                 StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                   stream: db
                       .collection('guidanceTasks')
@@ -1697,30 +1818,109 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                             item.data()['studentId'] == studentId &&
                             item.data()['active'] != false)
                         .toList();
-                    return Text(
-                      tasks.isEmpty
-                          ? 'Aktif haftalık takip yok.'
-                          : 'Aktif haftalık takip: ${tasks.map((item) => item.data()['schedule']).join(', ')}',
-                      style: const TextStyle(color: Colors.white70),
+                    final task = tasks.isEmpty ? null : tasks.first.data();
+                    final hasTask = task != null;
+                    final taskTitle = '${task?['title'] ?? ''}'.trim();
+                    final taskSchedule = '${task?['schedule'] ?? ''}'.trim();
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _guidanceInfoRow(
+                          Icons.event_repeat_rounded,
+                          'Haftalık takip',
+                          hasTask
+                              ? [
+                                  if (taskTitle.isNotEmpty) taskTitle,
+                                  if (taskSchedule.isNotEmpty) taskSchedule,
+                                ].join(' • ')
+                              : 'Henüz program oluşturulmamış',
+                        ),
+                        const SizedBox(height: 18),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: hasTask
+                                  ? Colors.white12
+                                  : const Color(0xFFFFB1C8),
+                              foregroundColor: hasTask
+                                  ? Colors.white38
+                                  : const Color(0xFF4A102B),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 15),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(17),
+                              ),
+                            ),
+                            onPressed: studentId.isEmpty || hasTask
+                                ? null
+                                : () {
+                                    Navigator.pop(dialogContext);
+                                    addWeeklyTask(
+                                      initialStudentId: studentId,
+                                      initialStudent: student,
+                                    );
+                                  },
+                            icon: Icon(hasTask
+                                ? Icons.check_circle_rounded
+                                : Icons.playlist_add_check_rounded),
+                            label: Text(
+                              hasTask
+                                  ? 'Aktif Takip Programı Var'
+                                  : 'Haftalık Takip Ver',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: studentId.isEmpty
-                      ? null
-                      : () {
-                          Navigator.pop(sheetContext);
-                          addWeeklyTask(
-                              initialStudentId: studentId,
-                              initialStudent: student);
-                        },
-                  icon: const Icon(Icons.playlist_add_check_rounded),
-                  label: const Text('Haftalık Takip Ver'),
-                ),
-              ]),
+              ],
+            ),
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _guidanceInfoRow(IconData icon, String label, String value) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .07),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFB1C8).withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(11),
+          ),
+          child: Icon(icon, size: 18, color: const Color(0xFFFFB1C8)),
+        ),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style:
+                      const TextStyle(color: Colors.white54, fontSize: 11)),
+              const SizedBox(height: 2),
+              Text(value,
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      ]),
     );
   }
 
@@ -1853,10 +2053,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                       },
                       icon: const Icon(Icons.logout_rounded))
                 ]),
-            floatingActionButton: FloatingActionButton.extended(
-                onPressed: addWeeklyTask,
-                icon: const Icon(Icons.playlist_add_check_rounded),
-                label: const Text('Haftalık Takip Ver')),
             body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                 stream: db
                     .collection('guidanceAppointments')
