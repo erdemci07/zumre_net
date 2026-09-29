@@ -145,9 +145,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return grade != null && grade >= 5 && grade <= 8;
   }
 
-  String get _scheduleEducationLevel =>
-      _usesLgsSubjectCards ? 'LGS' : 'YKS';
-
   Map<String, String>? _guidanceAppointment;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
       _guidanceAppointmentSubscription;
