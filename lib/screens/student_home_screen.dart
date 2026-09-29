@@ -690,7 +690,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     // Öğretmen ekranındaki kapsam mantığıyla aynı davranış:
     // scope henüz yüklenmediyse programı boşaltma. Öğrenci bilgisi gelir
     // gelmez kendi LGS/YKS kapsamına tekrar filtrelenir.
-    final level = _studentEducationLevel;
+    final level = _scheduleEducationLevel;
     if (level == null) return slots.toList();
 
     return slots.where((slot) {
