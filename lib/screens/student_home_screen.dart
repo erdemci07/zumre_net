@@ -1524,54 +1524,72 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       color: Colors.orangeAccent,
     );
 
-    if (confirm == true) {
+    if (confirm != true) return;
+
+    try {
+      int cooldownUntilMs;
+
       try {
         final callable = _functions.httpsCallable('studentCancelQueue');
         final response = await callable.call<Map<String, dynamic>>({
           'queueId': _currentQueueId,
         });
-
-        final cooldownUntilMs =
+        cooldownUntilMs =
             (response.data['cooldownUntilMs'] as num?)?.toInt() ??
                 DateTime.now()
                     .add(const Duration(minutes: 2))
                     .millisecondsSinceEpoch;
-
-        if (mounted) {
-          setState(() {
-            _isInQueue = false;
-            _cooldownUntil = cooldownUntilMs;
-            _remainingCooldownSeconds =
-                ((_cooldownUntil - DateTime.now().millisecondsSinceEpoch) /
-                        1000)
-                    .ceil()
-                    .clamp(0, 120)
-                    .toInt();
-            _currentQueueId = null;
-            _currentTeacherName = null;
-            _queuePosition = 0;
-            _estimatedWaitMinutes = null;
-          });
-        }
-
-        _startCooldownTimer();
-
-        await _queueSubscription?.cancel();
-        await _queuePositionSubscription?.cancel();
-        _queueSubscription = null;
-        _queuePositionSubscription = null;
-        _queuePositionTeacherId = null;
       } on FirebaseFunctionsException catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message ?? 'Sıra iptal edilemedi.')),
-        );
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('İptal sırasında hata: $e')),
-        );
+        // Backend workflow ilk kez kurulurken Functions deploy henüz canlı
+        // değilse mevcut production davranışı kısa süreli fallback olarak
+        // korunur. Function canlı olduğunda bu yol hiç çalışmaz.
+        if (e.code != 'not-found' && e.code != 'unimplemented') rethrow;
+
+        final cooldownDate = DateTime.now().add(const Duration(minutes: 2));
+        await _firestore.collection('queues').doc(_currentQueueId).update({
+          'status': 'cancelled',
+          'cancelledAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
+          'cooldownUntil': Timestamp.fromDate(cooldownDate),
+        });
+        cooldownUntilMs = cooldownDate.millisecondsSinceEpoch;
       }
+
+      if (mounted) {
+        setState(() {
+          _isInQueue = false;
+          _cooldownUntil = cooldownUntilMs;
+          _remainingCooldownSeconds =
+              ((_cooldownUntil - DateTime.now().millisecondsSinceEpoch) / 1000)
+                  .ceil()
+                  .clamp(0, 120)
+                  .toInt();
+          _currentQueueId = null;
+          _currentTeacherName = null;
+          _queuePosition = 0;
+          _estimatedWaitMinutes = null;
+        });
+      }
+
+      _startCooldownTimer();
+
+      await _queueSubscription?.cancel();
+      await _queuePositionSubscription?.cancel();
+      _queueSubscription = null;
+      _queuePositionSubscription = null;
+      _queuePositionTeacherId = null;
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message ?? 'Sıra iptal edilemedi.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('İptal sırasında hata: $e')),
+      );
     }
   }
 
