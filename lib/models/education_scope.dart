@@ -41,11 +41,14 @@ String? inferredStudentEducationLevel(Map<String, dynamic> data) {
   if (explicit != null) return explicit;
 
   final className = data['className']?.toString().trim().toUpperCase() ?? '';
-  if (RegExp(r'^(5|6|7|8)-').hasMatch(className)) return 'LGS';
-  if (RegExp(r'^(9|10|11|12)-').hasMatch(className) ||
-      RegExp(r'^MEZUN(?:-|$)').hasMatch(className)) {
-    return 'YKS';
-  }
+  // Kurum verilerinde sınıf; "8-A", "DERSLİK 8", "DERSLİK 10 SAY"
+  // veya "MEZUN" gibi farklı biçimlerde gelebiliyor.
+  final gradeMatch =
+      RegExp(r'(^|\\D)(1[0-2]|[5-9])(?=\\D|$)').firstMatch(className);
+  final grade = int.tryParse(gradeMatch?.group(2) ?? '');
+  if (grade != null && grade >= 5 && grade <= 8) return 'LGS';
+  if (grade != null && grade >= 9 && grade <= 12) return 'YKS';
+  if (RegExp(r'(^|\\s)MEZUN(?:\\s|$)').hasMatch(className)) return 'YKS';
   return null;
 }
 
