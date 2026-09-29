@@ -24,11 +24,26 @@ function educationLevel(value) {
 function studentEducationLevel(student = {}) {
   const explicit = educationLevel(student.educationLevel);
   if (explicit) return explicit;
-  const className = cleanText(student.className).toLocaleUpperCase("tr-TR");
-  if (/^(5|6|7|8)-/.test(className)) return "LGS";
-  if (/^(9|10|11|12)-/.test(className) || /^MEZUN(?:-|$)/.test(className)) {
-    return "YKS";
-  }
+
+  const classText = [
+    student.className,
+    student.class,
+    student.grade,
+    student.branch,
+    student.department,
+  ]
+    .filter((value) => value !== undefined && value !== null)
+    .map((value) => cleanText(value))
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleUpperCase("tr-TR");
+
+  if (/(^|\W)MEZUN(?=\W|$)/.test(classText)) return "YKS";
+
+  const gradeMatch = /(^|\D)(1[0-2]|[5-9])(?=\D|$)/.exec(classText);
+  const grade = Number(gradeMatch?.[2]);
+  if (Number.isInteger(grade) && grade >= 5 && grade <= 8) return "LGS";
+  if (Number.isInteger(grade) && grade >= 9 && grade <= 12) return "YKS";
   return null;
 }
 
