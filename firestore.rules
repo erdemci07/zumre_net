@@ -200,11 +200,8 @@ service cloud.firestore {
       allow read: if isAdmin()
         || isTeacher()
         || isStudyGuard()
-        || (isStudent() && isOwner(userId))
-        || (isGuidance()
-          && (isOwner(userId)
-            || (resource.data.role == "student"
-              && resource.data.guidanceCounselorId == request.auth.uid)));
+        || isStudent()
+        || isGuidance();
       allow create, update, delete: if isAdmin();
     }
 
