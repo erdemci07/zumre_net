@@ -5084,7 +5084,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 SliverToBoxAdapter(
                   child: _bulkSelectionBar(
                     selectedCount: selectedCount,
-                    selectedStudentCount: selectedStudentIds.length,
                     visibleCount: selectableUids.length,
                     progressCount: _bulkDeleteProcessed,
                     progressTotal: _bulkDeleteTotal,
@@ -5553,7 +5552,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
 
   Widget _bulkSelectionBar({
     required int selectedCount,
-    required int selectedStudentCount,
     required int visibleCount,
     required int progressCount,
     required int progressTotal,
