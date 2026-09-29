@@ -6805,6 +6805,49 @@ exports.adminAssignGuidanceCounselor = onCall({ region: REGION }, async (request
   return { assignedCount: students.length, skippedCount: studentIds.length - students.length };
 });
 
+exports.guidanceAssignStudents = onCall({ region: REGION }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
+  }
+  const caller = await db.collection("users").doc(request.auth.uid).get();
+  if (!caller.exists || caller.data()?.role !== "guidance") {
+    throw new HttpsError("permission-denied", "Bu işlem yalnız rehberlikçiler içindir.");
+  }
+
+  const counselorId = request.auth.uid;
+  const studentIds = [...new Set(
+    Array.isArray(request.data?.studentIds)
+      ? request.data.studentIds.map(cleanText).filter(Boolean)
+      : []
+  )].slice(0, 200);
+  if (studentIds.length === 0) {
+    throw new HttpsError("invalid-argument", "En az bir öğrenci seçin.");
+  }
+
+  const docs = await db.getAll(
+    ...studentIds.map((id) => db.collection("users").doc(id))
+  );
+  const students = docs.filter((doc) =>
+    doc.exists &&
+    doc.data()?.role === "student" &&
+    !cleanText(doc.data()?.guidanceCounselorId)
+  );
+
+  const batch = db.batch();
+  for (const student of students) {
+    batch.update(student.ref, {
+      guidanceCounselorId: counselorId,
+      updatedAt: fieldValue.serverTimestamp(),
+    });
+  }
+  await batch.commit();
+
+  return {
+    assignedCount: students.length,
+    skippedCount: studentIds.length - students.length,
+  };
+});
+
 exports.publicGuidanceVerifyStudent = onCall({ region: REGION }, async (request) => {
   const username = publicGuidance.normalizeUsername(request.data?.username);
   const phone = publicGuidance.normalizePhone(request.data?.guardianPhone);
