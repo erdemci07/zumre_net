@@ -2176,20 +2176,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                     return;
                                   }
 
-                                  await _firestore.collection('queues').add({
+                                  final callable = _functions
+                                      .httpsCallable('teacherAddManualQueue');
+                                  await callable.call<Map<String, dynamic>>({
                                     'studentId': selectedId,
-                                    'studentName': selectedStudentName,
-                                    'teacherId': teacherId,
-                                    'teacherName': _teacherName ?? 'Öğretmen',
                                     'subject': _teacherSubject ?? 'Ders',
-                                    'status': 'waiting',
-                                    'isManual': true,
-                                    'questionCount': 1,
-                                    'estimatedMinutes': 4,
-                                    'extraMinutes': 0,
-                                    'createdAt': FieldValue.serverTimestamp(),
-                                    'startedAt': null,
-                                    'updatedAt': FieldValue.serverTimestamp(),
                                   });
 
                                   await _takeNextWaitingQueue();
