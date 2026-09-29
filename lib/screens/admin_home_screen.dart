@@ -3225,39 +3225,84 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
+  bool _scopeIsOpenNow(
+    Map<String, dynamic> scheduleData,
+    String educationLevel,
+  ) {
+    final now = DateTime.now();
+    final weekly = scheduleData['weeklySchedule'];
+    if (weekly is! Map) return false;
+    final day = weekly[_scheduleDayKey(now)];
+    if (day is! Map ||
+        day['closed'] == true ||
+        day['zumreClosed'] == true) {
+      return false;
+    }
+
+    final nowMinutes = now.hour * 60 + now.minute;
+    final rawSlots = day['zumreSlots'];
+    if (rawSlots is! List) return false;
+
+    return rawSlots.whereType<Map>().any((slot) {
+      if (!timeSlotMatchesEducationLevel(slot, educationLevel)) return false;
+      final start = _clockToMinutes('${slot['start'] ?? ''}');
+      final end = _clockToMinutes('${slot['end'] ?? ''}');
+      return start >= 0 &&
+          end > start &&
+          nowMinutes >= start &&
+          nowMinutes < end;
+    });
+  }
+
   Widget _runtimeSummaryStrip() {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _firestore.collection('settings').doc('runtimeState').snapshots(),
-      builder: (context, snapshot) {
-        final data = snapshot.data?.data() ?? {};
-        final mode = _institutionModeFromRuntime(data);
-        final zumreOpen = data['isZumreOpen'] == true;
-        final studyOpen = data['isStudyOpen'] == true;
+      builder: (context, runtimeSnapshot) {
+        final runtimeData = runtimeSnapshot.data?.data() ?? {};
+        final mode = _institutionModeFromRuntime(runtimeData);
+        final studyOpen = runtimeData['isStudyOpen'] == true;
         final suffix = mode == 'closed'
             ? 'Kurum kapalı'
             : mode == 'exam'
                 ? 'Deneme modu'
                 : null;
 
-        return Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _smallStatusPill(
-              label: 'Zümre',
-              value: suffix ?? (zumreOpen ? 'Aktif' : 'Kapalı'),
-              color: zumreOpen && suffix == null
-                  ? Colors.greenAccent
-                  : Colors.orangeAccent,
-            ),
-            _smallStatusPill(
-              label: 'Etüt',
-              value: suffix ?? (studyOpen ? 'Aktif' : 'Kapalı'),
-              color: studyOpen && suffix == null
-                  ? Colors.greenAccent
-                  : Colors.orangeAccent,
-            ),
-          ],
+        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream:
+              _firestore.collection('settings').doc('zumreSchedule').snapshots(),
+          builder: (context, scheduleSnapshot) {
+            final scheduleData = scheduleSnapshot.data?.data() ?? {};
+            final lgsOpen =
+                suffix == null && _scopeIsOpenNow(scheduleData, 'LGS');
+            final yksOpen =
+                suffix == null && _scopeIsOpenNow(scheduleData, 'YKS');
+
+            return Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _smallStatusPill(
+                  label: 'LGS Zümre',
+                  value: suffix ?? (lgsOpen ? 'Aktif' : 'Kapalı'),
+                  color:
+                      lgsOpen ? Colors.greenAccent : Colors.orangeAccent,
+                ),
+                _smallStatusPill(
+                  label: 'YKS Zümre',
+                  value: suffix ?? (yksOpen ? 'Aktif' : 'Kapalı'),
+                  color:
+                      yksOpen ? Colors.greenAccent : Colors.orangeAccent,
+                ),
+                _smallStatusPill(
+                  label: 'Etüt',
+                  value: suffix ?? (studyOpen ? 'Aktif' : 'Kapalı'),
+                  color: studyOpen && suffix == null
+                      ? Colors.greenAccent
+                      : Colors.orangeAccent,
+                ),
+              ],
+            );
+          },
         );
       },
     );
