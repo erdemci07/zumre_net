@@ -49,6 +49,27 @@ String? inferredStudentEducationLevel(Map<String, dynamic> data) {
   return null;
 }
 
+List<String> educationLevelsFromData(Map<String, dynamic> data) {
+  final levels = <String>[];
+  final rawLevels = data['educationLevels'];
+
+  if (rawLevels is List) {
+    for (final rawLevel in rawLevels) {
+      final level = validEducationLevel(rawLevel);
+      if (level != null && !levels.contains(level)) {
+        levels.add(level);
+      }
+    }
+  }
+
+  final singleLevel = validEducationLevel(data['educationLevel']);
+  if (singleLevel != null && !levels.contains(singleLevel)) {
+    levels.add(singleLevel);
+  }
+
+  return levels;
+}
+
 List<Map<String, String>> teachingScopesFromData(Map<String, dynamic> data) {
   final rawScopes = data['teachingScopes'];
   if (rawScopes is! List) return const [];
