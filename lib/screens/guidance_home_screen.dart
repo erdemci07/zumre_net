@@ -1159,8 +1159,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                             Expanded(
                               child: Text(
                                 'Bu öğrencinin zaten aktif haftalık takip programı var: '
-                                '${selectedExistingTask?['title'] ?? 'Haftalık takip'} • '
-                                '${selectedExistingTask?['schedule'] ?? ''}. '
+                                '${selectedExistingTask['title'] ?? 'Haftalık takip'} • '
+                                '${selectedExistingTask['schedule'] ?? ''}. '
                                 'Değişiklik için Takipleri Yönet ekranını kullanın.',
                                 style: const TextStyle(
                                   color: Colors.white70,
@@ -1223,7 +1223,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                 final uid = auth.currentUser!.uid;
                                 final taskRef = db
                                     .collection('guidanceTasks')
-                                    .doc('${uid}_${selectedStudentId}');
+                                    .doc('${uid}_$selectedStudentId');
                                 setD(() => isSubmitting = true);
                                 try {
                                   await db.runTransaction((tx) async {
