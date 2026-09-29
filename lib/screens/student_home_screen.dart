@@ -136,14 +136,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return _subjectOptions;
   }
 
-  // Zümre kapsamı ders kartlarıyla aynı kaynaktan belirlenir.
-  // Ortaokul/LGS kartları gösteriliyorsa LGS; geri kalan tüm öğrenciler YKS.
-  String get _scheduleEducationLevel {
-    final subjects = _visibleSubjectOptions;
-    final usesLgsCards =
-        identical(subjects, _lgsSubjects) || identical(subjects, _middleSchoolSubjects);
-    return usesLgsCards ? 'LGS' : 'YKS';
+  // Ders kartlarının kullandığı tek karar:
+  // 5-6-7-8 => LGS, geri kalan herkes => YKS.
+  bool get _usesLgsSubjectCards {
+    final grade = _studentGrade;
+    return grade != null && grade >= 5 && grade <= 8;
   }
+
+  String get _scheduleEducationLevel =>
+      _usesLgsSubjectCards ? 'LGS' : 'YKS';
 
   Map<String, String>? _guidanceAppointment;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
@@ -679,23 +680,32 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   List<Map<String, dynamic>> _scheduleSlotsFromRaw(dynamic raw) {
     if (raw is! List) return [];
 
-    final slots = raw.whereType<Map>().map((slot) {
-      return {
-        'start': '${slot['start']}',
-        'end': '${slot['end']}',
-        'educationLevel': timeSlotScopeFromData(slot),
-      };
-    });
+    final wantsLgs = _usesLgsSubjectCards;
+    final result = <Map<String, dynamic>>[];
 
-    // Öğretmen ekranındaki kapsam mantığıyla aynı davranış:
-    // scope henüz yüklenmediyse programı boşaltma. Öğrenci bilgisi gelir
-    // gelmez kendi LGS/YKS kapsamına tekrar filtrelenir.
-    final level = _scheduleEducationLevel;
-    if (level == null) return slots.toList();
+    for (final item in raw) {
+      if (item is! Map) continue;
 
-    return slots.where((slot) {
-      return timeSlotMatchesEducationLevel(slot, level);
-    }).toList();
+      final rawScope =
+          (item['educationLevel'] ?? item['scope'] ?? 'YKS')
+              .toString()
+              .trim()
+              .toUpperCase();
+
+      // Çok basit kural:
+      // LGS kartı gören öğrenci yalnız LGS slotunu;
+      // diğer herkes LGS olmayan slotu (YKS/legacy) okur.
+      final matches = wantsLgs ? rawScope == 'LGS' : rawScope != 'LGS';
+      if (!matches) continue;
+
+      result.add({
+        'start': item['start']?.toString() ?? '',
+        'end': item['end']?.toString() ?? '',
+        'educationLevel': wantsLgs ? 'LGS' : 'YKS',
+      });
+    }
+
+    return result;
   }
 
   Map<String, dynamic> _dailyScheduleFromData(
@@ -858,7 +868,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     if (_cachedZumreSlots.isEmpty || !mounted) return;
 
     final uiState = _zumreUiStateFromSlots(
-      DateTime.now(),
+      _istanbulNow(),
       _cachedZumreSlots,
       _cachedZumreIsWeekend,
     );
@@ -877,7 +887,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Future<bool> _checkLocalZumreAvailability({
     Map<String, dynamic>? runtimeData,
   }) async {
-    final now = DateTime.now();
+    final now = _istanbulNow();
     final doc =
         await _firestore.collection('settings').doc('zumreSchedule').get();
 
