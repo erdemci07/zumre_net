@@ -224,7 +224,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                 DropdownButtonFormField<_GuidanceClassOption>(
                   initialValue: selected,
                   isExpanded: true,
-                  dropdownColor: const Color(0xFF4A1830),
+                  dropdownColor: const Color(0xFF06312E),
                   iconEnabledColor: Colors.white70,
                   style: const TextStyle(color: Colors.white),
                   decoration: _guidanceDialogFieldDecoration('Sınıf'),
@@ -258,8 +258,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                         _GuidanceSummaryRequest(selected),
                       ),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFFFB1C8),
-                        foregroundColor: const Color(0xFF4A1830),
+                        backgroundColor: Colors.greenAccent,
+                        foregroundColor: const Color(0xFF06312E),
                       ),
                       icon: const Icon(Icons.ios_share_rounded),
                       label: const Text('Özeti Hazırla'),
@@ -462,7 +462,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                 Container(
                     padding: const EdgeInsets.all(11),
                     decoration: BoxDecoration(
-                        color: const Color(0xFFFFB1C8).withValues(alpha: .16),
+                        color: Colors.greenAccent.withValues(alpha: .16),
                         shape: BoxShape.circle),
                     child: const Icon(Icons.person_add_alt_1_rounded,
                         color: Color(0xFFFFB1C8), size: 28)),
@@ -530,7 +530,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                     }),
                                 leading: CircleAvatar(
                                     backgroundColor: selected
-                                        ? const Color(0xFFFFB1C8)
+                                        ? Colors.greenAccent
                                         : Colors.white12,
                                     child: Icon(
                                         selected
@@ -593,7 +593,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                               label: Text(e),
                               selected: day == e,
                               onSelected: (_) => setD(() => day = e),
-                              selectedColor: const Color(0xFFFFB1C8),
+                              selectedColor: Colors.greenAccent,
                               backgroundColor: Colors.white10,
                               labelStyle: TextStyle(
                                   color: day == e
@@ -618,7 +618,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   height: 50,
                   child: FilledButton.icon(
                       style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFFFFB1C8),
+                          backgroundColor: Colors.greenAccent,
                           foregroundColor: const Color(0xFF4A102B),
                           disabledBackgroundColor: Colors.white12),
                       onPressed: selectedId == null || isSubmitting
@@ -788,7 +788,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                               }),
                                           leading: CircleAvatar(
                                               backgroundColor: sel
-                                                  ? const Color(0xFFFFB1C8)
+                                                  ? Colors.greenAccent
                                                   : Colors.white12,
                                               child: Icon(
                                                   sel
@@ -833,7 +833,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                       label: Text(e),
                                       selected: title == e,
                                       onSelected: (_) => setD(() => title = e),
-                                      selectedColor: const Color(0xFFFFB1C8),
+                                      selectedColor: Colors.greenAccent,
                                       backgroundColor: Colors.white10,
                                       labelStyle: TextStyle(
                                           color: title == e
@@ -864,7 +864,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                       label: Text(e),
                                       selected: day == e,
                                       onSelected: (_) => setD(() => day = e),
-                                      selectedColor: const Color(0xFFFFB1C8),
+                                      selectedColor: Colors.greenAccent,
                                       backgroundColor: Colors.white10,
                                       labelStyle: TextStyle(
                                           color: day == e
@@ -880,19 +880,55 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                 onPressed: studentId == null
                                     ? null
                                     : () async {
-                                        await db
+                                        final selectedStudentId = studentId!;
+                                        final uid = auth.currentUser!.uid;
+                                        final taskRef = db
                                             .collection('guidanceTasks')
-                                            .add({
-                                          'studentId': studentId,
-                                          'studentName': studentName,
-                                          'counselorId': auth.currentUser!.uid,
-                                          'title': title,
-                                          'schedule': day,
-                                          'active': true,
-                                          'createdAt':
-                                              FieldValue.serverTimestamp()
-                                        });
-                                        if (ctx.mounted) Navigator.pop(ctx);
+                                            .doc('${uid}_${selectedStudentId}');
+                                        try {
+                                          await db.runTransaction((tx) async {
+                                            final existing =
+                                                await tx.get(taskRef);
+                                            if (existing.exists &&
+                                                existing.data()?['active'] !=
+                                                    false) {
+                                              throw StateError(
+                                                'Bu öğrenci için zaten aktif bir haftalık görevlendirme var.',
+                                              );
+                                            }
+                                            tx.set(taskRef, {
+                                              'studentId': selectedStudentId,
+                                              'studentName': studentName,
+                                              'counselorId': uid,
+                                              'title': title,
+                                              'schedule': day,
+                                              'active': true,
+                                              'createdAt':
+                                                  FieldValue.serverTimestamp(),
+                                              'updatedAt':
+                                                  FieldValue.serverTimestamp(),
+                                            });
+                                          });
+                                          if (ctx.mounted) Navigator.pop(ctx);
+                                        } on StateError catch (error) {
+                                          if (!ctx.mounted) return;
+                                          ScaffoldMessenger.of(ctx)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Text(error.message),
+                                            ),
+                                          );
+                                        } catch (_) {
+                                          if (!ctx.mounted) return;
+                                          ScaffoldMessenger.of(ctx)
+                                              .showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Görevlendirme kaydedilemedi. Lütfen tekrar deneyin.',
+                                              ),
+                                            ),
+                                          );
+                                        }
                                       },
                                 icon: const Icon(Icons.repeat_rounded),
                                 label: const Text('Takibi Başlat')))
@@ -1032,7 +1068,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               : Colors.white.withValues(alpha: .08),
           borderRadius: BorderRadius.circular(15),
           border: Border.all(
-              color: selected ? const Color(0xFFFFB1C8) : Colors.white24),
+              color: selected ? Colors.greenAccent : Colors.white24),
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Flexible(
@@ -1115,6 +1151,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               (slot) => {
                 'start': '${slot['start'] ?? '09:00'}',
                 'end': '${slot['end'] ?? '17:00'}',
+                'educationLevel':
+                    '${slot['educationLevel'] ?? slot['scope'] ?? 'BOTH'}',
               },
             )
             .toList(),
@@ -1160,7 +1198,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF4A1830), Color(0xFF8B3155)],
+                colors: [Color(0xFF06312E), Color(0xFF008A5C)],
               ),
               borderRadius: BorderRadius.circular(28),
               border: Border.all(color: Colors.white24),
@@ -1213,6 +1251,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                   temp[day.key]!.add({
                                     'start': '09:00',
                                     'end': '17:00',
+                                    'educationLevel': 'BOTH',
                                   });
                                 }),
                                 icon: const Icon(
@@ -1353,7 +1392,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                           initialValue: [15, 20, 30].contains(slotMinutes)
                               ? slotMinutes
                               : 20,
-                          dropdownColor: const Color(0xFF4A1830),
+                          dropdownColor: const Color(0xFF06312E),
                           iconEnabledColor: Colors.white70,
                           style: const TextStyle(color: Colors.white),
                           decoration: _guidanceDialogFieldDecoration(
@@ -1442,8 +1481,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                             }
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFFFB1C8),
-                            foregroundColor: const Color(0xFF4A1830),
+                            backgroundColor: Colors.greenAccent,
+                            foregroundColor: const Color(0xFF06312E),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: const Text('Kaydet'),
@@ -1661,7 +1700,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               constraints: const BoxConstraints(maxWidth: 380),
               padding: const EdgeInsets.all(22),
               decoration: BoxDecoration(
-                color: const Color(0xFF4A1830),
+                color: const Color(0xFF06312E),
                 borderRadius: BorderRadius.circular(26),
                 border: Border.all(color: Colors.white24),
                 boxShadow: [
@@ -1758,7 +1797,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
           final name =
               '${userSnap.data?.data()?['fullName'] ?? 'Rehberlik Servisi'}';
           return Scaffold(
-            backgroundColor: const Color(0xFF4A1830),
+            backgroundColor: const Color(0xFF06312E),
             appBar: AppBar(
                 elevation: 0,
                 backgroundColor: const Color(0xFF6B2143),
