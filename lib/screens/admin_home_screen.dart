@@ -1426,33 +1426,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
-  Future<void> _requestClassReportPdf({
-    required String endpoint,
-    required String fallbackFileName,
-    required DateTime startDate,
-    required DateTime endDate,
-  }) async {
-    final selectedClass = await _showReportClassPicker();
-    if (selectedClass == null || selectedClass.className.isEmpty) return;
-    final classPrefix = _classBranchFilePrefix(
-      selectedClass.className,
-      selectedClass.branch,
-    );
-
-    await _requestReportPdf(
-      endpoint: endpoint,
-      fallbackFileName: '${classPrefix}_$fallbackFileName',
-      preferredFileName:
-          '${classPrefix}_${fallbackFileName.replaceFirst('.pdf', '')}_'
-          '${_formatIsoDate(startDate)}_${_formatIsoDate(endDate)}.pdf',
-      startDate: startDate,
-      endDate: endDate,
-      className: selectedClass.className,
-      branch: selectedClass.branch,
-      department: selectedClass.department,
-    );
-  }
-
   Future<void> _requestTeacherReportPdf({
     required DateTime startDate,
     required DateTime endDate,
@@ -4918,20 +4891,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
             final allVisibleSelected = selectableUids.isNotEmpty &&
                 selectedVisibleCount == selectableUids.length;
             final selectedCount = _selectedUserIds.length;
-            final selectedStudentIds = users
-                .where((doc) =>
-                    _selectedUserIds.contains(doc.id) &&
-                    (doc.data() as Map<String, dynamic>)['role']?.toString() ==
-                        'student' &&
-                    ((doc.data() as Map<String, dynamic>)[
-                                'guidanceCounselorId'] ??
-                            '')
-                        .toString()
-                        .trim()
-                        .isEmpty)
-                .map((doc) => doc.id)
-                .toList();
-
             return CustomScrollView(
               physics: const ClampingScrollPhysics(),
               slivers: [
@@ -7217,90 +7176,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
         ),
       ),
     );
-  }
-
-  Future<void> _showBulkGuidanceCounselorAssignment(
-    List<String> studentIds,
-  ) async {
-    if (studentIds.isEmpty) return;
-    final snapshot = await _firestore
-        .collection('users')
-        .where('role', isEqualTo: 'guidance')
-        .get();
-    if (!mounted) return;
-    if (snapshot.docs.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Atanabilecek rehber öğretmen bulunamadı.'),
-      ));
-      return;
-    }
-    String? selected;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text('Rehber Öğretmen Ata'),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(
-                '${studentIds.length} seçili öğrenciye aynı rehber öğretmen atanacak.'),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: selected,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Rehber öğretmen'),
-              items: snapshot.docs
-                  .map((doc) => DropdownMenuItem(
-                        value: doc.id,
-                        child: Text(
-                          '${doc.data()['fullName'] ?? doc.data()['name'] ?? 'Rehberlik Servisi'}',
-                        ),
-                      ))
-                  .toList(),
-              onChanged: (value) => setDialogState(() => selected = value),
-            ),
-          ]),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Vazgeç'),
-            ),
-            FilledButton(
-              onPressed: selected == null
-                  ? null
-                  : () => Navigator.pop(dialogContext, true),
-              child: const Text('Onayla ve Ata'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (confirmed != true || selected == null || !mounted) return;
-
-    setState(() => _isLoading = true);
-    try {
-      final response = await _functions
-          .httpsCallable('adminAssignGuidanceCounselor')
-          .call({'counselorId': selected, 'studentIds': studentIds});
-      final data = Map<String, dynamic>.from(response.data as Map);
-      final assigned = (data['assignedCount'] as num?)?.toInt() ?? 0;
-      final skipped = (data['skippedCount'] as num?)?.toInt() ?? 0;
-      if (!mounted) return;
-      setState(() => _selectedUserIds.removeAll(studentIds));
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-          skipped == 0
-              ? '$assigned öğrenciye rehber öğretmen atandı.'
-              : '$assigned öğrenci atandı, $skipped kayıt atlandı.',
-        ),
-      ));
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Atama hatası: ${_adminFunctionErrorMessage(error)}'),
-      ));
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
   }
 
   Future<void> _showGuidanceAvailabilityDialog(
