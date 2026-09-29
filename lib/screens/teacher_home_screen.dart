@@ -53,6 +53,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   String _teacherStatus = 'available';
   String? _teacherName;
   String? _teacherSubject;
+  Set<String> _teacherEducationLevels = <String>{};
   Map<String, List<Map<String, String>>> _weeklyAvailability = {};
   bool _isZumreOpenNow = false;
   bool _isTeacherWorkingNow = false;
@@ -136,11 +137,23 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
   List<Map<String, dynamic>> _scheduleSlotsFromRaw(dynamic raw) {
     if (raw is! List) return [];
-    return raw.whereType<Map>().map((slot) {
+
+    final slots = raw.whereType<Map>().map((slot) {
       return {
         'start': '${slot['start']}',
         'end': '${slot['end']}',
+        'educationLevel': timeSlotScopeFromData(slot),
       };
+    });
+
+    if (_teacherEducationLevels.isEmpty) {
+      return slots.toList();
+    }
+
+    return slots.where((slot) {
+      return _teacherEducationLevels.any(
+        (level) => timeSlotMatchesEducationLevel(slot, level),
+      );
     }).toList();
   }
 
@@ -154,7 +167,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
     if (daily is Map) {
       return {
-        'closed': daily['closed'] == true,
+        'closed':
+            daily['closed'] == true || daily['zumreClosed'] == true,
         'zumreSlots': _scheduleSlotsFromRaw(daily['zumreSlots']),
       };
     }
@@ -418,8 +432,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     if (!_isFreshRuntimeState(data)) return null;
 
     return {
-      'isZumreOpen': data!['isZumreOpen'] == true,
-      'isLunchBreak': data['isLunchBreak'] == true,
+      // runtimeState is institution-wide; teacher scope comes from
+      // the LGS/YKS slots in zumreSchedule.
+      'isZumreOpen': null,
+      'isLunchBreak': data!['isLunchBreak'] == true,
       'message': null,
     };
   }
@@ -1506,9 +1522,16 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         subject = data?['subject'];
       }
 
+      final teacherData = Map<String, dynamic>.from(data ?? {});
+      final teacherLevels = teachingScopesFromData(teacherData)
+          .map((scope) => scope['level'])
+          .whereType<String>()
+          .toSet();
+
       setState(() {
         _teacherName = data?['name'] ?? data?['email'] ?? 'Öğretmen';
         _teacherSubject = subject ?? 'Ders';
+        _teacherEducationLevels = teacherLevels;
         _teacherStatus = data?['teacherStatus'] ?? 'available';
         _manualAbsentDate = data?['manualAbsentDate']?.toString();
         _breakUntil = data?['breakUntil'] is Timestamp
