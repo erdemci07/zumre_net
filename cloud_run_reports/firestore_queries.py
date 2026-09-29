@@ -504,3 +504,69 @@ def build_class_report(
         date_range=date_range,
         students=students,
     )
+
+
+def _teacher_levels_from_data(data: dict) -> set[str]:
+    levels = set()
+    raw_levels = data.get("educationLevels")
+    if isinstance(raw_levels, list):
+        for raw in raw_levels:
+            level = _clean(raw).upper()
+            if level in {"LGS", "YKS"}:
+                levels.add(level)
+    single = _clean(data.get("educationLevel")).upper()
+    if single in {"LGS", "YKS"}:
+        levels.add(single)
+    raw_scopes = data.get("teachingScopes")
+    if isinstance(raw_scopes, list):
+        for raw in raw_scopes:
+            if isinstance(raw, dict):
+                level = _clean(raw.get("level")).upper()
+                if level in {"LGS", "YKS"}:
+                    levels.add(level)
+    return levels
+
+
+def build_teacher_activity_summary(start_date: str, end_date: str, education_level: str) -> dict:
+    """Build a teacher-first activity summary and keep zero-activity teachers visible."""
+    level = _clean(education_level).upper()
+    if level not in {"LGS", "YKS"}:
+        raise ValueError("LGS veya YKS seçimi zorunludur.")
+
+    db = firestore.client()
+    date_range = parse_date_range(start_date, end_date)
+    queues = fetch_completed_queues(db, date_range)
+    sessions = fetch_completed_study_sessions(db, date_range)
+
+    teachers = {}
+    for doc in db.collection("users").where(filter=FieldFilter("role", "==", "teacher")).stream():
+        data = doc.to_dict() or {}
+        levels = _teacher_levels_from_data(data)
+        # Legacy teachers without explicit scope stay visible in both lists.
+        if levels and level not in levels:
+            continue
+        subjects = data.get("subjects")
+        if not isinstance(subjects, list):
+            subjects = [subjects] if subjects else []
+        teachers[doc.id] = {
+            "id": doc.id,
+            "name": _teacher_name_from_data(data) or "Öğretmen",
+            "subjects": ", ".join(_clean(item) for item in subjects if _clean(item)),
+            "question_count": 0,
+            "study_count": 0,
+        }
+
+    for queue in queues:
+        if queue.teacher_id in teachers:
+            teachers[queue.teacher_id]["question_count"] += 1
+
+    for session in sessions:
+        if session.duty_teacher_id in teachers:
+            teachers[session.duty_teacher_id]["study_count"] += 1
+
+    rows = sorted(teachers.values(), key=lambda item: item["name"].casefold())
+    return {
+        "education_level": level,
+        "date_range": date_range,
+        "teachers": rows,
+    }
