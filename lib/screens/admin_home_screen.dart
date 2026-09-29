@@ -1461,48 +1461,174 @@ class _StatisticsPageState extends State<StatisticsPage> {
     final level = await showDialog<String>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF071A3A),
-          title: const Text(
-            'Öğretmen Faaliyet Özeti',
-            style: TextStyle(color: Colors.white),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Kademeyi seçin. Seçilen kapsamdaki öğretmenler, faaliyet kaydı olmasa da raporda listelenir.',
-                style: TextStyle(color: Colors.white70, height: 1.35),
+        builder: (context, setDialogState) {
+          final mobile = MediaQuery.of(context).size.width < 600;
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.symmetric(
+              horizontal: mobile ? 14 : 24,
+              vertical: 24,
+            ),
+            child: Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxWidth: 480),
+              padding: EdgeInsets.all(mobile ? 18 : 22),
+              decoration: BoxDecoration(
+                color: const Color(0xFF071A3A),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: Colors.white24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: .28),
+                    blurRadius: 24,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                children: ['LGS', 'YKS']
-                    .map(
-                      (item) => ChoiceChip(
-                        label: Text(item),
-                        selected: selectedLevel == item,
-                        onSelected: (_) =>
-                            setDialogState(() => selectedLevel = item),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: Colors.lightBlueAccent.withValues(alpha: .14),
+                        borderRadius: BorderRadius.circular(15),
                       ),
-                    )
-                    .toList(),
+                      child: const Icon(
+                        Icons.groups_2_rounded,
+                        color: Colors.lightBlueAccent,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Öğretmen Faaliyet Özeti',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          SizedBox(height: 3),
+                          Text(
+                            'Rapor kapsamını seçin',
+                            style:
+                                TextStyle(color: Colors.white60, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close_rounded,
+                          color: Colors.white70),
+                    ),
+                  ]),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: ['LGS', 'YKS'].map((item) {
+                      final selected = selectedLevel == item;
+                      return Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                            right: item == 'LGS' ? 6 : 0,
+                            left: item == 'YKS' ? 6 : 0,
+                          ),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: () =>
+                                setDialogState(() => selectedLevel = item),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 160),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 16),
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? Colors.lightBlueAccent
+                                        .withValues(alpha: .18)
+                                    : Colors.white.withValues(alpha: .06),
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: selected
+                                      ? Colors.lightBlueAccent
+                                      : Colors.white12,
+                                  width: selected ? 1.5 : 1,
+                                ),
+                              ),
+                              child: Column(children: [
+                                Icon(
+                                  selected
+                                      ? Icons.check_circle_rounded
+                                      : Icons.circle_outlined,
+                                  color: selected
+                                      ? Colors.lightBlueAccent
+                                      : Colors.white54,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  item,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: selected
+                                        ? FontWeight.w800
+                                        : FontWeight.w600,
+                                  ),
+                                ),
+                              ]),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(13),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: .06),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Text(
+                      'Seçilen kapsamdaki tüm öğretmenler gösterilir. Faaliyeti olmayan öğretmenler 0 değerleriyle raporda kalır; zümrede çözülen soru ve tamamlanan etüt sayıları ayrı gösterilir.',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.lightBlueAccent,
+                        foregroundColor: const Color(0xFF071A3A),
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(ctx, selectedLevel),
+                      icon: const Icon(Icons.picture_as_pdf_rounded),
+                      label: const Text(
+                        'Raporu Oluştur',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Vazgeç'),
             ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(ctx, selectedLevel),
-              icon: const Icon(Icons.picture_as_pdf_rounded),
-              label: const Text('Raporu Oluştur'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
     if (level == null) return;
