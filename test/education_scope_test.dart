@@ -41,6 +41,19 @@ void main() {
         isTrue);
   });
 
+  test('study guard education levels are normalized from user data', () {
+    expect(
+      educationLevelsFromData({
+        'educationLevels': ['LGS', 'YKS', 'LGS'],
+      }),
+      ['LGS', 'YKS'],
+    );
+    expect(
+      educationLevelsFromData({'educationLevel': 'LGS'}),
+      ['LGS'],
+    );
+  });
+
   test('student level only infers trusted production className prefixes', () {
     expect(
         inferredStudentEducationLevel(
