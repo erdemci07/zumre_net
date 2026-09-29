@@ -5534,6 +5534,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
     }
     String? studentEducationLevel =
         validEducationLevel(existingData?['educationLevel']);
+    final selectedStudyEducationLevels =
+        educationLevelsFromData(existingData ?? {}).toSet();
+    if (role == 'studyGuard' && selectedStudyEducationLevels.isEmpty) {
+      // Legacy study guards were institution-wide before educationLevels.
+      selectedStudyEducationLevels.addAll(educationLevels);
+    }
+
     await showDialog(
       context: context,
       barrierDismissible: false,
@@ -5977,6 +5984,61 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                       ),
                                     ),
                                   ],
+                                  if (role == 'studyGuard') ...[
+                                    const SizedBox(height: 12),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: Colors.grey),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'Etüt Kapsamı',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          const Text(
+                                            'Görevlinin takip edeceği etüt programını seçin.',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.white60,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 8,
+                                            children: educationLevels
+                                                .map(
+                                                  (level) => FilterChip(
+                                                    label: Text(level),
+                                                    selected:
+                                                        selectedStudyEducationLevels
+                                                            .contains(level),
+                                                    onSelected: (selected) =>
+                                                        setStateDialog(() {
+                                                      if (selected) {
+                                                        selectedStudyEducationLevels
+                                                            .add(level);
+                                                      } else {
+                                                        selectedStudyEducationLevels
+                                                            .remove(level);
+                                                      }
+                                                    }),
+                                                  ),
+                                                )
+                                                .toList(),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -6036,6 +6098,17 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     );
                                     return;
                                   }
+                                  if (role == 'studyGuard' &&
+                                      selectedStudyEducationLevels.isEmpty) {
+                                    ScaffoldMessenger.of(this.context)
+                                        .showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                            'Etüt görevlisi için LGS veya YKS kapsamı seçin.'),
+                                      ),
+                                    );
+                                    return;
+                                  }
 
                                   setStateDialog(() {
                                     isUserDialogSaving = true;
@@ -6068,8 +6141,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         branch,
                                         department,
                                         educationLevel: studentEducationLevel,
-                                        educationLevels:
-                                            selectedEducationLevels.toList(),
+                                        educationLevels: role == 'studyGuard'
+                                            ? selectedStudyEducationLevels
+                                                .toList()
+                                            : selectedEducationLevels.toList(),
                                         teachingScopes: teachingScopes,
                                         guardianName: guardianName,
                                         guardianSurname: guardianSurname,
@@ -6098,8 +6173,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                         branch,
                                         department,
                                         educationLevel: studentEducationLevel,
-                                        educationLevels:
-                                            selectedEducationLevels.toList(),
+                                        educationLevels: role == 'studyGuard'
+                                            ? selectedStudyEducationLevels
+                                                .toList()
+                                            : selectedEducationLevels.toList(),
                                         teachingScopes: teachingScopes,
                                         guardianName: guardianName,
                                         guardianSurname: guardianSurname,
