@@ -3232,7 +3232,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
     final now = DateTime.now();
     final weekly = scheduleData['weeklySchedule'];
     if (weekly is! Map) return false;
-    final day = weekly[_scheduleDayKey(now)];
+    final dayKey = _scheduleDays[now.weekday - 1]['key']!;
+    final day = weekly[dayKey];
     if (day is! Map ||
         day['closed'] == true ||
         day['zumreClosed'] == true) {
