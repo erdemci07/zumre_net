@@ -1545,7 +1545,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ((_cooldownUntil - DateTime.now().millisecondsSinceEpoch) /
                         1000)
                     .ceil()
-                    .clamp(0, 120);
+                    .clamp(0, 120)
+                    .toInt();
             _currentQueueId = null;
             _currentTeacherName = null;
             _queuePosition = 0;
