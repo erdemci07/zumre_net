@@ -3232,6 +3232,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
         final data = snapshot.data?.data() ?? {};
         final mode = _institutionModeFromRuntime(data);
         final zumreOpen = data['isZumreOpen'] == true;
+        final lgsZumreOpen = data['isZumreOpenLGS'] is bool
+            ? data['isZumreOpenLGS'] == true
+            : zumreOpen;
+        final yksZumreOpen = data['isZumreOpenYKS'] is bool
+            ? data['isZumreOpenYKS'] == true
+            : zumreOpen;
         final studyOpen = data['isStudyOpen'] == true;
         final suffix = mode == 'closed'
             ? 'Kurum kapalı'
@@ -3244,9 +3250,16 @@ class _StatisticsPageState extends State<StatisticsPage> {
           runSpacing: 8,
           children: [
             _smallStatusPill(
-              label: 'Zümre',
-              value: suffix ?? (zumreOpen ? 'Aktif' : 'Kapalı'),
-              color: zumreOpen && suffix == null
+              label: 'LGS Zümre',
+              value: suffix ?? (lgsZumreOpen ? 'Aktif' : 'Kapalı'),
+              color: lgsZumreOpen && suffix == null
+                  ? Colors.greenAccent
+                  : Colors.orangeAccent,
+            ),
+            _smallStatusPill(
+              label: 'YKS Zümre',
+              value: suffix ?? (yksZumreOpen ? 'Aktif' : 'Kapalı'),
+              color: yksZumreOpen && suffix == null
                   ? Colors.greenAccent
                   : Colors.orangeAccent,
             ),
