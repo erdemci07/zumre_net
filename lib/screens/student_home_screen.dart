@@ -670,14 +670,22 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   List<Map<String, dynamic>> _scheduleSlotsFromRaw(dynamic raw) {
     if (raw is! List) return [];
 
-    return raw.whereType<Map>().map((slot) {
+    final slots = raw.whereType<Map>().map((slot) {
       return {
         'start': '${slot['start']}',
         'end': '${slot['end']}',
         'educationLevel': timeSlotScopeFromData(slot),
       };
-    }).where((slot) {
-      return timeSlotMatchesEducationLevel(slot, _studentEducationLevel);
+    });
+
+    // Öğretmen ekranındaki kapsam mantığıyla aynı davranış:
+    // scope henüz yüklenmediyse programı boşaltma. Öğrenci bilgisi gelir
+    // gelmez kendi LGS/YKS kapsamına tekrar filtrelenir.
+    final level = _studentEducationLevel;
+    if (level == null) return slots.toList();
+
+    return slots.where((slot) {
+      return timeSlotMatchesEducationLevel(slot, level);
     }).toList();
   }
 
