@@ -734,6 +734,29 @@ async function completeTimedOutZumreQueues(scheduleData, now = new Date()) {
       autoCompleted: true,
       autoCompleteReason: "zumre_timeout",
     });
+
+    if (queueData.source === "appointment" && queueData.appointmentId) {
+      const appointmentRef = db.collection("appointments").doc(
+        cleanText(queueData.appointmentId)
+      );
+      const appointmentDoc = await appointmentRef.get();
+      const appointmentData = appointmentDoc.data() || {};
+
+      if (
+        appointmentDoc.exists &&
+        appointmentData.status === "started" &&
+        appointmentData.linkedQueueId === queueDoc.id
+      ) {
+        batch.update(appointmentRef, {
+          status: "completed",
+          completedAt: fieldValue.serverTimestamp(),
+          updatedAt: fieldValue.serverTimestamp(),
+          autoCompleted: true,
+          autoCompleteReason: "zumre_timeout",
+        });
+      }
+    }
+
     completedCount += 1;
   }
 
@@ -2807,10 +2830,10 @@ async function hasActiveAppointmentFor(uid, fieldName) {
   const snapshot = await db
     .collection("appointments")
     .where(fieldName, "==", uid)
-    .where("status", "in", ACTIVE_APPOINTMENT_STATUSES)
-    .limit(1)
     .get();
-  return !snapshot.empty;
+  return snapshot.docs.some((doc) =>
+    ACTIVE_APPOINTMENT_STATUSES.includes(doc.data()?.status)
+  );
 }
 
 async function assertNoActiveUserOperation(uid, userData) {
