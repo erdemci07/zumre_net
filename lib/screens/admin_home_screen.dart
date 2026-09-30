@@ -7193,76 +7193,144 @@ class _UserManagementPageState extends State<UserManagementPage> {
     ];
     final raw = Map<String, dynamic>.from(data['guidanceAvailability'] ?? {});
     final weekly = Map<String, dynamic>.from(raw['weekly'] ?? {});
-    final controllers = <String, TextEditingController>{
+    final selected = <String, Map<String, String>?>{
       for (final day in days)
-        day[0]: TextEditingController(
-          text: ((weekly[day[0]] as List? ?? const [])
-              .map((slot) => '${slot['start']}-${slot['end']}')
-              .join(', ')),
-        ),
+        day[0]: ((weekly[day[0]] as List? ?? const []).isEmpty)
+            ? null
+            : {
+                'start': '${(weekly[day[0]] as List).first['start'] ?? ''}',
+                'end': '${(weekly[day[0]] as List).first['end'] ?? ''}',
+              },
     };
     var slotMinutes = (raw['slotMinutes'] as num?)?.toInt() ?? 20;
-    InputDecoration availabilityFieldDecoration(String label) =>
-        InputDecoration(
-          labelText: label,
-          labelStyle: const TextStyle(color: Colors.white70),
-          floatingLabelStyle: const TextStyle(
-            color: Color(0xFF8EDBFF),
-            fontWeight: FontWeight.w700,
-          ),
-          filled: true,
-          fillColor: const Color(0xFF071A3A).withValues(alpha: 0.7),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF4D78B5)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF8EDBFF), width: 1.4),
-          ),
-        );
-    try {
-      await showDialog(
+
+    Future<String?> pickTime(BuildContext context, String? current) async {
+      final parts = (current ?? '').split(':');
+      final initial = parts.length == 2
+          ? TimeOfDay(
+              hour: int.tryParse(parts[0]) ?? 9,
+              minute: int.tryParse(parts[1]) ?? 0)
+          : const TimeOfDay(hour: 9, minute: 0);
+      final picked = await showTimePicker(
         context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            backgroundColor: const Color(0xFF0B234B),
-            elevation: 12,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(28),
-              side: const BorderSide(color: Color(0xFF4D78B5)),
-            ),
-            title: const Text(
-              'Veli Görüşme Saatleri',
+        initialTime: initial,
+        helpText: 'Saat seçin',
+        cancelText: 'Vazgeç',
+        confirmText: 'Seç',
+      );
+      if (picked == null) return null;
+      return '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF0B234B),
+          elevation: 12,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+            side: const BorderSide(color: Color(0xFF4D78B5)),
+          ),
+          title: const Text('Veli Görüşme Saatleri',
               style:
-                  TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
-            ),
-            content: SizedBox(
-              width: 430,
-              child: SingleChildScrollView(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   const Text(
-                    'Her aralığı 13:30-17:30 biçiminde, birden fazlasını virgülle yazın. Boş gün kapalıdır.',
+                    'Görüşme yapılacak günleri açın ve başlangıç/bitiş saatlerini seçin. Kapalı günlerde veli randevusu oluşturulmaz.',
                     style: TextStyle(color: Colors.white70, height: 1.35),
                   ),
-                  const SizedBox(height: 10),
-                  ...days.map((day) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: TextField(
-                          controller: controllers[day[0]],
-                          style: const TextStyle(color: Colors.white),
-                          decoration: availabilityFieldDecoration(day[1]),
-                        ),
-                      )),
+                  const SizedBox(height: 12),
+                  ...days.map((day) {
+                    final slot = selected[day[0]];
+                    final enabled = slot != null;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 9),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: .06),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: Row(
+                        children: [
+                          Switch(
+                            value: enabled,
+                            onChanged: (value) => setDialogState(() {
+                              selected[day[0]] = value
+                                  ? {'start': '13:00', 'end': '17:50'}
+                                  : null;
+                            }),
+                          ),
+                          SizedBox(
+                            width: 82,
+                            child: Text(day[1],
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                          if (enabled) ...[
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () async {
+                                  final value = await pickTime(
+                                      dialogContext, slot['start']);
+                                  if (value != null) {
+                                    setDialogState(
+                                        () => slot['start'] = value);
+                                  }
+                                },
+                                child: Text(slot['start']!),
+                              ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 6),
+                              child: Icon(Icons.arrow_forward_rounded,
+                                  color: Colors.white54, size: 18),
+                            ),
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () async {
+                                  final value = await pickTime(
+                                      dialogContext, slot['end']);
+                                  if (value != null) {
+                                    setDialogState(() => slot['end'] = value);
+                                  }
+                                },
+                                child: Text(slot['end']!),
+                              ),
+                            ),
+                          ] else
+                            const Expanded(
+                              child: Text('Kurumda değil',
+                                  textAlign: TextAlign.end,
+                                  style: TextStyle(color: Colors.white54)),
+                            ),
+                        ],
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 4),
                   DropdownButtonFormField<int>(
                     initialValue:
                         [15, 20, 30].contains(slotMinutes) ? slotMinutes : 20,
                     dropdownColor: const Color(0xFF10264C),
                     iconEnabledColor: const Color(0xFFB8ECFF),
                     style: const TextStyle(color: Colors.white),
-                    decoration: availabilityFieldDecoration('Randevu süresi'),
+                    decoration: const InputDecoration(
+                      labelText: 'Randevu süresi',
+                      labelStyle: TextStyle(color: Colors.white70),
+                      enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Color(0xFF4D78B5))),
+                      focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Color(0xFF8EDBFF))),
+                    ),
                     items: const [15, 20, 30]
                         .map((value) => DropdownMenuItem(
                             value: value,
@@ -7272,68 +7340,57 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     onChanged: (value) =>
                         setDialogState(() => slotMinutes = value ?? 20),
                   ),
-                ]),
+                ],
               ),
             ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: TextButton.styleFrom(foregroundColor: Colors.white70),
-                  child: const Text('Vazgeç')),
-              FilledButton(
-                  onPressed: () async {
-                    final weeklyPayload = <String, List<Map<String, String>>>{};
-                    for (final day in days) {
-                      weeklyPayload[day[0]] = controllers[day[0]]!
-                          .text
-                          .split(',')
-                          .map((part) {
-                            final pieces = part.trim().split('-');
-                            return pieces.length == 2
-                                ? {
-                                    'start': pieces[0].trim(),
-                                    'end': pieces[1].trim()
-                                  }
-                                : <String, String>{};
-                          })
-                          .where((slot) => slot.isNotEmpty)
-                          .toList();
-                    }
-                    try {
-                      await _functions
-                          .httpsCallable('saveGuidanceAvailability')
-                          .call({
-                        'counselorId': counselorId,
-                        'guidanceAvailability': {
-                          'weekly': weeklyPayload,
-                          'closedDates': const <String>[],
-                          'slotMinutes': slotMinutes,
-                        },
-                      });
-                      if (context.mounted) {
-                        Navigator.pop(context);
-                      }
-                    } catch (error) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text(_adminFunctionErrorMessage(error))));
-                      }
-                    }
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF7DD3FC),
-                    foregroundColor: const Color(0xFF071A3A),
-                  ),
-                  child: const Text('Kaydet')),
-            ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              style: TextButton.styleFrom(foregroundColor: Colors.white70),
+              child: const Text('Vazgeç'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final weeklyPayload = <String, List<Map<String, String>>>{};
+                for (final day in days) {
+                  final slot = selected[day[0]];
+                  weeklyPayload[day[0]] =
+                      slot == null ? <Map<String, String>>[] : [slot];
+                }
+                try {
+                  await _functions
+                      .httpsCallable('saveGuidanceAvailability')
+                      .call({
+                    'counselorId': counselorId,
+                    'guidanceAvailability': {
+                      'weekly': weeklyPayload,
+                      'closedDates': const <String>[],
+                      'slotMinutes': slotMinutes,
+                    },
+                  });
+                  if (dialogContext.mounted) {
+                    Navigator.pop(dialogContext);
+                  }
+                } catch (error) {
+                  if (dialogContext.mounted) {
+                    ScaffoldMessenger.of(dialogContext).showSnackBar(
+                      SnackBar(
+                          content: Text(_adminFunctionErrorMessage(error))),
+                    );
+                  }
+                }
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF7DD3FC),
+                foregroundColor: const Color(0xFF071A3A),
+              ),
+              child: const Text('Kaydet'),
+            ),
+          ],
         ),
-      );
-    } finally {
-      for (final controller in controllers.values) {
-        controller.dispose();
-      }
-    }
+      ),
+    );
   }
 
   Future<void> _showGuidanceCounselorStudents(
