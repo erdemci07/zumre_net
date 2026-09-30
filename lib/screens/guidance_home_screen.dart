@@ -2093,7 +2093,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   _guidanceInfoRow(
                     Icons.family_restroom_rounded,
                     'Veli',
-                    guardian,
+                    [
+                      guardian,
+                      '${student['guardianPhone'] ?? ''}'.trim(),
+                    ].where((value) => value.isNotEmpty).join(' • '),
                   ),
                 ],
                 const SizedBox(height: 10),
@@ -2624,7 +2627,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                                   _appointmentDetailChip(
                                                     Icons
                                                         .family_restroom_rounded,
-                                                    'Veli: $guardian',
+                                                    'Veli: ${[
+                                                      guardian,
+                                                      '${student['guardianPhone'] ?? ''}'.trim(),
+                                                    ].where((value) => value.isNotEmpty).join(' • ')}',
                                                   ),
                                               ]),
                                         ),
