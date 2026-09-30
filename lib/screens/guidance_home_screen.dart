@@ -416,6 +416,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
           final classOptions = students
+              .where((doc) {
+                if (levelFilter == 'ALL') return true;
+                return inferredStudentEducationLevel(doc.data()) == levelFilter;
+              })
               .map((doc) => formatStudentClassDisplay(
                     className: doc.data()['className'],
                     branch: doc.data()['branch'],
@@ -425,6 +429,9 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               .toSet()
               .toList()
             ..sort();
+          if (classFilter != 'ALL' && !classOptions.contains(classFilter)) {
+            classFilter = 'ALL';
+          }
           final filtered = students.where((doc) {
             final data = doc.data();
             final name = guidanceStudentName(data).toLowerCase();
