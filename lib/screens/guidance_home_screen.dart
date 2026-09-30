@@ -473,6 +473,13 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   : guidanceStudentName(a.data())
                       .compareTo(guidanceStudentName(b.data()));
             });
+          final selectableFiltered = filtered.where((doc) {
+            final counselorId =
+                '${doc.data()['guidanceCounselorId'] ?? ''}'.trim();
+            return counselorId != uid;
+          }).toList();
+          final allFilteredSelected = selectableFiltered.isNotEmpty &&
+              selectableFiltered.every((doc) => selectedIds.contains(doc.id));
           return Dialog(
             backgroundColor: Colors.transparent,
             insetPadding:
@@ -578,6 +585,32 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                       ),
                     ),
                   ]),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: submitting || selectableFiltered.isEmpty
+                          ? null
+                          : () => setDialogState(() {
+                                if (allFilteredSelected) {
+                                  selectedIds.removeAll(selectableFiltered
+                                      .map((doc) => doc.id));
+                                } else {
+                                  selectedIds.addAll(
+                                      selectableFiltered.map((doc) => doc.id));
+                                }
+                              }),
+                      icon: Icon(allFilteredSelected
+                          ? Icons.deselect_rounded
+                          : Icons.select_all_rounded),
+                      label: Text(allFilteredSelected
+                          ? 'Seçimi temizle'
+                          : 'Tümünü seç'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFFFB1C8),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   Expanded(
                     child: filtered.isEmpty
