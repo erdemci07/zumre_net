@@ -1668,7 +1668,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return '$remainingSeconds sn';
   }
 
-  Widget _compactZumreInfoBadge() {
+  Widget _compactZumreInfoBadge({bool compact = false}) {
     final active = _isZumreOpenNow && !_isLunchNow;
     final remaining = _zumreRemainingMinutes;
     final text = active
@@ -1683,8 +1683,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     final color = active ? Colors.greenAccent : Colors.orangeAccent;
 
     return Container(
-      constraints: const BoxConstraints(maxWidth: 190),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      constraints: BoxConstraints(maxWidth: compact ? 145 : 190),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 8,
+        vertical: compact ? 3 : 4,
+      ),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
@@ -1706,7 +1709,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: color,
-                fontSize: 10,
+                fontSize: compact ? 9 : 10,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -1716,45 +1719,42 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildSubjectGrid({bool fillHeight = false, bool compact = false}) {
+  Widget _buildSubjectGrid({required bool compact}) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        const crossAxisSpacing = 8.0;
-        const mainAxisSpacing = 8.0;
-        final minItemHeight = compact ? 36.0 : 48.0;
-        const crossAxisCount = 2;
-        final subjects = _visibleSubjectOptions;
-        final rowCount = (subjects.length / crossAxisCount).ceil().clamp(1, 99);
-        final availableWidth = constraints.maxWidth;
-        final availableHeight = constraints.maxHeight;
-        final itemWidth =
-            (availableWidth - (crossAxisSpacing * (crossAxisCount - 1))) /
-                crossAxisCount;
-        final totalVerticalSpacing = mainAxisSpacing * (rowCount - 1);
-        final rawItemHeight = fillHeight && availableHeight.isFinite
-            ? (availableHeight - totalVerticalSpacing) / rowCount
-            : itemWidth / (availableWidth < 390 ? 2.5 : 2.35);
-        final itemHeight = rawItemHeight.clamp(minItemHeight, 120.0);
-        final aspectRatio = itemHeight > 0
-            ? itemWidth / itemHeight
-            : availableWidth < 390
-                ? 2.5
-                : 2.35;
-
+      final crossAxisCount = compact && constraints.maxWidth < 600
+        ? _visibleSubjectOptions.length > 6
+          ? 4
+          : 3
+        : 2;
+      final dense = crossAxisCount == 4;
+      const crossAxisSpacing = 8.0;
+      const mainAxisSpacing = 8.0;
+      final rowCount =
+        (_visibleSubjectOptions.length / crossAxisCount).ceil();
+      final itemWidth = (constraints.maxWidth -
+          crossAxisSpacing * (crossAxisCount - 1)) /
+        crossAxisCount;
+      final availableItemHeight = constraints.maxHeight.isFinite
+        ? (constraints.maxHeight - mainAxisSpacing * (rowCount - 1)) /
+          rowCount
+        : itemWidth / 2.7;
+      final itemHeight = availableItemHeight.clamp(44.0, 140.0);
         return GridView.count(
-          shrinkWrap: !fillHeight,
+        shrinkWrap: false,
           padding: EdgeInsets.zero,
           physics: const NeverScrollableScrollPhysics(),
           crossAxisCount: crossAxisCount,
-          crossAxisSpacing: crossAxisSpacing,
-          mainAxisSpacing: mainAxisSpacing,
-          childAspectRatio: aspectRatio,
-          children: subjects
+        crossAxisSpacing: crossAxisSpacing,
+        mainAxisSpacing: mainAxisSpacing,
+        childAspectRatio: itemWidth / itemHeight,
+          children: _visibleSubjectOptions
               .map((subject) => _subjectCard(
                     subject.name,
                     subject.icon,
                     subject.color,
                     compact: compact,
+                    dense: dense,
                   ))
               .toList(),
         );
@@ -1762,12 +1762,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildQuestionCountSelector() {
+  Widget _buildQuestionCountSelector({bool compact = false}) {
     const options = [1, 2, 3];
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 9,
+        vertical: compact ? 3 : 5,
+      ),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(18),
@@ -1776,15 +1779,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Kaç soru çözdüreceksin?',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 13,
+              fontSize: compact ? 12 : 13,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 3),
+          SizedBox(height: compact ? 1 : 3),
           Row(
             children: options.map((questionCount) {
               final selected = _selectedQuestionCount == questionCount;
@@ -1802,7 +1805,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 220),
-                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      padding: EdgeInsets.symmetric(vertical: compact ? 2 : 4),
                       decoration: BoxDecoration(
                         color: selected
                             ? const Color(0xFF6C3DFF)
@@ -1817,10 +1820,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       child: Center(
                         child: Text(
                           label,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
-                            fontSize: 14,
+                            fontSize: compact ? 13 : 14,
                           ),
                         ),
                       ),
@@ -1830,12 +1833,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               );
             }).toList(),
           ),
-          const SizedBox(height: 3),
+          SizedBox(height: compact ? 1 : 3),
           Text(
             'Tahmini çözüm süresi: ~${_estimatedMinutesForQuestionCount(_selectedQuestionCount)} dk',
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white70,
-              fontSize: 10.5,
+              fontSize: compact ? 9.5 : 10.5,
             ),
           ),
         ],
@@ -1843,7 +1846,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildTeacherSelector() {
+  Widget _buildTeacherSelector({bool compact = false}) {
     final hasManualTeacher = _selectedTeacherId != null;
     final canSelectTeacher = _isZumreOpenNow && !_isLunchNow;
     final subtitle = !canSelectTeacher
@@ -1857,7 +1860,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       onTap: canSelectTeacher ? _showTeacherPickerDialog : null,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        padding: EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: compact ? 4 : 7,
+        ),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(18),
@@ -1866,8 +1872,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         child: Row(
           children: [
             Container(
-              width: 32,
-              height: 32,
+              width: compact ? 28 : 32,
+              height: compact ? 28 : 32,
               decoration: BoxDecoration(
                 color: (hasManualTeacher ? Colors.greenAccent : Colors.amber)
                     .withValues(alpha: 0.16),
@@ -1889,11 +1895,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Öğretmen Seç',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 14,
+                      fontSize: compact ? 13 : 14,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -1902,9 +1908,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     subtitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: Colors.white70,
-                      fontSize: 11,
+                      fontSize: compact ? 10 : 11,
                     ),
                   ),
                 ],
@@ -3266,6 +3272,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     IconData icon,
     Color color, {
     bool compact = false,
+    bool dense = false,
   }) {
     final selected = _selectedSubject == title;
 
@@ -3295,16 +3302,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           children: [
             Icon(icon,
                 color: selected ? Colors.white : color,
-                size: compact ? 18 : 26),
-            SizedBox(height: compact ? 2 : 5),
+                size: dense ? 18 : compact ? 21 : 26),
+            SizedBox(height: dense ? 1 : compact ? 2 : 5),
             Text(
               title,
-              maxLines: 1,
+              maxLines: dense ? 2 : 1,
               overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: compact ? 10.5 : 13,
+                fontSize: dense ? 9 : compact ? 12 : 13,
               ),
             ),
           ],
@@ -3313,9 +3321,40 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildCooldownCard() {
+  Widget _buildCooldownCard({bool compact = false}) {
     if (_remainingCooldownSeconds <= 0) {
       return const SizedBox.shrink();
+    }
+
+    if (compact) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.orange.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.timer, color: Colors.orangeAccent, size: 15),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                'Tekrar sıra: ${_formatCooldown(_remainingCooldownSeconds)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
     return Container(
@@ -3661,7 +3700,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildUpcomingAppointmentsSection() {
+  Widget _buildUpcomingAppointmentsSection({bool compact = false}) {
     final userId = _auth.currentUser?.uid;
     if (userId == null) return const SizedBox.shrink();
 
@@ -3715,8 +3754,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               onTap: () => _showUpcomingAppointmentsSheet(appointments),
               child: Container(
                 width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: EdgeInsets.symmetric(
+                  horizontal: compact ? 8 : 10,
+                  vertical: compact ? 5 : 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(16),
@@ -3728,14 +3769,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     Icon(
                       Icons.event_available_rounded,
                       color: Colors.amber.shade300,
-                      size: 15,
+                      size: compact ? 13 : 15,
                     ),
                     const SizedBox(width: 6),
-                    const Text(
+                    Text(
                       'Planlı',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 11.5,
+                        fontSize: compact ? 10.5 : 11.5,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -3745,9 +3786,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                         count == 1 ? '$summary • $teacher' : summary,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white70,
-                          fontSize: 11,
+                          fontSize: compact ? 10 : 11,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -3959,21 +4000,38 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             _hasActiveGuidanceTask ||
             _remainingCooldownSeconds > 0 ||
             _isInStudySession;
-        final compactPlanningLayout = compact && hasExtraCards;
+        final actionHeight = compact ? (hasExtraCards ? 40.0 : 52.0) : 48.0;
         return Padding(
           padding: EdgeInsets.fromLTRB(18, compact ? 5 : 8, 18, 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildWelcomeCard(),
-              SizedBox(height: compact ? 5 : 7),
-              _buildCooldownCard(),
-              _buildUpcomingAppointmentsSection(),
-              SizedBox(height: compact ? 4 : 6),
-              _buildGuidanceAppointmentDemoCard(),
-              _buildGuidanceTaskCard(),
-              SizedBox(height: compact ? 4 : 6),
-              if (_isInStudySession) ...[
+              _buildWelcomeCard(compact: compact),
+              SizedBox(height: compact ? 3 : 7),
+              _buildCooldownCard(compact: compact),
+              _buildUpcomingAppointmentsSection(compact: compact),
+              SizedBox(height: compact ? 3 : 6),
+              _buildGuidanceAppointmentDemoCard(compact: compact),
+              _buildGuidanceTaskCard(compact: compact),
+              SizedBox(height: compact ? 3 : 6),
+              if (_isInStudySession && compact)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.orangeAccent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Etüt sürüyor • Etüt bitince zümre sırası alabilirsiniz.',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                  ),
+                ),
+              if (_isInStudySession && !compact) ...[
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.only(bottom: 8),
@@ -3992,26 +4050,24 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ),
               ],
               const Text(
-                "Ders Seç",
+                'Ders Seç',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 19,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              SizedBox(height: compact ? 4 : 6),
-              Expanded(
-                child: _buildSubjectGrid(
-                  fillHeight: true,
-                  compact: compactPlanningLayout,
-                ),
+              SizedBox(height: compact ? 2 : 6),
+              Expanded(child: _buildSubjectGrid(compact: compact)),
+              SizedBox(height: compact ? 3 : 7),
+              _buildQuestionCountSelector(compact: compact),
+              SizedBox(height: compact ? 3 : 7),
+              _buildTeacherSelector(compact: compact),
+              SizedBox(height: compact ? 3 : 7),
+              _buildQueueActions(
+                compact: compact,
+                buttonHeight: actionHeight,
               ),
-              SizedBox(height: compact ? 5 : 7),
-              _buildQuestionCountSelector(),
-              SizedBox(height: compact ? 5 : 7),
-              _buildTeacherSelector(),
-              SizedBox(height: compact ? 5 : 7),
-              _buildQueueActions(compact: compactPlanningLayout),
             ],
           ),
         );
@@ -4019,10 +4075,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildWelcomeCard() {
+  Widget _buildWelcomeCard({bool compact = false}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(compact ? 11 : 18),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -4077,17 +4133,19 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                             ),
                           ),
                         ),
-                        _compactZumreInfoBadge(),
+                        _compactZumreInfoBadge(compact: compact),
                       ],
                     ),
-                    const SizedBox(height: 3),
-                    const Text(
-                      'Dersini seç, sıranı al ve öğretmenine ulaş.',
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 11,
+                    if (!compact) ...[
+                      const SizedBox(height: 3),
+                      const Text(
+                        'Dersini seç, sıranı al ve öğretmenine ulaş.',
+                        style: TextStyle(
+                          color: Colors.white60,
+                          fontSize: 11,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
@@ -4248,7 +4306,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildGuidanceTaskCard() {
+  Widget _buildGuidanceTaskCard({bool compact = false}) {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return const SizedBox.shrink();
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -4271,40 +4329,57 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         final d = tasks.first.data();
         return Container(
           width: double.infinity,
-          margin: const EdgeInsets.only(top: 7),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          margin: EdgeInsets.only(top: compact ? 3 : 7),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 10 : 14,
+            vertical: compact ? 6 : 11,
+          ),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
           ),
           child: Row(children: [
-            const Icon(Icons.assignment_turned_in_rounded,
-                color: Colors.white70, size: 22),
-            const SizedBox(width: 11),
+            Icon(Icons.assignment_turned_in_rounded,
+                color: Colors.white70, size: compact ? 17 : 22),
+            SizedBox(width: compact ? 7 : 11),
             Expanded(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                  Text('${d['title'] ?? 'Rehberlik Takibi'}',
+              child: compact
+                  ? Text(
+                      '${d['title'] ?? 'Rehberlik Takibi'} • ${d['schedule'] ?? 'Haftalık'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13.5)),
-                  const SizedBox(height: 2),
-                  Text(
-                      '${d['schedule'] ?? 'Haftalık'} • Rehberlikçi tarafından planlandı',
-                      style:
-                          const TextStyle(color: Colors.white60, fontSize: 11)),
-                ])),
-            const Icon(Icons.repeat_rounded, color: Colors.white70, size: 19),
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${d['title'] ?? 'Rehberlik Takibi'}',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13.5)),
+                        const SizedBox(height: 2),
+                        Text(
+                            '${d['schedule'] ?? 'Haftalık'} • Rehberlikçi tarafından planlandı',
+                            style: const TextStyle(
+                                color: Colors.white60, fontSize: 11)),
+                      ],
+                    ),
+            ),
+            Icon(Icons.repeat_rounded,
+                color: Colors.white70, size: compact ? 15 : 19),
           ]),
         );
       },
     );
   }
 
-  Widget _buildGuidanceAppointmentDemoCard() {
+  Widget _buildGuidanceAppointmentDemoCard({bool compact = false}) {
     return InkWell(
       onTap: _guidanceAppointment == null
           ? _showGuidanceAppointmentDemo
@@ -4312,7 +4387,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       borderRadius: BorderRadius.circular(18),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10 : 14,
+          vertical: compact ? 7 : 11,
+        ),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
@@ -4327,24 +4405,28 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.forum_rounded, color: Colors.cyanAccent, size: 23),
-            const SizedBox(width: 11),
+            Icon(Icons.forum_rounded,
+              color: Colors.cyanAccent, size: compact ? 18 : 23),
+            SizedBox(width: compact ? 8 : 11),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Rehberlik Randevusu',
+                    Text('Rehberlik Randevusu',
                       style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14.5)),
-                  const SizedBox(height: 2),
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: compact ? 12.5 : 14.5)),
+                    SizedBox(height: compact ? 0 : 2),
                   Text(
                     _guidanceAppointment == null
                         ? 'Rehberlikçini seç, uygun tarihi planla.'
                         : '${_guidanceAppointment!['day']} • ${_guidanceAppointment!['status']}',
-                    style:
-                        const TextStyle(color: Colors.white60, fontSize: 11.5),
+                    maxLines: compact ? 1 : 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontSize: compact ? 10 : 11.5),
                   ),
                 ],
               ),
@@ -4364,25 +4446,37 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildQueueActions({bool compact = false}) {
+  Widget _buildQueueActions({
+    bool compact = false,
+    double? buttonHeight,
+  }) {
     return Row(
       children: [
         Expanded(
           flex: 5,
-          child: _buildJoinQueueButton(compact: compact),
+          child: _buildJoinQueueButton(
+            compact: compact,
+            height: buttonHeight,
+          ),
         ),
         SizedBox(width: compact ? 6 : 9),
         Expanded(
           flex: 4,
-          child: _buildPlanAppointmentButton(compact: compact),
+          child: _buildPlanAppointmentButton(
+            compact: compact,
+            height: buttonHeight,
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildPlanAppointmentButton({bool compact = false}) {
+  Widget _buildPlanAppointmentButton({
+    bool compact = false,
+    double? height,
+  }) {
     return SizedBox(
-      height: compact ? 40 : 48,
+      height: height ?? (compact ? 40 : 48),
       child: OutlinedButton.icon(
         onPressed: _isRoutingQueue ? null : _showPlanAppointmentDialog,
         icon: Icon(Icons.event_available_rounded, size: compact ? 16 : 19),
@@ -4413,7 +4507,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildJoinQueueButton({bool compact = false}) {
+  Widget _buildJoinQueueButton({
+    bool compact = false,
+    double? height,
+  }) {
     final canJoinQueue = _selectedSubject != null &&
         _remainingCooldownSeconds <= 0 &&
         _isZumreOpenNow &&
@@ -4423,7 +4520,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     return SizedBox(
       width: double.infinity,
-      height: compact ? 40 : 48,
+      height: height ?? (compact ? 40 : 48),
       child: ElevatedButton(
         onPressed: canJoinQueue ? _joinQueue : null,
         style: ElevatedButton.styleFrom(

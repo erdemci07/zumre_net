@@ -3128,7 +3128,21 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _sectionTitle('Bugünkü Durum'),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 12),
+                    _runtimeSummaryStrip(),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _smallStatusPill(
+                          label: 'Zümre',
+                          value: 'Bugün $_totalSolvedToday çözüm',
+                          color: Colors.greenAccent,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     LayoutBuilder(
                       builder: (context, constraints) {
                         final crossAxisCount =
@@ -3140,7 +3154,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           crossAxisSpacing: 10,
                           mainAxisSpacing: 10,
                           childAspectRatio:
-                              constraints.maxWidth < 420 ? 1.42 : 1.75,
+                              constraints.maxWidth < 420 ? 2.05 : 4.0,
                           children: [
                             _operationMetricCard(
                               title: 'Bekleyen Öğrenci',
@@ -3170,20 +3184,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
                         );
                       },
                     ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _smallStatusPill(
-                          label: 'Zümre',
-                          value: 'Bugün $_totalSolvedToday çözüm',
-                          color: Colors.greenAccent,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    _runtimeSummaryStrip(),
                   ],
                 );
               },
@@ -3328,19 +3328,26 @@ class _StatisticsPageState extends State<StatisticsPage> {
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: color.withValues(alpha: 0.17),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.30)),
+        border: Border.all(color: color.withValues(alpha: 0.42), width: 1.2),
       ),
-      child: Text(
-        '$label: $value',
-        style: TextStyle(
-          color: color,
-          fontSize: 12.5,
-          fontWeight: FontWeight.bold,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.circle_rounded, color: color, size: 9),
+          const SizedBox(width: 8),
+          Text(
+            '$label: $value',
+            style: TextStyle(
+              color: color,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3352,35 +3359,41 @@ class _StatisticsPageState extends State<StatisticsPage> {
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.all(11),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white12),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Row(
         children: [
-          Icon(icon, color: color, size: 21),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 23,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+          Icon(icon, color: color, size: 24),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
