@@ -35,6 +35,31 @@ InputDecoration _guidanceDialogFieldDecoration(String label) {
   );
 }
 
+DateTimeRange _guidanceReportRangeForPreset(String preset) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  if (preset == 'week') {
+    return DateTimeRange(
+      start: today.subtract(Duration(days: today.weekday - 1)),
+      end: today,
+    );
+  }
+  if (preset == 'month') {
+    return DateTimeRange(start: DateTime(today.year, today.month), end: today);
+  }
+  return DateTimeRange(start: today, end: today);
+}
+
+String _guidanceIsoDate(DateTime date) =>
+    '${date.year.toString().padLeft(4, '0')}-'
+    '${date.month.toString().padLeft(2, '0')}-'
+    '${date.day.toString().padLeft(2, '0')}';
+
+String _guidanceDisplayDate(DateTime date) =>
+    '${date.day.toString().padLeft(2, '0')}.'
+    '${date.month.toString().padLeft(2, '0')}.'
+    '${date.year}';
+
 String _guidanceStatus(String? value) => guidanceStatusValue(value);
 
 bool _isGuidanceToday(Map<String, dynamic> data) {
@@ -173,6 +198,39 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
       return;
     }
     var selected = classes.first;
+    var preset = 'today';
+    var selectedRange = _guidanceReportRangeForPreset(preset);
+
+    Future<void> pickDate({
+      required bool isStart,
+      required StateSetter setDialogState,
+    }) async {
+      final picked = await showDatePicker(
+        context: context,
+        locale: const Locale('tr', 'TR'),
+        firstDate: DateTime(2024),
+        lastDate: DateTime.now(),
+        initialDate: isStart ? selectedRange.start : selectedRange.end,
+      );
+      if (picked == null) return;
+      setDialogState(() {
+        preset = 'custom';
+        if (isStart) {
+          selectedRange = DateTimeRange(
+            start: picked,
+            end: picked.isAfter(selectedRange.end) ? picked : selectedRange.end,
+          );
+        } else {
+          selectedRange = DateTimeRange(
+            start: picked.isBefore(selectedRange.start)
+                ? picked
+                : selectedRange.start,
+            end: picked,
+          );
+        }
+      });
+    }
+
     final request = await showDialog<_GuidanceSummaryRequest>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -219,8 +277,124 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'Özet anonimdir; panoya asılabilir veya öğrenci/veli WhatsApp gruplarında paylaşılabilir.',
+                  'Seçilen tarih aralığındaki tüm öğrenciler zümre ve etüt bilgileriyle listelenir.',
                   style: TextStyle(color: Colors.white70, height: 1.35),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 6,
+                  children: [
+                    ('Bugün', 'today'),
+                    ('Bu Hafta', 'week'),
+                    ('Bu Ay', 'month'),
+                    ('Özel', 'custom'),
+                  ].map((option) {
+                    final isSelected = preset == option.$2;
+                    return ChoiceChip(
+                      label: Text(option.$1),
+                      selected: isSelected,
+                      onSelected: (_) => setDialogState(() {
+                        preset = option.$2;
+                        if (preset != 'custom') {
+                          selectedRange =
+                              _guidanceReportRangeForPreset(preset);
+                        }
+                      }),
+                      selectedColor: const Color(0xFFFFB1C8),
+                      backgroundColor: Colors.white.withValues(alpha: .08),
+                      side: BorderSide(
+                        color: isSelected
+                            ? const Color(0xFFFFB1C8)
+                            : Colors.white24,
+                      ),
+                      labelStyle: TextStyle(
+                        color: isSelected
+                            ? const Color(0xFF4A1830)
+                            : Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: .08),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.date_range_rounded,
+                              color: Color(0xFFFFB1C8)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              '${_guidanceDisplayDate(selectedRange.start)} - ${_guidanceDisplayDate(selectedRange.end)}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (preset == 'custom') ...[
+                        const SizedBox(height: 10),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final stackDates = constraints.maxWidth < 340;
+                            final startButton = OutlinedButton.icon(
+                              onPressed: () => pickDate(
+                                isStart: true,
+                                setDialogState: setDialogState,
+                              ),
+                              icon: const Icon(Icons.calendar_today_rounded,
+                                  size: 16),
+                              label: const Text('Başlangıç'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFFFB1C8),
+                                side: const BorderSide(
+                                    color: Color(0x66FFB1C8)),
+                              ),
+                            );
+                            final endButton = OutlinedButton.icon(
+                              onPressed: () => pickDate(
+                                isStart: false,
+                                setDialogState: setDialogState,
+                              ),
+                              icon: const Icon(Icons.event_available_rounded,
+                                  size: 17),
+                              label: const Text('Bitiş'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFFFB1C8),
+                                side: const BorderSide(
+                                    color: Color(0x66FFB1C8)),
+                              ),
+                            );
+                            if (stackDates) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [startButton, endButton],
+                              );
+                            }
+                            return Row(
+                              children: [
+                                Expanded(child: startButton),
+                                const SizedBox(width: 8),
+                                Expanded(child: endButton),
+                              ],
+                            );
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 14),
                 DropdownButtonFormField<_GuidanceClassOption>(
@@ -257,7 +431,11 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                     FilledButton.icon(
                       onPressed: () => Navigator.pop(
                         dialogContext,
-                        _GuidanceSummaryRequest(selected),
+                        _GuidanceSummaryRequest(
+                          selected,
+                          selectedRange.start,
+                          selectedRange.end,
+                        ),
                       ),
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFFFFB1C8),
@@ -330,7 +508,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
           ),
         ),
       );
-      final today = DateTime.now().toIso8601String().substring(0, 10);
       final response = await http.post(
         Uri.parse('$_reportsBaseUrl/reports/class-activity-summary'),
         headers: {
@@ -338,8 +515,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
           'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
-          'startDate': today,
-          'endDate': today,
+          'startDate': _guidanceIsoDate(request.startDate),
+          'endDate': _guidanceIsoDate(request.endDate),
           'className': request.classOption.className,
           if (request.classOption.branch.isNotEmpty)
             'branch': request.classOption.branch,
@@ -3115,7 +3292,13 @@ class _GuidanceClassOption {
 }
 
 class _GuidanceSummaryRequest {
-  const _GuidanceSummaryRequest(this.classOption);
+  const _GuidanceSummaryRequest(
+    this.classOption,
+    this.startDate,
+    this.endDate,
+  );
 
   final _GuidanceClassOption classOption;
+  final DateTime startDate;
+  final DateTime endDate;
 }

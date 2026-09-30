@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from models import ClassReportData, DateRange, InstitutionSummaryData, StudentReportRow
 from pdf.pagination import student_chunks
 from reports import class_activity, class_activity_summary, class_tracking, institution_summary
+from reports.class_activity_summary import _student_summary_rows
 from pdf.styles import report_styles
 
 
@@ -38,3 +39,13 @@ def test_student_chunks_adds_continuation_title_for_long_sections():
     chunks = student_chunks("HASAN KAYA", blocks, styles, chunk_size=10)
 
     assert len(chunks) == 3
+
+
+def test_class_activity_summary_keeps_students_without_activity():
+    data = ClassReportData(
+        "11-A",
+        _range(),
+        [StudentReportRow("s1", "Faaliyet Yok", "11-A", "", "")],
+    )
+
+    assert _student_summary_rows(data) == [["Faaliyet Yok", "-", "0", "0"]]
