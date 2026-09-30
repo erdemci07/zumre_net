@@ -7234,7 +7234,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 9),
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
+                          horizontal: 8, vertical: 8),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: .06),
                         borderRadius: BorderRadius.circular(16),
@@ -7251,7 +7251,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                             }),
                           ),
                           SizedBox(
-                            width: 82,
+                            width: MediaQuery.sizeOf(dialogContext).width < 600
+                                ? 70
+                                : 82,
                             child: Text(day[1],
                                 style: const TextStyle(
                                     color: Colors.white,
@@ -7274,8 +7276,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                 decoration: const InputDecoration(
                                   isDense: true,
                                   hintText: '08:30',
-                                  contentPadding:
-                                      EdgeInsets.symmetric(vertical: 10),
+                                  contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 10),
                                   enabledBorder: OutlineInputBorder(
                                     borderSide:
                                         BorderSide(color: Colors.white24),
@@ -7309,8 +7311,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                 decoration: const InputDecoration(
                                   isDense: true,
                                   hintText: '17:30',
-                                  contentPadding:
-                                      EdgeInsets.symmetric(vertical: 10),
+                                  contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 10),
                                   enabledBorder: OutlineInputBorder(
                                     borderSide:
                                         BorderSide(color: Colors.white24),
