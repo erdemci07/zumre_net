@@ -386,25 +386,52 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     });
   }
 
+  bool _guidanceHasTimeRemainingToday() {
+    final weekly = _guidanceAvailability['weekly'];
+    if (weekly is! Map) return false;
+
+    final now = _istanbulNow();
+    final todayKey = _dateKey(now);
+    if (!_guidanceWorksOnDate(todayKey)) return false;
+
+    final slots = weekly[_guidanceDayKey(todayKey)];
+    if (slots is! List || slots.isEmpty) return false;
+
+    final nowMinutes = now.hour * 60 + now.minute;
+    return slots.whereType<Map>().any((slot) {
+      final start = _timeToMinutes(slot['start']?.toString() ?? '');
+      final end = _timeToMinutes(slot['end']?.toString() ?? '');
+      return end > start && nowMinutes <= end - 30;
+    });
+  }
+
   List<String> _upcomingAppointmentDateKeys() {
     final today = _istanbulNow();
+    final startOffset = _guidanceHasTimeRemainingToday() ? 0 : 1;
 
     return List.generate(_appointmentPlanningMaxOffsetDays + 1, (index) {
-      return _dateKey(DateTime(today.year, today.month, today.day + index));
+      return _dateKey(
+        DateTime(today.year, today.month, today.day + startOffset + index),
+      );
     });
   }
 
   List<String> _guidanceAppointmentPlanningDateKeys() {
     final now = _istanbulNow();
     final today = DateTime(now.year, now.month, now.day);
-    final startOffset = now.hour >= 18 ? 1 : 0;
+    final startOffset = _guidanceHasTimeRemainingToday() ? 0 : 1;
+    final dateKeys = <String>[];
 
-    return List.generate(
-      _appointmentPlanningMaxOffsetDays - startOffset + 1,
-      (index) => _dateKey(
-        DateTime(today.year, today.month, today.day + startOffset + index),
-      ),
-    ).where(_guidanceWorksOnDate).toList();
+    for (var offset = startOffset;
+        offset <= 365 && dateKeys.length < _appointmentPlanningDayCount;
+        offset++) {
+      final dateKey = _dateKey(
+        DateTime(today.year, today.month, today.day + offset),
+      );
+      if (_guidanceWorksOnDate(dateKey)) dateKeys.add(dateKey);
+    }
+
+    return dateKeys;
   }
 
   DateTime _parseDateKey(String dateKey) {
