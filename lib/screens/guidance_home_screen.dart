@@ -429,9 +429,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
               .toSet()
               .toList()
             ..sort();
-          if (classFilter != 'ALL' && !classOptions.contains(classFilter)) {
-            classFilter = 'ALL';
-          }
+          final effectiveClassFilter =
+              classFilter == 'ALL' || classOptions.contains(classFilter)
+                  ? classFilter
+                  : 'ALL';
           final filtered = students.where((doc) {
             final data = doc.data();
             final name = guidanceStudentName(data).toLowerCase();
@@ -451,8 +452,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                 classLabel.toLowerCase().contains(q);
             final matchesLevel =
                 levelFilter == 'ALL' || level == levelFilter;
-            final matchesClass =
-                classFilter == 'ALL' || classLabel == classFilter;
+            final matchesClass = effectiveClassFilter == 'ALL' ||
+                classLabel == effectiveClassFilter;
             return visibleByAssignment &&
                 matchesSearch &&
                 matchesLevel &&
@@ -563,7 +564,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        initialValue: classFilter,
+                        initialValue: effectiveClassFilter,
                         isExpanded: true,
                         dropdownColor: const Color(0xFF4A1830),
                         style: const TextStyle(color: Colors.white),
