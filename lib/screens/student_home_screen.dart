@@ -3527,7 +3527,18 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   Widget _buildVerifiedNoShowBell() {
     final stream = _verifiedNoShowWarningStream();
-    if (stream == null) return const SizedBox.shrink();
+    if (stream == null) {
+      return IconButton(
+        tooltip: 'Bildirimler',
+        onPressed: () => _showVerifiedNoShowHistoryDialog(
+          const <QueryDocumentSnapshot<Map<String, dynamic>>>[],
+        ),
+        icon: const Icon(
+          Icons.notifications_none_rounded,
+          color: Colors.white,
+        ),
+      );
+    }
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: stream,
