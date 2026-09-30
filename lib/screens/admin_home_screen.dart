@@ -7204,24 +7204,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
     };
     var slotMinutes = (raw['slotMinutes'] as num?)?.toInt() ?? 20;
 
-    Future<String?> pickTime(BuildContext context, String? current) async {
-      final parts = (current ?? '').split(':');
-      final initial = parts.length == 2
-          ? TimeOfDay(
-              hour: int.tryParse(parts[0]) ?? 9,
-              minute: int.tryParse(parts[1]) ?? 0)
-          : const TimeOfDay(hour: 9, minute: 0);
-      final picked = await showTimePicker(
-        context: context,
-        initialTime: initial,
-        helpText: 'Saat seçin',
-        cancelText: 'Vazgeç',
-        confirmText: 'Seç',
-      );
-      if (picked == null) return null;
-      return '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
-    }
-
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -7277,16 +7259,33 @@ class _UserManagementPageState extends State<UserManagementPage> {
                           ),
                           if (enabled) ...[
                             Expanded(
-                              child: OutlinedButton(
-                                onPressed: () async {
-                                  final value = await pickTime(
-                                      dialogContext, slot['start']);
-                                  if (value != null) {
-                                    setDialogState(
-                                        () => slot['start'] = value);
-                                  }
-                                },
-                                child: Text(slot['start']!),
+                              child: TextFormField(
+                                initialValue: slot['start'],
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                  LengthLimitingTextInputFormatter(4),
+                                  _TimeTextInputFormatter(),
+                                ],
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700),
+                                textAlign: TextAlign.center,
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  hintText: '08:30',
+                                  contentPadding:
+                                      EdgeInsets.symmetric(vertical: 10),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderSide:
+                                        BorderSide(color: Colors.white24),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderSide:
+                                        BorderSide(color: Color(0xFF8EDBFF)),
+                                  ),
+                                ),
+                                onChanged: (value) => slot['start'] = value,
                               ),
                             ),
                             const Padding(
@@ -7295,15 +7294,33 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                   color: Colors.white54, size: 18),
                             ),
                             Expanded(
-                              child: OutlinedButton(
-                                onPressed: () async {
-                                  final value = await pickTime(
-                                      dialogContext, slot['end']);
-                                  if (value != null) {
-                                    setDialogState(() => slot['end'] = value);
-                                  }
-                                },
-                                child: Text(slot['end']!),
+                              child: TextFormField(
+                                initialValue: slot['end'],
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                  LengthLimitingTextInputFormatter(4),
+                                  _TimeTextInputFormatter(),
+                                ],
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700),
+                                textAlign: TextAlign.center,
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  hintText: '17:30',
+                                  contentPadding:
+                                      EdgeInsets.symmetric(vertical: 10),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderSide:
+                                        BorderSide(color: Colors.white24),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderSide:
+                                        BorderSide(color: Color(0xFF8EDBFF)),
+                                  ),
+                                ),
+                                onChanged: (value) => slot['end'] = value,
                               ),
                             ),
                           ] else
