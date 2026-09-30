@@ -402,11 +402,11 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
         .get();
     if (!mounted) return;
 
-    final available = snapshot.docs
-        .where((doc) =>
-            '${doc.data()['guidanceCounselorId'] ?? ''}'.trim().isEmpty)
-        .toList();
+    final students = snapshot.docs;
+    final uid = auth.currentUser!.uid;
     String query = '';
+    String levelFilter = 'ALL';
+    String classFilter = 'ALL';
     final selectedIds = <String>{};
     bool submitting = false;
 
@@ -414,16 +414,41 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
-          final filtered = available.where((doc) {
+          final classOptions = students
+              .map((doc) => formatStudentClassDisplay(
+                    className: doc.data()['className'],
+                    branch: doc.data()['branch'],
+                    department: doc.data()['department'],
+                  ))
+              .where((value) => value.trim().isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
+          final filtered = students.where((doc) {
             final data = doc.data();
             final name = guidanceStudentName(data).toLowerCase();
             final classLabel = formatStudentClassDisplay(
               className: data['className'],
               branch: data['branch'],
               department: data['department'],
-            ).toLowerCase();
+            );
+            final level = inferredStudentEducationLevel(data) ?? '';
+            final counselorId =
+                '${data['guidanceCounselorId'] ?? ''}'.trim();
+            final visibleByAssignment =
+                counselorId.isEmpty || counselorId == uid;
             final q = query.trim().toLowerCase();
-            return q.isEmpty || name.contains(q) || classLabel.contains(q);
+            final matchesSearch = q.isEmpty ||
+                name.contains(q) ||
+                classLabel.toLowerCase().contains(q);
+            final matchesLevel =
+                levelFilter == 'ALL' || level == levelFilter;
+            final matchesClass =
+                classFilter == 'ALL' || classLabel == classFilter;
+            return visibleByAssignment &&
+                matchesSearch &&
+                matchesLevel &&
+                matchesClass;
           }).toList()
             ..sort((a, b) {
               final ac = formatStudentClassDisplay(
@@ -475,7 +500,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                   fontSize: 22,
                                   fontWeight: FontWeight.w800)),
                           Text(
-                              'Henüz rehber öğretmeni olmayan öğrencileri kendinize atayın.',
+                              'Kademe ve sınıfa göre öğrencileri filtreleyin. Size atanmış öğrenciler bilgi amaçlı listede kalır.',
                               style: TextStyle(
                                   color: Colors.white70, fontSize: 12)),
                         ],
@@ -508,6 +533,48 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: levelFilter,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF4A1830),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: _guidanceDialogFieldDecoration('Kademe'),
+                        items: const [
+                          DropdownMenuItem(value: 'ALL', child: Text('Tümü')),
+                          DropdownMenuItem(value: 'LGS', child: Text('LGS')),
+                          DropdownMenuItem(value: 'YKS', child: Text('YKS')),
+                        ],
+                        onChanged: (value) => setDialogState(() {
+                          levelFilter = value ?? 'ALL';
+                          classFilter = 'ALL';
+                        }),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: classFilter,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF4A1830),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: _guidanceDialogFieldDecoration('Sınıf'),
+                        items: [
+                          const DropdownMenuItem(
+                              value: 'ALL', child: Text('Tümü')),
+                          ...classOptions.map((value) => DropdownMenuItem(
+                                value: value,
+                                child: Text(value,
+                                    overflow: TextOverflow.ellipsis),
+                              )),
+                        ],
+                        onChanged: (value) => setDialogState(
+                            () => classFilter = value ?? 'ALL'),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
                   Expanded(
                     child: filtered.isEmpty
                         ? const Center(
@@ -522,6 +589,9 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                               final doc = filtered[index];
                               final data = doc.data();
                               final selected = selectedIds.contains(doc.id);
+                              final counselorId =
+                                  '${data['guidanceCounselorId'] ?? ''}'.trim();
+                              final assignedToMe = counselorId == uid;
                               final classLabel = formatStudentClassDisplay(
                                 className: data['className'],
                                 branch: data['branch'],
@@ -536,12 +606,18 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                 title: Text(guidanceStudentName(data),
                                     style:
                                         const TextStyle(color: Colors.white)),
-                                subtitle: classLabel.isEmpty
-                                    ? null
-                                    : Text(classLabel,
-                                        style: const TextStyle(
-                                            color: Colors.white60)),
-                                onChanged: submitting
+                                subtitle: Text(
+                                  [
+                                    if (classLabel.isNotEmpty) classLabel,
+                                    if (assignedToMe) 'Zaten size atanmış',
+                                  ].join(' • '),
+                                  style: TextStyle(
+                                    color: assignedToMe
+                                        ? const Color(0xFFFFB1C8)
+                                        : Colors.white60,
+                                  ),
+                                ),
+                                onChanged: submitting || assignedToMe
                                     ? null
                                     : (value) => setDialogState(() {
                                           if (value == true) {
