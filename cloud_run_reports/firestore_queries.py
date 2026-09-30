@@ -382,6 +382,7 @@ def fetch_class_students(
     class_name: str,
     branch: str = "",
     department: str = "",
+    counselor_id: str | None = None,
 ) -> list[StudentReportRow]:
     query = (
         db.collection("users")
@@ -395,6 +396,11 @@ def fetch_class_students(
             data = doc.to_dict() or {}
             student_branch = _clean(data.get("branch"))
             student_department = _clean(data.get("department"))
+            if (
+                counselor_id
+                and _clean(data.get("guidanceCounselorId")) != counselor_id
+            ):
+                continue
             if branch and student_branch != branch:
                 continue
             if department and student_department != department:
@@ -444,6 +450,7 @@ def build_class_report(
     end_date: str,
     branch: str | None = None,
     department: str | None = None,
+    counselor_id: str | None = None,
 ) -> ClassReportData:
     db = firestore.client()
     clean_class_name = _clean(class_name)
@@ -459,6 +466,7 @@ def build_class_report(
         clean_class_name,
         branch=clean_branch,
         department=clean_department,
+        counselor_id=counselor_id,
     )
     if students:
         student_branches = {student.branch for student in students if student.branch}

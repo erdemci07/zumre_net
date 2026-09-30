@@ -71,6 +71,7 @@ def _build_pdf(
     renderer: Callable,
     report_name: str,
     class_required: bool = False,
+    counselor_id: str | None = None,
 ) -> Response:
     try:
         if class_required:
@@ -82,6 +83,7 @@ def _build_pdf(
                 request.end_date,
                 branch=request.branch,
                 department=request.department,
+                counselor_id=counselor_id,
             )
         else:
             data = build_institution_summary(request.start_date, request.end_date)
@@ -152,13 +154,16 @@ def class_activity_report(
 @app.post("/reports/class-activity-summary")
 def class_activity_summary_report(
     request: ReportRequest,
-    _: dict = Depends(require_reporter),
+    reporter: dict[str, str] = Depends(require_reporter),
 ):
     return _build_pdf(
         request,
         class_activity_summary,
         "Sinif_Faaliyet_Ozeti",
         class_required=True,
+        counselor_id=(
+            reporter["uid"] if reporter["role"] == "guidance" else None
+        ),
     )
 
 

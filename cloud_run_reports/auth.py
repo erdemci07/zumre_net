@@ -26,7 +26,9 @@ def require_admin(authorization: str | None = Header(default=None)) -> str:
     return uid
 
 
-def require_reporter(authorization: str | None = Header(default=None)) -> str:
+def require_reporter(
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
     """Allow guidance only for the share-safe class activity summary."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Oturum doğrulanamadı.")
@@ -45,7 +47,8 @@ def require_reporter(authorization: str | None = Header(default=None)) -> str:
         raise HTTPException(status_code=401, detail="Oturum doğrulanamadı.")
 
     user_doc = firestore.client().collection("users").document(uid).get()
-    if not user_doc.exists or user_doc.to_dict().get("role") not in {"admin", "guidance"}:
+    role = user_doc.to_dict().get("role") if user_doc.exists else None
+    if role not in {"admin", "guidance"}:
         raise HTTPException(status_code=403, detail="Bu işlem için yetkiniz yok.")
 
-    return uid
+    return {"uid": uid, "role": role}

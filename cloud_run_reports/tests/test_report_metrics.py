@@ -13,6 +13,7 @@ from models import (
     StudySession,
 )
 from report_metrics import class_activity_summary, class_totals, institution_metrics
+from firestore_queries import fetch_class_students
 
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
@@ -78,6 +79,48 @@ def test_class_report_keeps_zero_activity_students():
         "question_count": 1,
         "study_attendance_count": 0,
     }
+
+
+def test_class_students_can_be_limited_to_guidance_assignments():
+    from unittest.mock import Mock
+
+    documents = [
+        Mock(
+            id="assigned",
+            to_dict=Mock(
+                return_value={
+                    "fullName": "Atanmış Öğrenci",
+                    "className": "11-A",
+                    "guidanceCounselorId": "counselor-1",
+                }
+            ),
+        ),
+        Mock(
+            id="unassigned",
+            to_dict=Mock(
+                return_value={
+                    "fullName": "Diğer Öğrenci",
+                    "className": "11-A",
+                    "guidanceCounselorId": "counselor-2",
+                }
+            ),
+        ),
+    ]
+    query = Mock()
+    query.where.return_value = query
+    query.stream.return_value = documents
+    collection = Mock()
+    collection.where.return_value = query
+    database = Mock()
+    database.collection.return_value = collection
+
+    students = fetch_class_students(
+        database,
+        "11-A",
+        counselor_id="counselor-1",
+    )
+
+    assert [student.student_id for student in students] == ["assigned"]
 
 
 def test_class_activity_summary_keeps_recorded_teacher_and_omits_legacy_teacher():
