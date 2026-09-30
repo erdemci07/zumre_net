@@ -81,6 +81,12 @@ function timeSlotMatchesEducationScope(slot, level) {
   return scope === "BOTH" || (!!level && scope === level);
 }
 
+// Institution schedules existed before scope metadata. Legacy/BOTH schedule
+// slots are the existing YKS program; an LGS schedule must be explicit.
+function institutionScheduleScope(slot = {}) {
+  return timeSlotScope(slot) === "LGS" ? "LGS" : "YKS";
+}
+
 function teacherCanUseTimeSlotScope(teacher = {}, scope) {
   const normalizedScope = timeSlotScope({ educationLevel: scope });
   const scopes = teachingScopes(teacher);
@@ -99,5 +105,6 @@ module.exports = {
   teacherMatchesEducationScope,
   timeSlotScope,
   timeSlotMatchesEducationScope,
+  institutionScheduleScope,
   teacherCanUseTimeSlotScope,
 };

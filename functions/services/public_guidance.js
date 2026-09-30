@@ -26,6 +26,47 @@ function timeToMinutes(value) {
 }
 function dateWeekday(dateKey) { return WEEKDAYS[new Date(`${dateKey}T12:00:00Z`).getUTCDay()]; }
 function validDateKey(dateKey) { return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && !Number.isNaN(Date.parse(`${dateKey}T12:00:00Z`)); }
+function availabilityValidationError(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return "Veli görüşme saatleri geçersiz.";
+  }
+  if (raw.weekly !== undefined &&
+      (!raw.weekly || typeof raw.weekly !== "object" || Array.isArray(raw.weekly))) {
+    return "Haftalık veli görüşme programı geçersiz.";
+  }
+  const labels = {
+    sunday: "Pazar", monday: "Pazartesi", tuesday: "Salı",
+    wednesday: "Çarşamba", thursday: "Perşembe", friday: "Cuma",
+    saturday: "Cumartesi",
+  };
+  for (const day of WEEKDAYS) {
+    const rawSlots = raw.weekly?.[day];
+    if (rawSlots !== undefined && !Array.isArray(rawSlots)) {
+      return `${labels[day]} görüşme saatleri geçersiz.`;
+    }
+    const slots = rawSlots || [];
+    if (slots.length > 12) return `${labels[day]} için çok fazla saat aralığı var.`;
+    for (const slot of slots) {
+      const start = clean(slot?.start);
+      const end = clean(slot?.end);
+      if (!/^\d{2}:\d{2}$/.test(start) ||
+          !/^\d{2}:\d{2}$/.test(end) ||
+          timeToMinutes(start) < 0 ||
+          timeToMinutes(end) <= timeToMinutes(start)) {
+        return `${labels[day]} için başlangıç ve bitiş saatlerini kontrol edin.`;
+      }
+    }
+  }
+  if (raw.slotMinutes !== undefined &&
+      ![15, 20, 30].includes(Number(raw.slotMinutes))) {
+    return "Veli görüşme süresi geçersiz.";
+  }
+  if (raw.closedDates !== undefined &&
+      (!Array.isArray(raw.closedDates) || raw.closedDates.some((value) => !validDateKey(value)))) {
+    return "Kapalı tarih bilgisi geçersiz.";
+  }
+  return null;
+}
 function normalizeAvailability(raw = {}) {
   const weekly = {};
   for (const day of WEEKDAYS) {
@@ -68,10 +109,25 @@ function publicUpcomingAppointments(appointments = [], now = new Date()) {
 }
 function opaqueToken() { return crypto.randomBytes(32).toString("base64url"); }
 function otpCode() { return String(crypto.randomInt(0, 1000000)).padStart(6, "0"); }
+function otpAttemptDecision(challenge = {}, code = "") {
+  const attempts = Math.max(0, Number(challenge.attempts || 0));
+  if (attempts >= OTP_MAX_ATTEMPTS) {
+    return { status: "blocked", attempts };
+  }
+
+  const submittedHash = hashOtp(String(code), challenge.salt);
+  const expectedHash = String(challenge.codeHash || "");
+  const matches = submittedHash.length === expectedHash.length &&
+    crypto.timingSafeEqual(Buffer.from(submittedHash), Buffer.from(expectedHash));
+
+  return matches
+    ? { status: "verified", attempts }
+    : { status: "invalid", attempts: attempts + 1 };
+}
 function genericVerificationError(HttpsError) { return new HttpsError("failed-precondition", "Bilgiler doğrulanamadı. Lütfen bilgilerinizi kontrol edin."); }
 
 module.exports = {
   ACTIVE_STATUSES, OTP_COOLDOWN_MS, OTP_DAILY_LIMIT, OTP_MAX_ATTEMPTS, OTP_TTL_MS, PUBLIC_SESSION_TTL_MS,
-  clean, dateWeekday, genericVerificationError, hashOtp, istanbulDateKey, maskPhone, normalizeAvailability, normalizePhone,
-  normalizeUsername, opaqueToken, otpCode, publicUpcomingAppointments, slotOptions, timeToMinutes, validDateKey,
+  availabilityValidationError, clean, dateWeekday, genericVerificationError, hashOtp, istanbulDateKey, maskPhone, normalizeAvailability, normalizePhone,
+  normalizeUsername, opaqueToken, otpAttemptDecision, otpCode, publicUpcomingAppointments, slotOptions, timeToMinutes, validDateKey,
 };

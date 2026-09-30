@@ -165,6 +165,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   String _zumreSlotText = '';
   String _nextZumreText = '';
   int? _zumreRemainingMinutes;
+  bool _didShowVerifiedNoShowWarning = false;
   static const int _appointmentPlanningDayCount = 7;
   static const int _appointmentPlanningMaxOffsetDays = 7;
 
@@ -686,11 +687,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     for (final item in raw) {
       if (item is! Map) continue;
 
-        final rawScope =
-          (item['educationLevel'] ?? item['scope'] ?? 'YKS')
-            .toString()
-            .trim()
-            .toUpperCase();
+      final rawScope = (item['educationLevel'] ?? item['scope'] ?? 'YKS')
+          .toString()
+          .trim()
+          .toUpperCase();
 
       // Çok basit kural:
       // LGS kartı gören öğrenci yalnız LGS slotunu;
@@ -718,8 +718,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     if (daily is Map) {
       return {
-        'closed':
-          daily['closed'] == true || daily['zumreClosed'] == true,
+        'closed': daily['closed'] == true || daily['zumreClosed'] == true,
         'zumreSlots': _scheduleSlotsFromRaw(daily['zumreSlots']),
       };
     }
@@ -796,7 +795,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   void _listenRuntimeScheduleState() {
     _runtimeStateSubscription?.cancel();
-    _guidanceAppointmentSubscription?.cancel();
     _runtimeStateSubscription = _firestore
         .collection('settings')
         .doc('runtimeState')
@@ -970,6 +968,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     _zumrePillTimer?.cancel();
     _studentSubscription?.cancel();
     _runtimeStateSubscription?.cancel();
+    _guidanceAppointmentSubscription?.cancel();
     super.dispose();
   }
 
@@ -1052,8 +1051,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         if (_studentName!.isEmpty) _studentName = data?['email'] ?? 'Öğrenci';
         _studentClassName = data?['className']?.toString();
         _isInStudySession = data?['isInStudySession'] == true;
-        _guidanceCounselorId =
-          data?['guidanceCounselorId']?.toString().trim();
+        _guidanceCounselorId = data?['guidanceCounselorId']?.toString().trim();
 
         final visibleSubjects =
             _visibleSubjectOptions.map((subject) => subject.name).toSet();
@@ -1252,49 +1250,50 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         .where('status', whereIn: ['waiting', 'in_progress'])
         .snapshots()
         .listen((snapshot) {
-      if (!mounted || _currentQueueId != queueId) return;
+          if (!mounted || _currentQueueId != queueId) return;
 
-      final docs = snapshot.docs.toList();
-      final currentQueueDocs = docs.where((doc) => doc.id == queueId);
+          final docs = snapshot.docs.toList();
+          final currentQueueDocs = docs.where((doc) => doc.id == queueId);
 
-      // Öğretmen devri sırasında eski öğretmenin query'sinden kayıt anlık
-      // olarak düşebilir. Queue belgesi ayrı dinlendiği için burada sırayı
-      // kapatmıyoruz; yeni teacherId gelince position listener yeniden bağlanır.
-      if (currentQueueDocs.isEmpty) return;
+          // Öğretmen devri sırasında eski öğretmenin query'sinden kayıt anlık
+          // olarak düşebilir. Queue belgesi ayrı dinlendiği için burada sırayı
+          // kapatmıyoruz; yeni teacherId gelince position listener yeniden bağlanır.
+          if (currentQueueDocs.isEmpty) return;
 
-      final currentData = currentQueueDocs.first.data();
-      if (currentData['status'] != 'waiting') return;
+          final currentData = currentQueueDocs.first.data();
+          if (currentData['status'] != 'waiting') return;
 
-      QueryDocumentSnapshot<Map<String, dynamic>>? activeDoc;
-      for (final doc in docs) {
-        if (doc.data()['status'] == 'in_progress') {
-          activeDoc = doc;
-          break;
-        }
-      }
+          QueryDocumentSnapshot<Map<String, dynamic>>? activeDoc;
+          for (final doc in docs) {
+            if (doc.data()['status'] == 'in_progress') {
+              activeDoc = doc;
+              break;
+            }
+          }
 
-      final waitingDocs =
-          docs.where((doc) => doc.data()['status'] == 'waiting').toList()
-        ..sort((a, b) => compareQueuePriority(a.data(), b.data()));
+          final waitingDocs = docs
+              .where((doc) => doc.data()['status'] == 'waiting')
+              .toList()
+            ..sort((a, b) => compareQueuePriority(a.data(), b.data()));
 
-      var position = 1;
-      var estimatedWaitMinutes = activeDoc == null
-          ? 0
-          : _activeQueueRemainingMinutes(activeDoc.data());
+          var position = 1;
+          var estimatedWaitMinutes = activeDoc == null
+              ? 0
+              : _activeQueueRemainingMinutes(activeDoc.data());
 
-      for (final doc in waitingDocs) {
-        if (doc.id == queueId) break;
-        final queueData = doc.data();
-        estimatedWaitMinutes += _queueEstimatedMinutes(queueData) +
-            _toInt(queueData['extraMinutes']);
-        position++;
-      }
+          for (final doc in waitingDocs) {
+            if (doc.id == queueId) break;
+            final queueData = doc.data();
+            estimatedWaitMinutes += _queueEstimatedMinutes(queueData) +
+                _toInt(queueData['extraMinutes']);
+            position++;
+          }
 
-      setState(() {
-        _queuePosition = position;
-        _estimatedWaitMinutes = estimatedWaitMinutes;
-      });
-    });
+          setState(() {
+            _queuePosition = position;
+            _estimatedWaitMinutes = estimatedWaitMinutes;
+          });
+        });
   }
 
   Future<void> _joinQueue() async {
@@ -1544,11 +1543,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         final response = await callable.call<Map<String, dynamic>>({
           'queueId': _currentQueueId,
         });
-        cooldownUntilMs =
-          (response.data['cooldownUntilMs'] as num?)?.toInt() ??
+        cooldownUntilMs = (response.data['cooldownUntilMs'] as num?)?.toInt() ??
             DateTime.now()
-              .add(const Duration(minutes: 2))
-              .millisecondsSinceEpoch;
+                .add(const Duration(minutes: 2))
+                .millisecondsSinceEpoch;
       } on FirebaseFunctionsException catch (e) {
         // Backend workflow ilk kez kurulurken Functions deploy henüz canlı
         // değilse mevcut production davranışı kısa süreli fallback olarak
@@ -1561,7 +1559,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           'cancelledAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         });
-        await _firestore.collection('users').doc(_auth.currentUser!.uid).update({
+        await _firestore
+            .collection('users')
+            .doc(_auth.currentUser!.uid)
+            .update({
           'cooldownUntil': Timestamp.fromDate(cooldownDate),
         });
         cooldownUntilMs = cooldownDate.millisecondsSinceEpoch;
@@ -2115,8 +2116,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   Future<void> _loadAssignedGuidanceCounselor(String counselorId) async {
     try {
-        final doc =
-          await _firestore.collection('users').doc(counselorId).get();
+      final doc = await _firestore.collection('users').doc(counselorId).get();
       if (!mounted || _guidanceCounselorId != counselorId) return;
       if (!doc.exists || doc.data()?['role'] != 'guidance') {
         setState(() {
@@ -2351,8 +2351,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                                color:
-                                  Colors.cyanAccent.withValues(alpha: 0.10),
+                              color: Colors.cyanAccent.withValues(alpha: 0.10),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
                                 color:
@@ -2467,8 +2466,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                     'id': appointment.id,
                                     'counselor': counselorName,
                                     'reason': reason!,
-                                    'day':
-                                      _formatPlanningDay(selectedDateKey!),
+                                    'day': _formatPlanningDay(selectedDateKey!),
                                     'time': 'Gün içinde',
                                     'status': 'Onay Bekliyor',
                                   };
@@ -3308,6 +3306,286 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _verifiedNoShowWarningStream() {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) return null;
+
+    final historyStart = DateTime.now().subtract(const Duration(days: 14));
+    return _firestore
+        .collection('appointments')
+        .where('studentId', isEqualTo: userId)
+        .where('status', isEqualTo: 'no_show')
+        .where('noShowVerificationStatus', isEqualTo: 'verified')
+        .where(
+          'noShowVerifiedAt',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(historyStart),
+        )
+        .orderBy('noShowVerifiedAt', descending: true)
+        .snapshots();
+  }
+
+  bool _isVerifiedNoShowPopupEligible(Map<String, dynamic> data) {
+    final verifiedAt = data['noShowVerifiedAt'];
+    if (verifiedAt is! Timestamp) return false;
+
+    final age = DateTime.now().difference(verifiedAt.toDate());
+    return !age.isNegative && age <= const Duration(days: 7);
+  }
+
+  Future<void> _showVerifiedNoShowWarningDialog(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) async {
+    if (!mounted || docs.isEmpty) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF17123F),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          title: const Text(
+            'Planlı Zümre Katılım Uyarısı',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  docs.length == 1
+                      ? 'Planladığınız zümre saatinde öğretmeniniz sizin için zaman ayırmasına rağmen katılım sağlamadığınız tespit edildi. Planlı zümrelere zamanında katılmanız beklenmektedir. Tekrarlanan katılmama durumları rehberlik birimi ve veli ile paylaşılabilir.'
+                      : '${docs.length} planlı zümre katılım uyarınız bulunuyor. Planlı zümrelere zamanında katılmanız beklenmektedir. Tekrarlanan katılmama durumları rehberlik birimi ve veli ile paylaşılabilir.',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ...docs.take(5).map((doc) {
+                  final data = doc.data();
+                  final start = data['scheduledStart'];
+                  final teacher = data['teacherName']?.toString() ?? 'Öğretmen';
+                  final subject = data['subject']?.toString() ?? 'Ders';
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Text(
+                      '${_formatAppointmentDate(start)} '
+                      '${_formatAppointmentClock(start)} • $subject • $teacher',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6C3DFF),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Anladım'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showVerifiedNoShowHistoryDialog(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) async {
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF17123F),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Planlı Zümre Bildirimleri',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (docs.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 18),
+                    child: Text(
+                      'Son 14 gün içinde bildirim bulunmuyor.',
+                      style: TextStyle(color: Colors.white60),
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: docs.map((doc) {
+                          final data = doc.data();
+                          final start = data['scheduledStart'];
+                          final teacher =
+                              data['teacherName']?.toString() ?? 'Öğretmen';
+                          final subject = data['subject']?.toString() ?? 'Ders';
+
+                          return Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${_formatAppointmentDate(start)} '
+                                  '${_formatAppointmentClock(start)}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  '$subject • $teacher',
+                                  style: const TextStyle(
+                                    color: Colors.white60,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                const Text(
+                                  'Katılım sağlanmadı',
+                                  style: TextStyle(
+                                    color: Colors.orangeAccent,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildVerifiedNoShowBell() {
+    final stream = _verifiedNoShowWarningStream();
+    if (stream == null) {
+      return IconButton(
+        tooltip: 'Bildirimler',
+        onPressed: () => _showVerifiedNoShowHistoryDialog(
+          const <QueryDocumentSnapshot<Map<String, dynamic>>>[],
+        ),
+        icon: const Icon(
+          Icons.notifications_none_rounded,
+          color: Colors.white,
+        ),
+      );
+    }
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (context, snapshot) {
+        // Bildirim zili sorgu/index hatası olsa bile kaybolmamalı.
+        final docs = snapshot.hasError
+            ? <QueryDocumentSnapshot<Map<String, dynamic>>>[]
+            : (snapshot.data?.docs ?? []);
+        final popupDocs = docs
+            .where((doc) => _isVerifiedNoShowPopupEligible(doc.data()))
+            .toList();
+
+        if (!_didShowVerifiedNoShowWarning && popupDocs.isNotEmpty) {
+          _didShowVerifiedNoShowWarning = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _showVerifiedNoShowWarningDialog(popupDocs);
+          });
+        }
+
+        final hasBadge = docs.isNotEmpty;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              tooltip: 'Planlı Zümre Bildirimleri',
+              onPressed: () => _showVerifiedNoShowHistoryDialog(docs),
+              icon: const Icon(
+                Icons.notifications_none_rounded,
+                color: Colors.white,
+              ),
+            ),
+            if (hasBadge)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: const BoxDecoration(
+                    color: Colors.orangeAccent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildUpcomingAppointmentsSection() {
     final userId = _auth.currentUser?.uid;
     if (userId == null) return const SizedBox.shrink();
@@ -3691,6 +3969,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   ],
                 ),
               ),
+              _buildVerifiedNoShowBell(),
               IconButton(
                 tooltip: 'Çıkış Yap',
                 onPressed: () async {
@@ -3778,49 +4057,48 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         actions: [
           if (appointment['status'] == 'Onay Bekliyor')
             TextButton.icon(
-            onPressed: () async {
-                    final cancel = await showDialog<bool>(
-                      context: ctx,
-                      builder: (confirmCtx) => AlertDialog(
-                        title: const Text('Randevu iptal edilsin mi?'),
-                        content: const Text(
-                            'Oluşturduğunuz rehberlik randevu talebi iptal edilecektir.'),
-                        actions: [
-                          TextButton(
-                              onPressed: () => Navigator.pop(confirmCtx, false),
-                              child: const Text('Vazgeç')),
-                          TextButton(
-                              onPressed: () => Navigator.pop(confirmCtx, true),
-                              child: const Text('Randevuyu İptal Et')),
-                        ],
-                      ),
-                    );
-                    if (cancel == true && mounted) {
-                      final id = appointment['id'];
-                      if (id != null) {
-                        await _firestore
-                            .collection('guidanceAppointments')
-                            .doc(id)
-                            .update({
-                          'status': 'cancelled',
-                          'updatedAt': FieldValue.serverTimestamp(),
-                          'cancelledAt': FieldValue.serverTimestamp(),
-                        });
-                      }
-                      if (!mounted) return;
-                      setState(() => _guidanceAppointment = null);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content:
-                                Text('Rehberlik randevunuz iptal edildi.')),
-                      );
-                    }
-                  },
-            icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent),
-            label: const Text('İptal Et',
-                style: TextStyle(color: Colors.redAccent)),
-          ),
+              onPressed: () async {
+                final cancel = await showDialog<bool>(
+                  context: ctx,
+                  builder: (confirmCtx) => AlertDialog(
+                    title: const Text('Randevu iptal edilsin mi?'),
+                    content: const Text(
+                        'Oluşturduğunuz rehberlik randevu talebi iptal edilecektir.'),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(confirmCtx, false),
+                          child: const Text('Vazgeç')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(confirmCtx, true),
+                          child: const Text('Randevuyu İptal Et')),
+                    ],
+                  ),
+                );
+                if (cancel == true && mounted) {
+                  final id = appointment['id'];
+                  if (id != null) {
+                    await _firestore
+                        .collection('guidanceAppointments')
+                        .doc(id)
+                        .update({
+                      'status': 'cancelled',
+                      'updatedAt': FieldValue.serverTimestamp(),
+                      'cancelledAt': FieldValue.serverTimestamp(),
+                    });
+                  }
+                  if (!mounted) return;
+                  setState(() => _guidanceAppointment = null);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Rehberlik randevunuz iptal edildi.')),
+                  );
+                }
+              },
+              icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent),
+              label: const Text('İptal Et',
+                  style: TextStyle(color: Colors.redAccent)),
+            ),
           FilledButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('Tamam')),
         ],
@@ -3891,8 +4169,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       style:
                           const TextStyle(color: Colors.white60, fontSize: 11)),
                 ])),
-            const Icon(Icons.repeat_rounded,
-              color: Colors.white70, size: 19),
+            const Icon(Icons.repeat_rounded, color: Colors.white70, size: 19),
           ]),
         );
       },
@@ -4075,7 +4352,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       decoration: BoxDecoration(
         color: (_isZumreOpenNow && !_isLunchNow)
             ? Colors.greenAccent.withValues(alpha: 0.12)
-          : Colors.white.withValues(alpha: 0.08),
+            : Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: (_isZumreOpenNow && !_isLunchNow)
@@ -4091,7 +4368,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 : Icons.info_outline,
             color: (_isZumreOpenNow && !_isLunchNow)
                 ? Colors.greenAccent
-              : Colors.white70,
+                : Colors.white70,
           ),
           const SizedBox(width: 10),
           Expanded(

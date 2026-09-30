@@ -96,12 +96,28 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   Future<void> _initTeacherPage() async {
     _listenTeacherInfo();
     await _loadTeacherAvailability();
+    if (!mounted) return;
     await _loadTodaySolvedCount();
+    if (!mounted) return;
     _listenRuntimeScheduleState();
     _zumrePillTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _refreshZumrePillFromCache(),
     );
+  }
+
+  Set<String> _teacherLevelsFromData(Map<String, dynamic> data) {
+    return <String>{
+      ...educationLevelsFromData(data),
+      ...teachingScopesFromData(data)
+          .map((scope) => scope['level'])
+          .whereType<String>(),
+    };
+  }
+
+  String _defaultAvailabilityScope([Set<String>? levels]) {
+    final effectiveLevels = levels ?? _teacherEducationLevels;
+    return effectiveLevels.length == 1 ? effectiveLevels.single : 'BOTH';
   }
 
   int _timeToMinutes(String time) {
@@ -142,7 +158,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       return {
         'start': '${slot['start']}',
         'end': '${slot['end']}',
-        'educationLevel': timeSlotScopeFromData(slot),
+        'educationLevel': institutionScheduleScopeFromData(slot),
       };
     });
 
@@ -167,8 +183,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
     if (daily is Map) {
       return {
-        'closed':
-          daily['closed'] == true || daily['zumreClosed'] == true,
+        'closed': daily['closed'] == true || daily['zumreClosed'] == true,
         'zumreSlots': _scheduleSlotsFromRaw(daily['zumreSlots']),
       };
     }
@@ -340,7 +355,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       return 'absent';
     }
 
-    return _isTeacherScheduledFromData(data, DateTime.now())
+    return _isTeacherScheduledFromData(data, _istanbulNow())
         ? 'available'
         : 'absent';
   }
@@ -363,7 +378,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       return 'break';
     }
 
-    final now = DateTime.now();
+    final now = _istanbulNow();
     final slots = (weeklyAvailability[_dayKey(now)] ?? [])
         .map((slot) => Map<String, dynamic>.from(slot))
         .toList();
@@ -561,7 +576,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     if (_cachedZumreSlots.isEmpty || !mounted) return;
 
     final uiState = _zumreUiStateFromSlots(
-      DateTime.now(),
+      _istanbulNow(),
       _cachedZumreSlots,
       _cachedZumreIsWeekend,
     );
@@ -719,7 +734,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   }
 
   Future<void> _checkScheduleAvailability() async {
-    final now = DateTime.now();
+    final now = _istanbulNow();
     final todayKey = _dayKey(now);
     final isWeekend =
         now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
@@ -818,7 +833,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
           (e) => {
             'start': e['start'] ?? '09:00',
             'end': e['end'] ?? '17:00',
-            'educationLevel': e['educationLevel'] ?? e['scope'] ?? 'BOTH',
+            'educationLevel': e['educationLevel'] ??
+                e['scope'] ??
+                _defaultAvailabilityScope(),
           },
         ),
       );
@@ -895,7 +912,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                         temp[day.key]!.add({
                                           'start': '09:00',
                                           'end': '17:00',
-                                          'educationLevel': 'BOTH',
+                                          'educationLevel':
+                                              _defaultAvailabilityScope(),
                                         });
                                       });
                                     },
@@ -1193,6 +1211,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     final doc = await _firestore.collection('users').doc(uid).get();
 
     final data = doc.data();
+    final teacherData = Map<String, dynamic>.from(data ?? {});
+    final teacherLevels = _teacherLevelsFromData(teacherData);
+    final defaultScope = _defaultAvailabilityScope(teacherLevels);
     final raw = Map<String, dynamic>.from(data?['weeklyAvailability'] ?? {});
 
     final parsed = <String, List<Map<String, String>>>{};
@@ -1201,11 +1222,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       final list = List.from(entry.value ?? []);
       parsed[entry.key] = list.map((e) {
         final item = Map<String, dynamic>.from(e);
+        final rawScope = '${item['educationLevel'] ?? item['scope'] ?? ''}'
+            .trim()
+            .toUpperCase();
         return {
           'start': '${item['start']}',
           'end': '${item['end']}',
-          'educationLevel':
-              '${item['educationLevel'] ?? item['scope'] ?? 'BOTH'}',
+          'educationLevel': rawScope.isEmpty ? defaultScope : rawScope,
         };
       }).toList();
     }
@@ -1213,6 +1236,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     if (!mounted) return;
 
     setState(() {
+      _teacherEducationLevels = teacherLevels;
       _weeklyAvailability = parsed;
     });
   }
@@ -1488,10 +1512,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       }
 
       final teacherData = Map<String, dynamic>.from(data ?? {});
-      final teacherLevels = teachingScopesFromData(teacherData)
-          .map((scope) => scope['level'])
-          .whereType<String>()
-          .toSet();
+      final teacherLevels = _teacherLevelsFromData(teacherData);
 
       setState(() {
         _teacherName = data?['name'] ?? data?['email'] ?? 'Öğretmen';
@@ -2161,19 +2182,16 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                       'studentId': selectedId,
                                       'studentName': selectedStudentName,
                                       'teacherId': teacherId,
-                                        'teacherName':
-                                          _teacherName ?? 'Öğretmen',
+                                      'teacherName': _teacherName ?? 'Öğretmen',
                                       'subject': _teacherSubject ?? 'Ders',
                                       'status': 'waiting',
                                       'isManual': true,
                                       'questionCount': 1,
                                       'estimatedMinutes': 4,
                                       'extraMinutes': 0,
-                                        'createdAt':
-                                          FieldValue.serverTimestamp(),
+                                      'createdAt': FieldValue.serverTimestamp(),
                                       'startedAt': null,
-                                        'updatedAt':
-                                          FieldValue.serverTimestamp(),
+                                      'updatedAt': FieldValue.serverTimestamp(),
                                     });
                                   }
 

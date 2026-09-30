@@ -154,10 +154,6 @@ class MyApp extends StatelessWidget {
               ),
         routes: {
           '/login': (context) => const LoginScreen(),
-          '/student': (context) => const StudentHomeScreen(),
-          '/teacher': (context) => const TeacherHomeScreen(),
-          '/admin': (context) => const AdminHomeScreen(),
-          '/guidance': (context) => const GuidanceHomeScreen(),
           '/veli': (context) => const ParentGuidanceScreen(),
         },
       ),

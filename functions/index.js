@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const { createSmsService } = require("./services/sms_service");
 const { confirmationMessage, otpMessage } = require("./services/sms_templates");
 const publicGuidance = require("./services/public_guidance");
+const guidanceTasks = require("./services/guidance_tasks");
 const {
   educationLevel: validEducationLevel,
   studentEducationLevel,
@@ -12,6 +13,7 @@ const {
   teacherMatchesEducationScope,
   timeSlotScope,
   timeSlotMatchesEducationScope,
+  institutionScheduleScope,
   teacherCanUseTimeSlotScope,
 } = require("./utils/education_scope");
 
@@ -140,7 +142,7 @@ function normalizeScheduleSlots(rawSlots) {
     .map((slot) => ({
       start: String(slot?.start ?? ""),
       end: String(slot?.end ?? ""),
-      educationLevel: timeSlotScope(slot),
+      educationLevel: institutionScheduleScope(slot),
       startMinutes: timeToMinutes(String(slot?.start ?? "")),
       endMinutes: timeToMinutes(String(slot?.end ?? "")),
     }))
@@ -6781,7 +6783,12 @@ exports.saveGuidanceAvailability = onCall({ region: REGION }, async (request) =>
   if (!counselorDoc.exists || counselorDoc.data()?.role !== "guidance") {
     throw new HttpsError("failed-precondition", "Seçilen kullanıcı rehberlikçi değil.");
   }
-  const availability = publicGuidance.normalizeAvailability(request.data?.guidanceAvailability);
+  const rawAvailability = request.data?.guidanceAvailability;
+  const validationError = publicGuidance.availabilityValidationError(rawAvailability);
+  if (validationError) {
+    throw new HttpsError("invalid-argument", validationError);
+  }
+  const availability = publicGuidance.normalizeAvailability(rawAvailability);
   await counselorRef.update({ guidanceAvailability: availability, updatedAt: fieldValue.serverTimestamp() });
   return { ok: true, guidanceAvailability: availability };
 });
@@ -6791,29 +6798,25 @@ exports.adminAssignGuidanceCounselor = onCall({ region: REGION }, async (request
   const counselorId = cleanText(request.data?.counselorId);
   const studentIds = [...new Set(Array.isArray(request.data?.studentIds) ? request.data.studentIds.map(cleanText).filter(Boolean) : [])].slice(0, 400);
   if (!counselorId || studentIds.length === 0) throw new HttpsError("invalid-argument", "Rehberlikçi ve öğrenci seçimi zorunludur.");
-  const counselor = await db.collection("users").doc(counselorId).get();
-  if (!counselor.exists || counselor.data()?.role !== "guidance") throw new HttpsError("failed-precondition", "Seçilen kullanıcı rehberlikçi değil.");
-  const docs = await db.getAll(...studentIds.map((id) => db.collection("users").doc(id)));
-  const students = docs.filter((doc) =>
-    doc.exists &&
-    doc.data()?.role === "student" &&
-    !cleanText(doc.data()?.guidanceCounselorId)
-  );
-  const batch = db.batch();
-  for (const student of students) batch.update(student.ref, { guidanceCounselorId: counselorId, updatedAt: fieldValue.serverTimestamp() });
-  await batch.commit();
-  return { assignedCount: students.length, skippedCount: studentIds.length - students.length };
+  const counselorRef = db.collection("users").doc(counselorId);
+  const studentRefs = studentIds.map((id) => db.collection("users").doc(id));
+  return db.runTransaction(async (transaction) => {
+    const [counselor, ...docs] = await transaction.getAll(counselorRef, ...studentRefs);
+    if (!counselor.exists || counselor.data()?.role !== "guidance") throw new HttpsError("failed-precondition", "Seçilen kullanıcı rehberlikçi değil.");
+    const students = docs.filter((doc) =>
+      doc.exists &&
+      doc.data()?.role === "student" &&
+      !cleanText(doc.data()?.guidanceCounselorId)
+    );
+    for (const student of students) transaction.update(student.ref, { guidanceCounselorId: counselorId, updatedAt: fieldValue.serverTimestamp() });
+    return { assignedCount: students.length, skippedCount: studentIds.length - students.length };
+  });
 });
 
 exports.guidanceAssignStudents = onCall({ region: REGION }, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
   }
-  const caller = await db.collection("users").doc(request.auth.uid).get();
-  if (!caller.exists || caller.data()?.role !== "guidance") {
-    throw new HttpsError("permission-denied", "Bu işlem yalnız rehberlikçiler içindir.");
-  }
-
   const counselorId = request.auth.uid;
   const studentIds = [...new Set(
     Array.isArray(request.data?.studentIds)
@@ -6824,28 +6827,93 @@ exports.guidanceAssignStudents = onCall({ region: REGION }, async (request) => {
     throw new HttpsError("invalid-argument", "En az bir öğrenci seçin.");
   }
 
-  const docs = await db.getAll(
-    ...studentIds.map((id) => db.collection("users").doc(id))
-  );
-  const students = docs.filter((doc) =>
-    doc.exists &&
-    doc.data()?.role === "student" &&
-    !cleanText(doc.data()?.guidanceCounselorId)
-  );
+  const counselorRef = db.collection("users").doc(counselorId);
+  const studentRefs = studentIds.map((id) => db.collection("users").doc(id));
+  return db.runTransaction(async (transaction) => {
+    const [counselor, ...docs] = await transaction.getAll(counselorRef, ...studentRefs);
+    if (!counselor.exists || counselor.data()?.role !== "guidance") {
+      throw new HttpsError("permission-denied", "Bu işlem yalnız rehberlikçiler içindir.");
+    }
+    const students = docs.filter((doc) =>
+      doc.exists &&
+      doc.data()?.role === "student" &&
+      !cleanText(doc.data()?.guidanceCounselorId)
+    );
+    for (const student of students) {
+      transaction.update(student.ref, {
+        guidanceCounselorId: counselorId,
+        updatedAt: fieldValue.serverTimestamp(),
+      });
+    }
+    return {
+      assignedCount: students.length,
+      skippedCount: studentIds.length - students.length,
+    };
+  });
+});
 
-  const batch = db.batch();
-  for (const student of students) {
-    batch.update(student.ref, {
-      guidanceCounselorId: counselorId,
-      updatedAt: fieldValue.serverTimestamp(),
-    });
+exports.guidanceCreateWeeklyTask = onCall({ region: REGION }, async (request) => {
+  const counselor = await assertRoleCaller(request, "guidance");
+  const input = guidanceTasks.parseWeeklyGuidanceTaskInput(request.data);
+  if (input.error) {
+    throw new HttpsError("invalid-argument", input.error);
   }
-  await batch.commit();
 
-  return {
-    assignedCount: students.length,
-    skippedCount: studentIds.length - students.length,
-  };
+  const studentRef = db.collection("users").doc(input.studentId);
+  const taskRef = db
+    .collection("guidanceTasks")
+    .doc(`${counselor.uid}_${input.studentId}`);
+
+  return db.runTransaction(async (transaction) => {
+    const [currentCounselor, student, existingTask] = await transaction.getAll(
+      counselor.ref,
+      studentRef,
+      taskRef
+    );
+    if (!currentCounselor.exists || currentCounselor.data()?.role !== "guidance") {
+      throw new HttpsError(
+        "permission-denied",
+        "Bu işlem yalnız rehberlikçiler içindir."
+      );
+    }
+    if (!student.exists || student.data()?.role !== "student") {
+      throw new HttpsError("not-found", "Öğrenci kaydı bulunamadı.");
+    }
+
+    const studentData = student.data() || {};
+    if (cleanText(studentData.guidanceCounselorId) !== counselor.uid) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Bu öğrenci size atanmış değil."
+      );
+    }
+    if (existingTask.exists && existingTask.data()?.active !== false) {
+      throw new HttpsError(
+        "already-exists",
+        "Bu öğrenci için zaten aktif bir haftalık takip var."
+      );
+    }
+
+    const taskData = {
+      studentId: input.studentId,
+      studentName: cleanText(publicDisplayName(studentData, "Öğrenci")) || "Öğrenci",
+      counselorId: counselor.uid,
+      title: input.title,
+      schedule: input.schedule,
+      active: true,
+      updatedAt: fieldValue.serverTimestamp(),
+    };
+    if (existingTask.exists) {
+      transaction.set(taskRef, taskData, { merge: true });
+    } else {
+      transaction.set(taskRef, {
+        ...taskData,
+        createdAt: fieldValue.serverTimestamp(),
+      });
+    }
+
+    return { ok: true, reactivated: existingTask.exists };
+  });
 });
 
 exports.guidanceUnassignStudent = onCall({ region: REGION }, async (request) => {
@@ -7091,16 +7159,15 @@ exports.publicGuidanceConfirmOtp = onCall({ region: REGION }, async (request) =>
   if (!/^[A-Za-z0-9_-]{32,}$/.test(challengeId) || !/^\d{6}$/.test(code)) throw new HttpsError("invalid-argument", "Doğrulama kodu geçersiz.");
   const challengeRef = db.collection(PUBLIC_GUIDANCE_OTP_COLLECTION).doc(challengeId);
   const appointmentRef = db.collection("guidanceAppointments").doc();
-  let confirmation;
-  await db.runTransaction(async (transaction) => {
+  const result = await db.runTransaction(async (transaction) => {
     const challengeDoc = await transaction.get(challengeRef);
     const challenge = challengeDoc.data() || {};
     if (!challengeDoc.exists || challenge.sessionToken !== request.data.sessionToken || challenge.studentId !== session.data.studentId || challenge.usedAt || publicTimestampExpired(challenge.expiresAt)) throw new HttpsError("failed-precondition", "Doğrulama kodu geçersiz veya süresi dolmuş.");
-    if (Number(challenge.attempts || 0) >= publicGuidance.OTP_MAX_ATTEMPTS) throw new HttpsError("resource-exhausted", "Doğrulama deneme sınırına ulaşıldı.");
-    const submittedHash = publicGuidance.hashOtp(code, challenge.salt);
-    if (!crypto.timingSafeEqual(Buffer.from(submittedHash), Buffer.from(challenge.codeHash))) {
-      transaction.update(challengeRef, { attempts: Number(challenge.attempts || 0) + 1, updatedAt: fieldValue.serverTimestamp() });
-      throw new HttpsError("failed-precondition", "Doğrulama kodu geçersiz veya süresi dolmuş.");
+    const otpDecision = publicGuidance.otpAttemptDecision(challenge, code);
+    if (otpDecision.status === "blocked") throw new HttpsError("resource-exhausted", "Doğrulama deneme sınırına ulaşıldı.");
+    if (otpDecision.status === "invalid") {
+      transaction.update(challengeRef, { attempts: otpDecision.attempts, updatedAt: fieldValue.serverTimestamp() });
+      return { invalidCode: true };
     }
     const [studentDoc, counselorDoc, appointmentSnapshot] = await Promise.all([
       transaction.get(db.collection("users").doc(session.data.studentId)),
@@ -7114,8 +7181,13 @@ exports.publicGuidanceConfirmOtp = onCall({ region: REGION }, async (request) =>
     const student = studentDoc.data() || {}; const counselor = counselorDoc.data() || {};
     transaction.set(appointmentRef, { studentId: studentDoc.id, studentName: cleanText(student.fullName || student.name) || "Öğrenci", counselorId: counselorDoc.id, counselorName: cleanText(counselor.fullName || counselor.name) || "Rehberlik Servisi", reason: "Veli rehberlik görüşmesi", dayLabel: challenge.appointmentDate, appointmentDate: challenge.appointmentDate, time: challenge.time, participantType: "guardian", status: "approved", source: "parent_public", createdAt: fieldValue.serverTimestamp(), updatedAt: fieldValue.serverTimestamp(), approvedAt: fieldValue.serverTimestamp() });
     transaction.update(challengeRef, { usedAt: fieldValue.serverTimestamp(), updatedAt: fieldValue.serverTimestamp() });
-    confirmation = { studentName: cleanText(student.fullName || student.name) || "Öğrenci", counselorName: cleanText(counselor.fullName || counselor.name) || "Rehberlik Servisi", date: challenge.appointmentDate, time: challenge.time };
+    return {
+      invalidCode: false,
+      confirmation: { studentName: cleanText(student.fullName || student.name) || "Öğrenci", counselorName: cleanText(counselor.fullName || counselor.name) || "Rehberlik Servisi", date: challenge.appointmentDate, time: challenge.time },
+    };
   });
+  if (result.invalidCode) throw new HttpsError("failed-precondition", "Doğrulama kodu geçersiz veya süresi dolmuş.");
+  const confirmation = result.confirmation;
   await createSmsService().sendAppointmentConfirmation({
     ...confirmation,
     message: confirmationMessage(confirmation),
@@ -7353,6 +7425,7 @@ if (process.env.NODE_ENV === "test") {
     teacherMatchesEducationScope,
     teacherMatchesStudentScope,
     timeSlotMatchesEducationScope,
+    institutionScheduleScope,
     validateTeacherWeeklyAvailability,
   };
 }

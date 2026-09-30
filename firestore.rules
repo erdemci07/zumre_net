@@ -60,6 +60,36 @@ service cloud.firestore {
           .data.guidanceCounselorId == request.auth.uid;
     }
 
+    function isValidWeeklyGuidanceSchedule(value) {
+      return value is string
+        && value in [
+          "Her Pazartesi",
+          "Her Salı",
+          "Her Çarşamba",
+          "Her Perşembe",
+          "Her Cuma",
+          "Her Cumartesi",
+          "Her Pazar"
+        ];
+    }
+
+    function isGuidanceTaskCancelUpdate() {
+      return resource.data.active != false
+        && request.resource.data.active == false
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["active", "updatedAt"]);
+    }
+
+    function isGuidanceTaskScheduleUpdate() {
+      return resource.data.active != false
+        && request.resource.data.active != false
+        && isValidWeeklyGuidanceSchedule(request.resource.data.schedule)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["schedule", "updatedAt"]);
+    }
+
     function isGuidanceAppointmentText(fieldName, maxLength) {
       return request.resource.data[fieldName] is string
         && request.resource.data[fieldName].size() > 0
@@ -166,11 +196,6 @@ service cloud.firestore {
       ).data;
     }
 
-    function isFreshRuntimeState() {
-      return runtimeState().updatedAt is timestamp
-        && runtimeState().updatedAt > request.time - duration.value(5, "m");
-    }
-
     function isFreshStudyRuntimeState() {
       return runtimeState().updatedAt is timestamp
         && runtimeState().updatedAt > request.time - duration.value(3, "h");
@@ -178,13 +203,6 @@ service cloud.firestore {
 
     function isInstitutionOverrideActive() {
       return runtimeState().institutionMode in ["closed", "exam"];
-    }
-
-    function canStartZumreQueue() {
-      return isFreshRuntimeState()
-        && runtimeState().isZumreOpen == true
-        && runtimeState().isLunchBreak != true
-        && !isInstitutionOverrideActive();
     }
 
     function canStartStudySession() {
@@ -306,14 +324,13 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (isStudent() && resource.data.studentId == request.auth.uid)
         || (isGuidance() && resource.data.counselorId == request.auth.uid);
-      allow create: if isGuidance()
-        && request.resource.data.counselorId == request.auth.uid
-        && isAssignedGuidanceStudent(request.resource.data.studentId);
       allow update: if isGuidance()
         && resource.data.counselorId == request.auth.uid
         && request.resource.data.counselorId == request.auth.uid
         && request.resource.data.studentId == resource.data.studentId
-        && isAssignedGuidanceStudent(resource.data.studentId);
+        && isAssignedGuidanceStudent(resource.data.studentId)
+        && (isGuidanceTaskCancelUpdate()
+          || isGuidanceTaskScheduleUpdate());
       allow delete: if isGuidance()
         && resource.data.counselorId == request.auth.uid;
       allow create, update, delete: if isAdmin();

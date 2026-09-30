@@ -210,7 +210,12 @@ def merge_student_import_fields(
 
     existing_level = valid_education_level(existing.get("educationLevel"))
     incoming_level = valid_education_level(incoming.get("educationLevel"))
-    education_level = existing_level or incoming_level
+    # A trusted canonical class prefix is the strongest signal. This lets an
+    # annual 8 -> 9 import move the student from LGS to YKS instead of keeping
+    # a stale educationLevel from the previous record.
+    education_level = (
+        class_name_education_level(class_name) or incoming_level or existing_level
+    )
 
     return {
         "className": class_name,
@@ -519,8 +524,10 @@ def normalize_student(
         record["educationLevel"] = education_level
 
     if include_guardian:
-        record["guardianName"] = guardian_name
-        record["guardianSurname"] = guardian_surname
+        if guardian_name:
+            record["guardianName"] = guardian_name
+        if guardian_surname:
+            record["guardianSurname"] = guardian_surname
         if guardian_phone:
             record["guardianPhone"] = guardian_phone
 

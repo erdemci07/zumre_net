@@ -106,6 +106,21 @@ class SmartImportEngineTest(unittest.TestCase):
         self.assertEqual(merged["department"], "LGS")
         self.assertEqual(merged["educationLevel"], "LGS")
 
+    def test_canonical_class_transition_updates_stale_education_level(self):
+        merged = merge_student_import_fields(
+            {
+                "className": "8-DERSLİK 4",
+                "educationLevel": "LGS",
+            },
+            {
+                "className": "9-DERSLİK 2",
+                "educationLevel": "YKS",
+            },
+        )
+
+        self.assertEqual(merged["className"], "9-DERSLİK 2")
+        self.assertEqual(merged["educationLevel"], "YKS")
+
     def test_separate_sinif_sube_and_bolum_columns_stay_separate(self):
         result = analyze_excel(
             self._workbook_with_columns(
@@ -150,6 +165,21 @@ class SmartImportEngineTest(unittest.TestCase):
         self.assertEqual(result["validRows"][0]["guardianSurname"], "Yılmaz")
         self.assertNotIn("guardianPhone", result["validRows"][0])
         self.assertEqual(result["reviewCount"], 1)
+
+    def test_guardian_mode_does_not_emit_unmapped_blank_guardian_fields(self):
+        result = analyze_excel(
+            self._workbook_with_columns(
+                ["AD", "SOYAD", "KULLANICI ADI", "ŞİFRE", "ŞUBE"],
+                ["Ayşe", "Yılmaz", "ayse.yilmaz", "123456", "8-DERSLİK 4"],
+            ),
+            "student",
+            include_guardian=True,
+        )
+
+        row = result["validRows"][0]
+        self.assertNotIn("guardianName", row)
+        self.assertNotIn("guardianSurname", row)
+        self.assertNotIn("guardianPhone", row)
 
     def test_manual_mapping_override_is_reported_and_reanalyzed(self):
         path = self._workbook(class_header="GRUP")

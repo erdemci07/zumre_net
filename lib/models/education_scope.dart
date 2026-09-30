@@ -124,6 +124,20 @@ String timeSlotScopeFromData(Map<Object?, Object?> data) {
   return timeSlotScopes.contains(scope) ? scope : 'BOTH';
 }
 
+/// Institution schedules predate education-level scoping. Those legacy
+/// entries are the existing YKS schedule; LGS slots must always be explicit.
+String institutionScheduleScopeFromData(Map<Object?, Object?> data) {
+  return timeSlotScopeFromData(data) == 'LGS' ? 'LGS' : 'YKS';
+}
+
+bool institutionScheduleSlotMatchesEducationLevel(
+  Map<Object?, Object?> data,
+  String? educationLevel,
+) {
+  return educationLevel != null &&
+      institutionScheduleScopeFromData(data) == educationLevel;
+}
+
 bool timeSlotMatchesEducationLevel(
   Map<Object?, Object?> data,
   String? educationLevel,

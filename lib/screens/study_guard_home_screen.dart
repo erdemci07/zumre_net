@@ -103,7 +103,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     return hour * 60 + minute;
   }
 
-
   String _dayKey(DateTime date) {
     switch (date.weekday) {
       case DateTime.monday:
@@ -150,8 +149,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
 
     if (daily is Map) {
       return {
-        'closed':
-            daily['closed'] == true || daily['studyClosed'] == true,
+        'closed': daily['closed'] == true || daily['studyClosed'] == true,
         'studySlots': _scheduleSlotsFromRaw(daily['studySlots']),
       };
     }
@@ -282,9 +280,9 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
         ? 'Kurum bugün kapalı. Yeni etüt başlatılamaz.'
         : slots.isEmpty
             ? 'Bugün etüt saati tanımlı değil.'
-        : isOpen
-            ? 'Etüt saati aktif. Yoklama alabilirsiniz.'
-            : 'Şu an etüt saati aktif değil.';
+            : isOpen
+                ? 'Etüt saati aktif. Yoklama alabilirsiniz.'
+                : 'Şu an etüt saati aktif değil.';
 
     return {
       'isOpen': isOpen,
@@ -460,8 +458,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
         _activeStudySlotText = slotText;
 
         if (isClosedDay) {
-          _studyScheduleMessage =
-              'Kurum bugün kapalı. Yeni etüt başlatılamaz.';
+          _studyScheduleMessage = 'Kurum bugün kapalı. Yeni etüt başlatılamaz.';
         } else if (slots.isEmpty) {
           _studyScheduleMessage = 'Bugün etüt saati tanımlı değil.';
         } else {
@@ -684,8 +681,7 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
     final data = doc.data() as Map<String, dynamic>;
     final studentLevel = inferredStudentEducationLevel(data);
 
-    if (studentLevel == null ||
-        !_staffEducationLevels.contains(studentLevel)) {
+    if (studentLevel == null || !_staffEducationLevels.contains(studentLevel)) {
       _showSnack('Bu öğrenci etüt kapsamınızda değil.');
       return false;
     }
@@ -1155,7 +1151,8 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
             decoration: BoxDecoration(
               color: Colors.cyanAccent.withValues(alpha: 0.16),
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.35)),
+              border:
+                  Border.all(color: Colors.cyanAccent.withValues(alpha: 0.35)),
             ),
             child: const Icon(
               Icons.fact_check_rounded,
@@ -1412,7 +1409,6 @@ class _StudyGuardHomeScreenState extends State<StudyGuardHomeScreen> {
       ),
     );
   }
-
 
   Widget _inactiveInfoCard() {
     return Container(

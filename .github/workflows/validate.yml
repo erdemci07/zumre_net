@@ -7,7 +7,11 @@ on:
     paths:
       - "lib/**"
       - "test/**"
+      - "web/**"
+      - "assets/**"
       - "functions/**"
+      - "cloud_run_smart_import/**"
+      - "cloud_run_reports/**"
       - "firestore.rules"
       - "firestore.indexes.json"
       - "pubspec.yaml"
@@ -28,11 +32,17 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: "3.47.5"
           cache: true
 
       - name: Install Flutter dependencies
         run: flutter pub get
+
+      - name: Analyze Flutter sources
+        run: flutter analyze
+
+      - name: Check Dart formatting
+        run: dart format --output=none --set-exit-if-changed lib test
 
       - name: Run Flutter tests
         run: flutter test
@@ -61,3 +71,53 @@ jobs:
 
       - name: Run Functions tests
         run: npm test
+
+  smart-import:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud_run_smart_import
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: cloud_run_smart_import/requirements.txt
+
+      - name: Install Smart Import dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile Smart Import sources
+        run: python -m py_compile main.py smart_import_engine.py
+
+      - name: Run Smart Import tests
+        run: python -m unittest discover -p "test_*.py"
+
+  reports:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud_run_reports
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: cloud_run_reports/requirements.txt
+
+      - name: Install report dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Compile report sources
+        run: python -m py_compile main.py
+
+      - name: Run report tests
+        run: python -m pytest tests -q

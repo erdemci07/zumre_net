@@ -1,6 +1,7 @@
 import base64
 import os
 import tempfile
+from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -71,14 +72,17 @@ def analyze_file(request: AnalyzeRequest, _admin_uid: str = Depends(require_admi
     if request.type not in ["student", "teacher"]:
         raise HTTPException(status_code=400, detail="Geçersiz dosya tipi.")
 
+    suffix = Path(request.fileName).suffix.lower()
+    if suffix != ".xlsx":
+        raise HTTPException(
+            status_code=400,
+            detail="Yalnızca .xlsx Excel dosyaları desteklenir.",
+        )
+
     tmp_path = None
 
     try:
         file_bytes = base64.b64decode(request.fileBase64)
-
-        suffix = ".xlsx"
-        if request.fileName.lower().endswith(".xls"):
-            suffix = ".xls"
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(file_bytes)
@@ -110,6 +114,8 @@ def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin
     failed_rows = []
 
     for row in request.validRows:
+        created_auth_user = False
+        uid = None
         try:
             email = row.get("email")
             password = row.get("password", "123456")
@@ -125,21 +131,31 @@ def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin
 
             try:
                 user = auth.get_user_by_email(email)
-                uid = user.uid
-                auth.update_user(uid, password=password)
-                updated += 1
             except auth.UserNotFoundError:
-                user = auth.create_user(
-                    email=email,
-                    password=password,
-                    display_name=row.get("fullName", ""),
-                )
-                uid = user.uid
-                created += 1
+                try:
+                    user = auth.create_user(
+                        email=email,
+                        password=password,
+                        display_name=row.get("fullName", ""),
+                    )
+                    created_auth_user = True
+                except auth.EmailAlreadyExistsError:
+                    # A concurrent import may create this account after the
+                    # lookup above. Re-read and continue idempotently.
+                    user = auth.get_user_by_email(email)
+
+            uid = user.uid
 
             doc_ref = db.collection("users").document(uid)
             existing_doc = doc_ref.get()
             existing_data = existing_doc.to_dict() or {}
+            if existing_doc.exists and existing_data.get("role") != request.type:
+                raise ValueError(
+                    "Bu e-posta farklı bir kullanıcı rolüne ait; kayıt değiştirilmedi."
+                )
+
+            if not created_auth_user:
+                auth.update_user(uid, password=password)
 
             user_data = {
                 "uid": uid,
@@ -162,11 +178,11 @@ def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin
                 if student_fields["educationLevel"]:
                     user_data["educationLevel"] = student_fields["educationLevel"]
                 if request.includeGuardian:
-                    if "guardianName" in row:
+                    if row.get("guardianName"):
                         user_data["guardianName"] = row["guardianName"]
-                    if "guardianSurname" in row:
+                    if row.get("guardianSurname"):
                         user_data["guardianSurname"] = row["guardianSurname"]
-                    if "guardianPhone" in row:
+                    if row.get("guardianPhone"):
                         user_data["guardianPhone"] = row["guardianPhone"]
 
             if request.type == "teacher":
@@ -185,8 +201,17 @@ def import_users(request: ImportRequest, _admin_uid: str = Depends(require_admin
                 user_data["createdAt"] = firestore.SERVER_TIMESTAMP
 
             doc_ref.set(user_data, merge=True)
+            if created_auth_user:
+                created += 1
+            else:
+                updated += 1
 
         except Exception as e:
+            if created_auth_user and uid:
+                try:
+                    auth.delete_user(uid)
+                except Exception:
+                    pass
             failed += 1
             failed_rows.append({
                 "row": row,

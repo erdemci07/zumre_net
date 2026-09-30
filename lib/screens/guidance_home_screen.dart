@@ -9,10 +9,10 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:printing/printing.dart';
 
+import '../models/education_scope.dart';
 import '../utils/class_name_display.dart';
 import '../utils/guidance_presentation.dart';
 import '../utils/guidance_student_groups.dart';
-import '../utils/user_management_filters.dart';
 
 const _guidanceTerminalStatuses = {'completed', 'cancelled', 'no_show'};
 
@@ -400,40 +400,61 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
   Future<void> _showStudentAssignmentDialog() async {
     final snapshot =
         await db.collection('users').where('role', isEqualTo: 'student').get();
-    final counselorsSnapshot =
-        await db.collection('users').where('role', isEqualTo: 'guidance').get();
     if (!mounted) return;
 
     final students = snapshot.docs;
-    final studentsData = students.map((doc) => doc.data()).toList();
-    final counselorNamesById = {
-      for (final doc in counselorsSnapshot.docs)
-        doc.id: guidanceStudentName(doc.data()),
-    };
-    final currentCounselorId = auth.currentUser?.uid;
-    var filters = const UserManagementFilters(role: 'student');
+    final uid = auth.currentUser!.uid;
+    String query = '';
+    String levelFilter = 'ALL';
+    String classFilter = 'ALL';
     final selectedIds = <String>{};
     bool submitting = false;
-
-    void applyFilters(
-      StateSetter setDialogState,
-      UserManagementFilters nextFilters,
-    ) {
-      setDialogState(() {
-        final options =
-            cascadingStudentFilterOptions(studentsData, nextFilters);
-        filters = clearInvalidStudentFilterSelections(nextFilters, options);
-      });
-    }
 
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
-          final filterOptions =
-              cascadingStudentFilterOptions(studentsData, filters);
+          final classOptions = students
+              .where((doc) {
+                if (levelFilter == 'ALL') return true;
+                return inferredStudentEducationLevel(doc.data()) == levelFilter;
+              })
+              .map((doc) => formatStudentClassDisplay(
+                    className: doc.data()['className'],
+                    branch: doc.data()['branch'],
+                    department: doc.data()['department'],
+                  ))
+              .where((value) => value.trim().isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
+          final effectiveClassFilter =
+              classFilter == 'ALL' || classOptions.contains(classFilter)
+                  ? classFilter
+                  : 'ALL';
           final filtered = students.where((doc) {
-            return userMatchesManagementFilters(doc.data(), filters);
+            final data = doc.data();
+            final name = guidanceStudentName(data).toLowerCase();
+            final classLabel = formatStudentClassDisplay(
+              className: data['className'],
+              branch: data['branch'],
+              department: data['department'],
+            );
+            final level = inferredStudentEducationLevel(data) ?? '';
+            final counselorId = '${data['guidanceCounselorId'] ?? ''}'.trim();
+            final visibleByAssignment =
+                counselorId.isEmpty || counselorId == uid;
+            final q = query.trim().toLowerCase();
+            final matchesSearch = q.isEmpty ||
+                name.contains(q) ||
+                classLabel.toLowerCase().contains(q);
+            final matchesLevel = levelFilter == 'ALL' || level == levelFilter;
+            final matchesClass = effectiveClassFilter == 'ALL' ||
+                classLabel == effectiveClassFilter;
+            return visibleByAssignment &&
+                matchesSearch &&
+                matchesLevel &&
+                matchesClass;
           }).toList()
             ..sort((a, b) {
               final ac = formatStudentClassDisplay(
@@ -452,46 +473,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   : guidanceStudentName(a.data())
                       .compareTo(guidanceStudentName(b.data()));
             });
-
-          Widget filterDropdown({
-            required String label,
-            required List<String> options,
-            required String? value,
-            required ValueChanged<String?> onChanged,
-          }) =>
-              DropdownButtonFormField<String>(
-                initialValue: value ?? '',
-                isExpanded: true,
-                dropdownColor: const Color(0xFF64203C),
-                iconEnabledColor: Colors.white70,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-                decoration: InputDecoration(
-                  labelText: label,
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: .08),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-                items: [
-                  const DropdownMenuItem(
-                    value: '',
-                    child: Text('Tümü', overflow: TextOverflow.ellipsis),
-                  ),
-                  ...options.map(
-                    (option) => DropdownMenuItem(
-                      value: option,
-                      child: Text(option, overflow: TextOverflow.ellipsis),
-                    ),
-                  ),
-                ],
-                onChanged: submitting ? null : onChanged,
-              );
-
           return Dialog(
             backgroundColor: Colors.transparent,
             insetPadding:
@@ -524,7 +505,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                   fontSize: 22,
                                   fontWeight: FontWeight.w800)),
                           Text(
-                              'Henüz rehber öğretmeni olmayan öğrencileri kendinize atayın.',
+                              'Kademe ve sınıfa göre öğrencileri filtreleyin. Size atanmış öğrenciler bilgi amaçlı listede kalır.',
                               style: TextStyle(
                                   color: Colors.white70, fontSize: 12)),
                         ],
@@ -540,16 +521,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   ]),
                   const SizedBox(height: 12),
                   TextField(
-                    onChanged: (value) => applyFilters(
-                      setDialogState,
-                      UserManagementFilters(
-                        role: 'student',
-                        search: value,
-                        className: filters.className,
-                        branch: filters.branch,
-                        department: filters.department,
-                      ),
-                    ),
+                    onChanged: (value) => setDialogState(() => query = value),
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       hintText: 'Öğrenci veya sınıf ara',
@@ -564,78 +536,48 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      const spacing = 8.0;
-                      final columns = constraints.maxWidth >= 450 ? 3 : 2;
-                      final width =
-                          (constraints.maxWidth - spacing * (columns - 1)) /
-                              columns;
-                      return Wrap(
-                        spacing: spacing,
-                        runSpacing: spacing,
-                        children: [
-                          SizedBox(
-                            width: width,
-                            child: filterDropdown(
-                              label: 'Sınıf',
-                              options: filterOptions.classNames,
-                              value: filters.className,
-                              onChanged: (value) => applyFilters(
-                                setDialogState,
-                                UserManagementFilters(
-                                  role: 'student',
-                                  search: filters.search,
-                                  className:
-                                      value?.isEmpty == true ? null : value,
-                                  branch: filters.branch,
-                                  department: filters.department,
-                                ),
-                              ),
-                            ),
-                          ),
-                          SizedBox(
-                            width: width,
-                            child: filterDropdown(
-                              label: 'Şube',
-                              options: filterOptions.branches,
-                              value: filters.branch,
-                              onChanged: (value) => applyFilters(
-                                setDialogState,
-                                UserManagementFilters(
-                                  role: 'student',
-                                  search: filters.search,
-                                  className: filters.className,
-                                  branch: value?.isEmpty == true ? null : value,
-                                  department: filters.department,
-                                ),
-                              ),
-                            ),
-                          ),
-                          SizedBox(
-                            width: width,
-                            child: filterDropdown(
-                              label: 'Bölüm',
-                              options: filterOptions.departments,
-                              value: filters.department,
-                              onChanged: (value) => applyFilters(
-                                setDialogState,
-                                UserManagementFilters(
-                                  role: 'student',
-                                  search: filters.search,
-                                  className: filters.className,
-                                  branch: filters.branch,
-                                  department:
-                                      value?.isEmpty == true ? null : value,
-                                ),
-                              ),
-                            ),
-                          ),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: levelFilter,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF4A1830),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: _guidanceDialogFieldDecoration('Kademe'),
+                        items: const [
+                          DropdownMenuItem(value: 'ALL', child: Text('Tümü')),
+                          DropdownMenuItem(value: 'LGS', child: Text('LGS')),
+                          DropdownMenuItem(value: 'YKS', child: Text('YKS')),
                         ],
-                      );
-                    },
-                  ),
+                        onChanged: (value) => setDialogState(() {
+                          levelFilter = value ?? 'ALL';
+                          classFilter = 'ALL';
+                        }),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: effectiveClassFilter,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF4A1830),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: _guidanceDialogFieldDecoration('Sınıf'),
+                        items: [
+                          const DropdownMenuItem(
+                              value: 'ALL', child: Text('Tümü')),
+                          ...classOptions.map((value) => DropdownMenuItem(
+                                value: value,
+                                child: Text(value,
+                                    overflow: TextOverflow.ellipsis),
+                              )),
+                        ],
+                        onChanged: (value) =>
+                            setDialogState(() => classFilter = value ?? 'ALL'),
+                      ),
+                    ),
+                  ]),
                   const SizedBox(height: 10),
                   Expanded(
                     child: filtered.isEmpty
@@ -651,21 +593,16 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                               final doc = filtered[index];
                               final data = doc.data();
                               final selected = selectedIds.contains(doc.id);
-                              final assignedCounselorId =
+                              final counselorId =
                                   '${data['guidanceCounselorId'] ?? ''}'.trim();
-                              final isAssigned = assignedCounselorId.isNotEmpty;
-                              final assignedToMe = isAssigned &&
-                                  assignedCounselorId == currentCounselorId;
-                              final assignedName =
-                                  counselorNamesById[assignedCounselorId] ??
-                                      'Başka rehberlikçi';
+                              final assignedToMe = counselorId == uid;
                               final classLabel = formatStudentClassDisplay(
                                 className: data['className'],
                                 branch: data['branch'],
                                 department: data['department'],
                               );
                               return CheckboxListTile(
-                                value: assignedToMe || selected,
+                                value: selected,
                                 activeColor: const Color(0xFFFFB1C8),
                                 checkColor: const Color(0xFF4A1830),
                                 controlAffinity:
@@ -673,30 +610,18 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                 title: Text(guidanceStudentName(data),
                                     style:
                                         const TextStyle(color: Colors.white)),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (classLabel.isNotEmpty)
-                                      Text(
-                                        classLabel,
-                                        style: const TextStyle(
-                                            color: Colors.white60),
-                                      ),
-                                    if (isAssigned)
-                                      Text(
-                                        assignedToMe
-                                            ? 'Zaten size atanmış'
-                                            : 'Atanmış: $assignedName',
-                                        style: TextStyle(
-                                          color: assignedToMe
-                                              ? const Color(0xFFFFD7E4)
-                                              : Colors.white54,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                  ],
+                                subtitle: Text(
+                                  [
+                                    if (classLabel.isNotEmpty) classLabel,
+                                    if (assignedToMe) 'Zaten size atanmış',
+                                  ].join(' • '),
+                                  style: TextStyle(
+                                    color: assignedToMe
+                                        ? const Color(0xFFFFB1C8)
+                                        : Colors.white60,
+                                  ),
                                 ),
-                                onChanged: submitting || isAssigned
+                                onChanged: submitting || assignedToMe
                                     ? null
                                     : (value) => setDialogState(() {
                                           if (value == true) {
@@ -1247,7 +1172,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
 
   Future<void> addWeeklyTask({
     String? initialStudentId,
-    Map<String, dynamic>? initialStudent,
   }) async {
     final students = await db
         .collection('users')
@@ -1270,8 +1194,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
 
     String query = '';
     String? studentId = initialStudentId;
-    String? studentName =
-        initialStudent == null ? null : guidanceStudentName(initialStudent);
     String title = 'Haftalık Ödev Kontrolü';
     String day = 'Her Pazartesi';
     bool isSubmitting = false;
@@ -1279,7 +1201,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
         studentId == null ? null : activeTasksByStudent[studentId];
     if (selectedExistingTask != null) {
       studentId = null;
-      studentName = null;
     }
     const tasks = [
       'Haftalık Ödev Kontrolü',
@@ -1423,7 +1344,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                       ? null
                                       : () => setD(() {
                                             studentId = d.id;
-                                            studentName = n;
                                           }),
                                   leading: CircleAvatar(
                                     backgroundColor: selected
@@ -1558,37 +1478,29 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                             ? null
                             : () async {
                                 final selectedStudentId = studentId!;
-                                final uid = auth.currentUser!.uid;
-                                final taskRef = db
-                                    .collection('guidanceTasks')
-                                    .doc('${uid}_$selectedStudentId');
                                 setD(() => isSubmitting = true);
                                 try {
-                                  await db.runTransaction((tx) async {
-                                    final existing = await tx.get(taskRef);
-                                    if (existing.exists &&
-                                        existing.data()?['active'] != false) {
-                                      throw StateError(
-                                        'Bu öğrenci için zaten aktif bir haftalık görevlendirme var.',
-                                      );
-                                    }
-                                    tx.set(taskRef, {
-                                      'studentId': selectedStudentId,
-                                      'studentName': studentName,
-                                      'counselorId': uid,
-                                      'title': title,
-                                      'schedule': day,
-                                      'active': true,
-                                      'createdAt': FieldValue.serverTimestamp(),
-                                      'updatedAt': FieldValue.serverTimestamp(),
-                                    });
+                                   await functions
+                                       .httpsCallable(
+                                           'guidanceCreateWeeklyTask')
+                                       .call({
+                                     'studentId': selectedStudentId,
+                                     'title': title,
+                                     'schedule': day,
                                   });
                                   if (ctx.mounted) Navigator.pop(ctx);
-                                } on StateError catch (error) {
+                                 } on FirebaseFunctionsException catch (error) {
                                   if (!ctx.mounted) return;
                                   setD(() => isSubmitting = false);
+                                   final message = error.message?.trim();
                                   ScaffoldMessenger.of(ctx).showSnackBar(
-                                    SnackBar(content: Text(error.message)),
+                                     SnackBar(
+                                       content: Text(
+                                         message == null || message.isEmpty
+                                             ? 'Haftalık takip kaydedilemedi. Lütfen tekrar deneyin.'
+                                             : message,
+                                       ),
+                                     ),
                                   );
                                 } catch (_) {
                                   if (!ctx.mounted) return;
@@ -2331,7 +2243,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                   ? null
                                   : () => addWeeklyTask(
                                         initialStudentId: studentId,
-                                        initialStudent: student,
                                       ),
                             ),
                             PopupMenuButton<String>(
@@ -2484,7 +2395,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                   _guidanceInfoRow(
                     Icons.family_restroom_rounded,
                     'Veli',
-                    guardian,
+                    [
+                      guardian,
+                      '${student['guardianPhone'] ?? ''}'.trim(),
+                    ].where((value) => value.isNotEmpty).join(' • '),
                   ),
                 ],
                 const SizedBox(height: 10),
@@ -2558,7 +2472,6 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                     Navigator.pop(dialogContext);
                                     addWeeklyTask(
                                       initialStudentId: studentId,
-                                      initialStudent: student,
                                     );
                                   },
                             icon: Icon(hasTask
@@ -3013,7 +2926,11 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                                   _appointmentDetailChip(
                                                     Icons
                                                         .family_restroom_rounded,
-                                                    'Veli: $guardian',
+                                                    'Veli: ${[
+                                                      guardian,
+                                                      '${student?['guardianPhone'] ?? ''}'
+                                                          .trim(),
+                                                    ].where((value) => value.isNotEmpty).join(' • ')}',
                                                   ),
                                               ]),
                                         ),

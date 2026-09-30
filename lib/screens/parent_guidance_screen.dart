@@ -119,6 +119,9 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
       });
 
   Future<void> _verify() => _run(() async {
+        if (!RegExp(r'^\d{10}$').hasMatch(_phone.text)) {
+          throw StateError('Telefon numarası tam 10 rakam olmalıdır.');
+        }
         final result = await _functions
             .httpsCallable('publicGuidanceVerifySelectedPhone')
             .call({
@@ -491,9 +494,11 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
                         borderRadius: BorderRadius.circular(16),
                         borderSide: BorderSide.none),
                   ),
-                  keyboardType: TextInputType.phone,
+                  keyboardType: TextInputType.number,
+                  maxLength: 10,
                   inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9+()\- ]'))
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(10),
                   ]),
             const SizedBox(height: 20),
             SizedBox(
