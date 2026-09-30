@@ -491,9 +491,11 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
                         borderRadius: BorderRadius.circular(16),
                         borderSide: BorderSide.none),
                   ),
-                  keyboardType: TextInputType.phone,
+                  keyboardType: TextInputType.number,
+                  maxLength: 10,
                   inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9+()\- ]'))
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(10),
                   ]),
             const SizedBox(height: 20),
             SizedBox(
