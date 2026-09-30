@@ -3532,7 +3532,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: stream,
       builder: (context, snapshot) {
-        final docs = snapshot.data?.docs ?? [];
+        // Bildirim zili sorgu/index hatası olsa bile kaybolmamalı.
+        final docs = snapshot.hasError
+            ? <QueryDocumentSnapshot<Map<String, dynamic>>>[]
+            : (snapshot.data?.docs ?? []);
         final popupDocs = docs
             .where((doc) => _isVerifiedNoShowPopupEligible(doc.data()))
             .toList();
