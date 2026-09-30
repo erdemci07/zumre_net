@@ -148,6 +148,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Map<String, String>? _guidanceAppointment;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
       _guidanceAppointmentSubscription;
+  bool _hasUpcomingZumreAppointments = false;
+  bool _hasActiveGuidanceTask = false;
 
   bool _isInStudySession = false;
   bool _isInQueue = false;
@@ -392,6 +394,19 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     });
   }
 
+  List<String> _guidanceAppointmentPlanningDateKeys() {
+    final now = _istanbulNow();
+    final today = DateTime(now.year, now.month, now.day);
+    final startOffset = now.hour >= 18 ? 1 : 0;
+
+    return List.generate(
+      _appointmentPlanningMaxOffsetDays - startOffset + 1,
+      (index) => _dateKey(
+        DateTime(today.year, today.month, today.day + startOffset + index),
+      ),
+    ).where(_guidanceWorksOnDate).toList();
+  }
+
   DateTime _parseDateKey(String dateKey) {
     final parts = dateKey.split('-');
     if (parts.length != 3) return _istanbulNow();
@@ -451,6 +466,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     if (dateKey == todayKey) return 'Bugün';
 
     return '${weekdays[date.weekday - 1]} ${date.day} ${months[date.month - 1]}';
+  }
+
+  String _formatGuidancePlanningDay(String dateKey) {
+    final now = _istanbulNow();
+    final date = _parseDateKey(dateKey);
+    if (_dateKey(date) == _dateKey(now)) return 'Bugün';
+    if (_dateKey(date) ==
+        _dateKey(DateTime(now.year, now.month, now.day + 1))) {
+      return 'Yarın';
+    }
+    return _formatPlanningDay(dateKey);
   }
 
   String _formatAppointmentDate(Object? value) {
@@ -1663,12 +1689,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildSubjectGrid({bool fillHeight = false}) {
+  Widget _buildSubjectGrid({bool fillHeight = false, bool compact = false}) {
     return LayoutBuilder(
       builder: (context, constraints) {
         const crossAxisSpacing = 8.0;
         const mainAxisSpacing = 8.0;
-        const minItemHeight = 48.0;
+        final minItemHeight = compact ? 36.0 : 48.0;
         const crossAxisCount = 2;
         final subjects = _visibleSubjectOptions;
         final rowCount = (subjects.length / crossAxisCount).ceil().clamp(1, 99);
@@ -1701,6 +1727,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     subject.name,
                     subject.icon,
                     subject.color,
+                    compact: compact,
                   ))
               .toList(),
         );
@@ -2157,8 +2184,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   bool _guidanceWorksOnDate(String dateKey) {
     final weekly = _guidanceAvailability['weekly'];
     if (weekly is! Map) return false;
+    final closedDates = _guidanceAvailability['closedDates'];
+    if (closedDates is List && closedDates.contains(dateKey)) return false;
     final slots = weekly[_guidanceDayKey(dateKey)];
-    return slots is List && slots.isNotEmpty;
+    return slots is List &&
+        slots.whereType<Map>().any((slot) {
+          final start = slot['start']?.toString() ?? '';
+          final end = slot['end']?.toString() ?? '';
+          return start.isNotEmpty &&
+              end.isNotEmpty &&
+              _timeToMinutes(end) > _timeToMinutes(start);
+        });
   }
 
   void _listenGuidanceAppointment() {
@@ -2268,7 +2304,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       'Motivasyon',
       'Genel görüşme',
     ];
-    final dateKeys = _upcomingAppointmentDateKeys();
+    final dateKeys = _guidanceAppointmentPlanningDateKeys();
 
     String? reason;
     String? selectedDateKey;
@@ -2406,30 +2442,34 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                           ),
                           const SizedBox(height: 16),
                           _planningSectionTitle('Tarih'),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: dateKeys.map((dateKey) {
-                              final works = _guidanceWorksOnDate(dateKey);
-                              return _planningChoiceChip(
-                                label: works
-                                    ? _formatPlanningDay(dateKey)
-                                    : '${_formatPlanningDay(dateKey)} • Öğretmeniniz bugün kurumda değil',
-                                selected: selectedDateKey == dateKey,
-                                enabled: works,
-                                onTap: () => setDialogState(
-                                    () => selectedDateKey = dateKey),
-                                color: Colors.cyanAccent,
-                              );
-                            }).toList(),
-                          ),
+                          if (dateKeys.isEmpty)
+                            _planningInfoBox(
+                              'Rehber öğretmeninizin önümüzdeki günlerde tanımlı çalışma saati bulunmuyor.',
+                              color: Colors.cyanAccent,
+                            )
+                          else
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: dateKeys.map((dateKey) {
+                                return _planningChoiceChip(
+                                  label: _formatGuidancePlanningDay(dateKey),
+                                  selected: selectedDateKey == dateKey,
+                                  enabled: !isCreatingRequest,
+                                  onTap: () => setDialogState(
+                                      () => selectedDateKey = dateKey),
+                                  color: Colors.cyanAccent,
+                                );
+                              }).toList(),
+                            ),
                           const SizedBox(height: 14),
-                          _planningInfoBox(
-                            selectedDateKey == null
-                                ? 'Rehber öğretmeninizin kurumda olduğu günlerden birini seçin.'
-                                : 'Seçtiğiniz gün içinde rehberlik birimine gelebilirsiniz. Görüşmeniz gün içinde rehber öğretmeninizin uygunluğuna göre gerçekleştirilecektir.',
-                            color: Colors.cyanAccent,
-                          ),
+                          if (dateKeys.isNotEmpty)
+                            _planningInfoBox(
+                              selectedDateKey == null
+                                  ? 'Rehber öğretmeninizin çalışma günlerinden birini seçin.'
+                                  : 'Görüşmeniz seçtiğiniz gün, rehber öğretmeninizin çalışma saatleri içinde yapılacaktır.',
+                              color: Colors.cyanAccent,
+                            ),
                         ],
                       ),
                     ),
@@ -2452,8 +2492,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                   'counselorId': counselorId,
                                   'counselorName': counselorName,
                                   'reason': reason,
-                                  'dayLabel':
-                                      _formatPlanningDay(selectedDateKey!),
+                                  'dayLabel': _formatGuidancePlanningDay(
+                                      selectedDateKey!),
                                   'appointmentDate': selectedDateKey,
                                   'time': 'Gün içinde',
                                   'status': 'pending',
@@ -2466,7 +2506,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                     'id': appointment.id,
                                     'counselor': counselorName,
                                     'reason': reason!,
-                                    'day': _formatPlanningDay(selectedDateKey!),
+                                    'day': _formatGuidancePlanningDay(
+                                        selectedDateKey!),
                                     'time': 'Gün içinde',
                                     'status': 'Onay Bekliyor',
                                   };
@@ -2476,7 +2517,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(
                                     content: Text(
-                                      'Randevu talebiniz oluşturuldu: $counselorName • ${_formatPlanningDay(selectedDateKey!)}',
+                                      'Randevu talebiniz oluşturuldu: $counselorName • ${_formatGuidancePlanningDay(selectedDateKey!)}',
                                     ),
                                   ),
                                 );
@@ -3193,7 +3234,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _subjectCard(String title, IconData icon, Color color) {
+  Widget _subjectCard(
+    String title,
+    IconData icon,
+    Color color, {
+    bool compact = false,
+  }) {
     final selected = _selectedSubject == title;
 
     return InkWell(
@@ -3220,16 +3266,18 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: selected ? Colors.white : color, size: 26),
-            const SizedBox(height: 5),
+            Icon(icon,
+                color: selected ? Colors.white : color,
+                size: compact ? 18 : 26),
+            SizedBox(height: compact ? 2 : 5),
             Text(
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: 13,
+                fontSize: compact ? 10.5 : 13,
               ),
             ),
           ],
@@ -3600,6 +3648,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError || !snapshot.hasData) {
+          _scheduleHomeCardPresenceUpdate(
+            hasUpcomingZumreAppointments: false,
+          );
           return const SizedBox.shrink();
         }
 
@@ -3614,6 +3665,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             return aStart.compareTo(bStart);
           });
 
+        _scheduleHomeCardPresenceUpdate(
+          hasUpcomingZumreAppointments: appointments.isNotEmpty,
+        );
         if (appointments.isEmpty) return const SizedBox.shrink();
 
         final first = appointments.first.data();
@@ -3839,10 +3893,46 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  void _scheduleHomeCardPresenceUpdate({
+    bool? hasUpcomingZumreAppointments,
+    bool? hasActiveGuidanceTask,
+  }) {
+    if ((hasUpcomingZumreAppointments == null ||
+            hasUpcomingZumreAppointments == _hasUpcomingZumreAppointments) &&
+        (hasActiveGuidanceTask == null ||
+            hasActiveGuidanceTask == _hasActiveGuidanceTask)) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if ((hasUpcomingZumreAppointments == null ||
+              hasUpcomingZumreAppointments == _hasUpcomingZumreAppointments) &&
+          (hasActiveGuidanceTask == null ||
+              hasActiveGuidanceTask == _hasActiveGuidanceTask)) {
+        return;
+      }
+      setState(() {
+        if (hasUpcomingZumreAppointments != null) {
+          _hasUpcomingZumreAppointments = hasUpcomingZumreAppointments;
+        }
+        if (hasActiveGuidanceTask != null) {
+          _hasActiveGuidanceTask = hasActiveGuidanceTask;
+        }
+      });
+    });
+  }
+
   Widget _buildHomeView() {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxHeight < 900;
+        final hasExtraCards = _guidanceAppointment != null ||
+            _hasUpcomingZumreAppointments ||
+            _hasActiveGuidanceTask ||
+            _remainingCooldownSeconds > 0 ||
+            _isInStudySession;
+        final compactPlanningLayout = compact && hasExtraCards;
         return Padding(
           padding: EdgeInsets.fromLTRB(18, compact ? 5 : 8, 18, 8),
           child: Column(
@@ -3883,13 +3973,18 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 ),
               ),
               SizedBox(height: compact ? 4 : 6),
-              Expanded(child: _buildSubjectGrid(fillHeight: true)),
+              Expanded(
+                child: _buildSubjectGrid(
+                  fillHeight: true,
+                  compact: compactPlanningLayout,
+                ),
+              ),
               SizedBox(height: compact ? 5 : 7),
               _buildQuestionCountSelector(),
               SizedBox(height: compact ? 5 : 7),
               _buildTeacherSelector(),
               SizedBox(height: compact ? 5 : 7),
-              _buildQueueActions(),
+              _buildQueueActions(compact: compactPlanningLayout),
             ],
           ),
         );
@@ -4135,10 +4230,16 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           .where('studentId', isEqualTo: uid)
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const SizedBox.shrink();
+        if (!snapshot.hasData) {
+          _scheduleHomeCardPresenceUpdate(hasActiveGuidanceTask: false);
+          return const SizedBox.shrink();
+        }
         final tasks = snapshot.data!.docs
             .where((d) => d.data()['active'] != false)
             .toList();
+        _scheduleHomeCardPresenceUpdate(
+          hasActiveGuidanceTask: tasks.isNotEmpty,
+        );
         if (tasks.isEmpty) return const SizedBox.shrink();
         final d = tasks.first.data();
         return Container(
@@ -4236,35 +4337,35 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Widget _buildQueueActions() {
+  Widget _buildQueueActions({bool compact = false}) {
     return Row(
       children: [
         Expanded(
           flex: 5,
-          child: _buildJoinQueueButton(),
+          child: _buildJoinQueueButton(compact: compact),
         ),
-        const SizedBox(width: 9),
+        SizedBox(width: compact ? 6 : 9),
         Expanded(
           flex: 4,
-          child: _buildPlanAppointmentButton(),
+          child: _buildPlanAppointmentButton(compact: compact),
         ),
       ],
     );
   }
 
-  Widget _buildPlanAppointmentButton() {
+  Widget _buildPlanAppointmentButton({bool compact = false}) {
     return SizedBox(
-      height: 48,
+      height: compact ? 40 : 48,
       child: OutlinedButton.icon(
         onPressed: _isRoutingQueue ? null : _showPlanAppointmentDialog,
-        icon: const Icon(Icons.event_available_rounded, size: 19),
-        label: const FittedBox(
+        icon: Icon(Icons.event_available_rounded, size: compact ? 16 : 19),
+        label: FittedBox(
           fit: BoxFit.scaleDown,
           child: Text(
             'Zümre Planla',
             maxLines: 1,
             style: TextStyle(
-              fontSize: 15,
+              fontSize: compact ? 13 : 15,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -4278,14 +4379,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 10),
           backgroundColor: Colors.white.withValues(alpha: 0.06),
         ),
       ),
     );
   }
 
-  Widget _buildJoinQueueButton() {
+  Widget _buildJoinQueueButton({bool compact = false}) {
     final canJoinQueue = _selectedSubject != null &&
         _remainingCooldownSeconds <= 0 &&
         _isZumreOpenNow &&
@@ -4295,7 +4396,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
     return SizedBox(
       width: double.infinity,
-      height: 48,
+      height: compact ? 40 : 48,
       child: ElevatedButton(
         onPressed: canJoinQueue ? _joinQueue : null,
         style: ElevatedButton.styleFrom(
@@ -4308,33 +4409,33 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         child: FittedBox(
           fit: BoxFit.scaleDown,
           child: _isRoutingQueue
-              ? const Row(
+              ? Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
+                      width: compact ? 15 : 18,
+                      height: compact ? 15 : 18,
+                      child: const CircularProgressIndicator(
                         strokeWidth: 2.2,
                         color: Colors.white,
                       ),
                     ),
-                    SizedBox(width: 10),
+                    SizedBox(width: compact ? 6 : 10),
                     Text(
                       'Sıranız hazırlanıyor...',
                       maxLines: 1,
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: compact ? 14 : 18,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
                 )
-              : const Text(
+              : Text(
                   'Sıra Al',
                   maxLines: 1,
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: compact ? 15 : 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
