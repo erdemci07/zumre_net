@@ -277,7 +277,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'Seçilen tarih aralığındaki tüm öğrenciler zümre ve etüt bilgileriyle listelenir.',
+                  'Seçilen tarih aralığındaki tüm öğrenciler zümre ve etüt bilgileriyle listelenir. Oluşuan PDF dosyası panoya asılabilir veya WhatsApp veli/öğrenci gruplarında paylaşılabilir.',
                   style: TextStyle(color: Colors.white70, height: 1.35),
                 ),
                 const SizedBox(height: 14),
