@@ -7240,23 +7240,28 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: Colors.white12),
                       ),
-                      child: Row(
+                      child: LayoutBuilder(
+                        builder: (context, rowConstraints) {
+                          final mobile = rowConstraints.maxWidth < 390;
+                          final dayWidth = mobile ? 64.0 : 82.0;
+                          return Row(
                         children: [
-                          Switch(
+                          Transform.scale(
+                            scale: mobile ? .88 : 1,
+                            child: Switch(
                             value: enabled,
                             onChanged: (value) => setDialogState(() {
                               selected[day[0]] = value
                                   ? {'start': '13:00', 'end': '17:50'}
                                   : null;
                             }),
-                          ),
+                          )),
                           SizedBox(
-                            width: MediaQuery.sizeOf(dialogContext).width < 600
-                                ? 70
-                                : 82,
+                            width: dayWidth,
                             child: Text(day[1],
-                                style: const TextStyle(
+                                style: TextStyle(
                                     color: Colors.white,
+                                    fontSize: mobile ? 13 : 14,
                                     fontWeight: FontWeight.w700)),
                           ),
                           if (enabled) ...[
@@ -7277,7 +7282,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                   isDense: true,
                                   hintText: '08:30',
                                   contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 10),
+                                      horizontal: 4, vertical: 12),
                                   enabledBorder: OutlineInputBorder(
                                     borderSide:
                                         BorderSide(color: Colors.white24),
@@ -7312,7 +7317,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                   isDense: true,
                                   hintText: '17:30',
                                   contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 10),
+                                      horizontal: 4, vertical: 12),
                                   enabledBorder: OutlineInputBorder(
                                     borderSide:
                                         BorderSide(color: Colors.white24),
@@ -7332,6 +7337,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                   style: TextStyle(color: Colors.white54)),
                             ),
                         ],
+                          );
+                        },
                       ),
                     );
                   }),
