@@ -384,11 +384,29 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     });
   }
 
+  bool _guidanceHasTimeRemainingToday() {
+    final weekly = _guidanceAvailability['weekly'];
+    if (weekly is! Map) return false;
+
+    final now = _istanbulNow();
+    final slots = weekly[_guidanceDayKey(_dateKey(now))];
+    if (slots is! List || slots.isEmpty) return false;
+
+    final nowMinutes = now.hour * 60 + now.minute;
+    return slots.whereType<Map>().any((slot) {
+      final end = _timeToMinutes(slot['end']?.toString() ?? '');
+      return end > nowMinutes;
+    });
+  }
+
   List<String> _upcomingAppointmentDateKeys() {
     final today = _istanbulNow();
+    final startOffset = _guidanceHasTimeRemainingToday() ? 0 : 1;
 
     return List.generate(_appointmentPlanningMaxOffsetDays + 1, (index) {
-      return _dateKey(DateTime(today.year, today.month, today.day + index));
+      return _dateKey(
+        DateTime(today.year, today.month, today.day + startOffset + index),
+      );
     });
   }
 
