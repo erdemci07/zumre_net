@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:printing/printing.dart';
 
+import '../models/education_scope.dart';
 import '../utils/class_name_display.dart';
 import '../utils/guidance_presentation.dart';
 import '../utils/guidance_student_groups.dart';
@@ -2171,7 +2172,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                     'Veli',
                     [
                       guardian,
-                      '${student['guardianPhone'] ?? ''}'.trim(),
+                      '${student?['guardianPhone'] ?? ''}'.trim(),
                     ].where((value) => value.isNotEmpty).join(' • '),
                   ),
                 ],
@@ -2705,7 +2706,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                                         .family_restroom_rounded,
                                                     'Veli: ${[
                                                       guardian,
-                                                      '${student['guardianPhone'] ?? ''}'.trim(),
+                                                      '${student?['guardianPhone'] ?? ''}'.trim(),
                                                     ].where((value) => value.isNotEmpty).join(' • ')}',
                                                   ),
                                               ]),
