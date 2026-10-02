@@ -1400,7 +1400,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: const Text(
-                      'Seçilen kapsamdaki tüm öğretmenler gösterilir. Faaliyeti olmayan öğretmenler 0 değerleriyle raporda kalır; zümrede çözülen soru ve tamamlanan etüt sayıları ayrı gösterilir.',
+                      'Seçilen kapsamdaki tüm öğretmenler gösterilir. Faaliyeti olmayan öğretmenler 0 değerleriyle raporda kalır; zümrede çözülen soru sayısı gösterilir.',
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 12,

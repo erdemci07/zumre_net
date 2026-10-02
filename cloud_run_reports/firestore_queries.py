@@ -544,7 +544,6 @@ def build_teacher_activity_summary(start_date: str, end_date: str, education_lev
     db = firestore.client()
     date_range = parse_date_range(start_date, end_date)
     queues = fetch_completed_queues(db, date_range)
-    sessions = fetch_completed_study_sessions(db, date_range)
 
     teachers = {}
     for doc in db.collection("users").where(filter=FieldFilter("role", "==", "teacher")).stream():
@@ -561,16 +560,11 @@ def build_teacher_activity_summary(start_date: str, end_date: str, education_lev
             "name": _teacher_name_from_data(data) or "Öğretmen",
             "subjects": ", ".join(_clean(item) for item in subjects if _clean(item)),
             "question_count": 0,
-            "study_count": 0,
         }
 
     for queue in queues:
         if queue.teacher_id in teachers:
             teachers[queue.teacher_id]["question_count"] += 1
-
-    for session in sessions:
-        if session.duty_teacher_id in teachers:
-            teachers[session.duty_teacher_id]["study_count"] += 1
 
     rows = sorted(teachers.values(), key=lambda item: item["name"].casefold())
     return {

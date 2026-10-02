@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from reportlab.platypus import Spacer
+
 from models import ClassReportData, DateRange, InstitutionSummaryData, StudentReportRow
 from pdf.pagination import student_chunks
-from reports import class_activity, class_activity_summary, class_tracking, institution_summary
+from reports import class_activity, class_activity_summary, class_tracking, institution_summary, teacher_activity_summary
 from reports.class_activity_summary import _student_summary_rows
 from pdf.styles import report_styles
 
@@ -30,6 +32,26 @@ def test_reports_render_valid_pdf_bytes_without_firebase():
     assert class_tracking.render(class_data).startswith(b"%PDF")
     assert class_activity.render(class_data).startswith(b"%PDF")
     assert class_activity_summary.render(class_data).startswith(b"%PDF")
+
+
+def test_teacher_activity_summary_contains_no_study_session_column(monkeypatch):
+    headers = []
+
+    def capture_table(table_headers, rows, widths, font_size):
+        headers.extend(table_headers)
+        return Spacer(1, 1)
+
+    monkeypatch.setattr(teacher_activity_summary, "simple_table", capture_table)
+    data = {
+        "education_level": "LGS",
+        "date_range": _range(),
+        "teachers": [
+            {"name": "Öğretmen", "subjects": "Matematik", "question_count": 3}
+        ],
+    }
+
+    assert teacher_activity_summary.render(data).startswith(b"%PDF")
+    assert headers == ["Öğretmen", "Branş", "Zümrede Çözülen Soru"]
 
 
 def test_student_chunks_adds_continuation_title_for_long_sections():

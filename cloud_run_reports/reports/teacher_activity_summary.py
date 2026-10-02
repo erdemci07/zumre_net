@@ -42,15 +42,14 @@ def render(data: dict) -> bytes:
                 teacher["name"],
                 teacher["subjects"] or "-",
                 str(teacher["question_count"]),
-                str(teacher["study_count"]),
             ]
             for teacher in teachers
         ]
         story.append(
             simple_table(
-                ["Öğretmen", "Branş", "Zümrede Çözülen Soru", "Tamamlanan Etüt"],
+                ["Öğretmen", "Branş", "Zümrede Çözülen Soru"],
                 rows,
-                [55 * mm, 45 * mm, 38 * mm, 32 * mm],
+                [65 * mm, 55 * mm, 50 * mm],
                 font_size=8.5,
             )
         )
