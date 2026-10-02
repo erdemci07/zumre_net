@@ -3194,70 +3194,121 @@ class _StatisticsPageState extends State<StatisticsPage> {
     );
   }
 
-  bool _scopeZumreIsOpenNow(
+  DateTime _istanbulNow() =>
+      DateTime.now().toUtc().add(const Duration(hours: 3));
+
+  ({bool active, String value}) _scopeSchedulePillState(
     Map<String, dynamic> scheduleData,
     String educationLevel,
-  ) {
-    final now = DateTime.now();
+    DateTime now, {
+    required bool isStudy,
+  }) {
     final weekly = scheduleData['weeklySchedule'];
-    if (weekly is! Map) return false;
-    final dayKey = _scheduleDays[now.weekday - 1]['key']!;
-    final day = weekly[dayKey];
-    if (day is! Map || day['closed'] == true || day['zumreClosed'] == true) {
-      return false;
+    final slotKey = isStudy ? 'studySlots' : 'zumreSlots';
+    final closedKey = isStudy ? 'studyClosed' : 'zumreClosed';
+    final activityName = isStudy ? 'oturum' : 'zümre';
+
+    List<Map<String, dynamic>> slotsFor(DateTime date) {
+      if (weekly is! Map) return [];
+      final dayKey = _scheduleDays[date.weekday - 1]['key']!;
+      final day = weekly[dayKey];
+      if (day is! Map || day['closed'] == true || day[closedKey] == true) {
+        return [];
+      }
+
+      final rawSlots = day[slotKey];
+      if (rawSlots is! List) return [];
+
+      final slots = rawSlots
+          .whereType<Map>()
+          .map((slot) => Map<String, dynamic>.from(slot))
+          .where((slot) {
+            if (!institutionScheduleSlotMatchesEducationLevel(
+              slot,
+              educationLevel,
+            )) {
+              return false;
+            }
+            final start = _clockToMinutes('${slot['start'] ?? ''}');
+            final end = _clockToMinutes('${slot['end'] ?? ''}');
+            return start >= 0 && end > start;
+          })
+          .toList()
+        ..sort(
+          (first, second) => _clockToMinutes('${first['start']}')
+              .compareTo(_clockToMinutes('${second['start']}')),
+        );
+      return slots;
     }
 
-    final nowMinutes = now.hour * 60 + now.minute;
-    final rawSlots = day['zumreSlots'];
-    if (rawSlots is! List) return false;
+    String formatClock(int minutes) =>
+        '${(minutes ~/ 60).toString().padLeft(2, '0')}:'
+        '${(minutes % 60).toString().padLeft(2, '0')}';
 
-    return rawSlots.whereType<Map>().any((slot) {
-      if (!institutionScheduleSlotMatchesEducationLevel(
-        slot,
-        educationLevel,
-      )) {
-        return false;
+    String? nextScheduledValue() {
+      for (var offset = 1; offset <= 7; offset++) {
+        final date = DateTime(now.year, now.month, now.day + offset);
+        final slots = slotsFor(date);
+        if (slots.isEmpty) continue;
+
+        final dayLabel = offset == 1
+            ? 'Yarın'
+            : _scheduleDays[date.weekday - 1]['label']!;
+        final start = _clockToMinutes('${slots.first['start']}');
+        return '$dayLabel 1. $activityName ${formatClock(start)}';
       }
-      final start = _clockToMinutes('${slot['start'] ?? ''}');
-      final end = _clockToMinutes('${slot['end'] ?? ''}');
-      return start >= 0 &&
-          end > start &&
-          nowMinutes >= start &&
-          nowMinutes < end;
-    });
-  }
-
-  bool _scopeStudyIsOpenNow(
-    Map<String, dynamic> scheduleData,
-    String educationLevel,
-  ) {
-    final now = DateTime.now();
-    final weekly = scheduleData['weeklySchedule'];
-    if (weekly is! Map) return false;
-    final dayKey = _scheduleDays[now.weekday - 1]['key']!;
-    final day = weekly[dayKey];
-    if (day is! Map || day['closed'] == true || day['studyClosed'] == true) {
-      return false;
+      return null;
     }
 
+    final todaySlots = slotsFor(now);
     final nowMinutes = now.hour * 60 + now.minute;
-    final rawSlots = day['studySlots'];
-    if (rawSlots is! List) return false;
+    for (var index = 0; index < todaySlots.length; index++) {
+      final slot = todaySlots[index];
+      final start = _clockToMinutes('${slot['start']}');
+      final end = _clockToMinutes('${slot['end']}');
+      if (nowMinutes < start || nowMinutes >= end) continue;
 
-    return rawSlots.whereType<Map>().any((slot) {
-      if (!institutionScheduleSlotMatchesEducationLevel(
-        slot,
-        educationLevel,
-      )) {
-        return false;
+      final secondsRemaining = (end - nowMinutes) * 60 - now.second;
+      final minutesRemaining = (secondsRemaining + 59) ~/ 60;
+      var value = '${index + 1}. $activityName · $minutesRemaining dk kaldı';
+
+      Map<String, dynamic>? nextSlot;
+      var nextIndex = -1;
+      for (var next = index + 1; next < todaySlots.length; next++) {
+        if (_clockToMinutes('${todaySlots[next]['start']}') >= end) {
+          nextSlot = todaySlots[next];
+          nextIndex = next;
+          break;
+        }
       }
-      final start = _clockToMinutes('${slot['start'] ?? ''}');
-      final end = _clockToMinutes('${slot['end'] ?? ''}');
-      return start >= 0 &&
-          end > start &&
-          nowMinutes >= start &&
-          nowMinutes < end;
-    });
+
+      if (nextSlot != null) {
+        final nextStart = _clockToMinutes('${nextSlot['start']}');
+        value += '\nSonraki: ${nextIndex + 1}. $activityName '
+            '${formatClock(nextStart)}';
+      } else {
+        final nextDay = nextScheduledValue();
+        if (nextDay != null) value += '\nSonraki: $nextDay';
+      }
+      return (active: true, value: value);
+    }
+
+    for (var index = 0; index < todaySlots.length; index++) {
+      final start = _clockToMinutes('${todaySlots[index]['start']}');
+      if (start > nowMinutes) {
+        return (
+          active: false,
+          value: 'Kapalı · Sonraki: ${index + 1}. $activityName '
+              '${formatClock(start)}',
+        );
+      }
+    }
+
+    final nextDay = nextScheduledValue();
+    return (
+      active: false,
+      value: nextDay == null ? 'Kapalı' : 'Kapalı · $nextDay',
+    );
   }
 
   Widget _runtimeSummaryStrip() {
@@ -3279,14 +3330,31 @@ class _StatisticsPageState extends State<StatisticsPage> {
               .snapshots(),
           builder: (context, scheduleSnapshot) {
             final scheduleData = scheduleSnapshot.data?.data() ?? {};
-            final lgsOpen =
-                suffix == null && _scopeZumreIsOpenNow(scheduleData, 'LGS');
-            final yksOpen =
-                suffix == null && _scopeZumreIsOpenNow(scheduleData, 'YKS');
-            final lgsStudyOpen =
-                suffix == null && _scopeStudyIsOpenNow(scheduleData, 'LGS');
-            final yksStudyOpen =
-                suffix == null && _scopeStudyIsOpenNow(scheduleData, 'YKS');
+            final now = _istanbulNow();
+            final lgsZumre = _scopeSchedulePillState(
+              scheduleData,
+              'LGS',
+              now,
+              isStudy: false,
+            );
+            final yksZumre = _scopeSchedulePillState(
+              scheduleData,
+              'YKS',
+              now,
+              isStudy: false,
+            );
+            final lgsStudy = _scopeSchedulePillState(
+              scheduleData,
+              'LGS',
+              now,
+              isStudy: true,
+            );
+            final yksStudy = _scopeSchedulePillState(
+              scheduleData,
+              'YKS',
+              now,
+              isStudy: true,
+            );
 
             return Wrap(
               spacing: 8,
@@ -3294,25 +3362,31 @@ class _StatisticsPageState extends State<StatisticsPage> {
               children: [
                 _smallStatusPill(
                   label: 'LGS Zümre',
-                  value: suffix ?? (lgsOpen ? 'Aktif' : 'Kapalı'),
-                  color: lgsOpen ? Colors.greenAccent : Colors.orangeAccent,
+                  value: suffix ?? lgsZumre.value,
+                  color: lgsZumre.active
+                      ? Colors.greenAccent
+                      : Colors.orangeAccent,
                 ),
                 _smallStatusPill(
                   label: 'YKS Zümre',
-                  value: suffix ?? (yksOpen ? 'Aktif' : 'Kapalı'),
-                  color: yksOpen ? Colors.greenAccent : Colors.orangeAccent,
+                  value: suffix ?? yksZumre.value,
+                  color: yksZumre.active
+                      ? Colors.greenAccent
+                      : Colors.orangeAccent,
                 ),
                 _smallStatusPill(
                   label: 'LGS Etüt',
-                  value: suffix ?? (lgsStudyOpen ? 'Aktif' : 'Kapalı'),
-                  color:
-                      lgsStudyOpen ? Colors.greenAccent : Colors.orangeAccent,
+                  value: suffix ?? lgsStudy.value,
+                  color: lgsStudy.active
+                      ? Colors.greenAccent
+                      : Colors.orangeAccent,
                 ),
                 _smallStatusPill(
                   label: 'YKS Etüt',
-                  value: suffix ?? (yksStudyOpen ? 'Aktif' : 'Kapalı'),
-                  color:
-                      yksStudyOpen ? Colors.greenAccent : Colors.orangeAccent,
+                  value: suffix ?? yksStudy.value,
+                  color: yksStudy.active
+                      ? Colors.greenAccent
+                      : Colors.orangeAccent,
                 ),
               ],
             );
@@ -3339,12 +3413,14 @@ class _StatisticsPageState extends State<StatisticsPage> {
         children: [
           Icon(Icons.circle_rounded, color: color, size: 9),
           const SizedBox(width: 8),
-          Text(
-            '$label: $value',
-            style: TextStyle(
-              color: color,
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
+          Flexible(
+            child: Text(
+              '$label: $value',
+              style: TextStyle(
+                color: color,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
