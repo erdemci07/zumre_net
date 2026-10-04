@@ -1846,6 +1846,21 @@ class _StatisticsPageState extends State<StatisticsPage> {
                                 endDate: selectedRange.end,
                               ),
                             ),
+                            _reportCard(
+                              icon: Icons.groups_2_rounded,
+                              title: 'Rehberlik Faaliyet Özeti',
+                              subtitle:
+                                  'Tamamlanan öğrenci ve veli görüşmelerini rehberlikçi bazında listeler',
+                              color: Colors.cyanAccent,
+                              compact: compact,
+                              onTap: () => _requestReportPdf(
+                                endpoint: '/reports/guidance-activity-summary',
+                                fallbackFileName:
+                                    'Rehberlik_Faaliyet_Ozeti.pdf',
+                                startDate: selectedRange.start,
+                                endDate: selectedRange.end,
+                              ),
+                            ),
                           ];
 
                           if (compact) {

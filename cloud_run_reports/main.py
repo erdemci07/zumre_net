@@ -11,8 +11,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from auth import require_admin, require_reporter
-from firestore_queries import build_class_report, build_institution_summary, build_teacher_activity_summary
-from reports import class_activity, class_activity_summary, class_tracking, institution_summary, teacher_activity_summary
+from firestore_queries import build_class_report, build_guidance_activity_summary, build_institution_summary, build_teacher_activity_summary
+from reports import class_activity, class_activity_summary, class_tracking, guidance_activity_summary, institution_summary, teacher_activity_summary
 
 
 if not firebase_admin._apps:
@@ -193,3 +193,34 @@ def teacher_activity_summary_report(
             type(exc).__name__,
         )
         raise HTTPException(status_code=500, detail="Öğretmen faaliyet raporu oluşturulamadı.") from exc
+
+
+@app.post("/reports/guidance-activity-summary")
+def guidance_activity_summary_report(
+    request: ReportRequest,
+    _: dict = Depends(require_admin),
+):
+    try:
+        data = build_guidance_activity_summary(
+            request.start_date,
+            request.end_date,
+        )
+        pdf_bytes = guidance_activity_summary.render(data)
+        filename = (
+            f"Rehberlik_Faaliyet_Ozeti_"
+            f"{request.start_date}_{request.end_date}.pdf"
+        )
+        return _pdf_response(pdf_bytes, filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logging.exception(
+            "Guidance activity report generation failed: startDate=%s endDate=%s exceptionType=%s",
+            request.start_date,
+            request.end_date,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Rehberlik faaliyet raporu oluşturulamadı.",
+        ) from exc

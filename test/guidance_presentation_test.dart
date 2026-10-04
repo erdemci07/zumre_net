@@ -3,8 +3,8 @@ import 'package:zumre_net/utils/guidance_presentation.dart';
 
 void main() {
   test('guidance status labels preserve the existing status model', () {
-    expect(guidanceStatusLabel('pending'), 'Randevulu');
-    expect(guidanceStatusLabel('approved'), 'Geldi / Bekliyor');
+    expect(guidanceStatusLabel('pending'), 'Onay bekliyor');
+    expect(guidanceStatusLabel('approved'), 'Onaylandı');
     expect(guidanceStatusLabel('in_progress'), 'Görüşmede');
     expect(guidanceStatusLabel('no_show'), 'Gelmedi');
   });

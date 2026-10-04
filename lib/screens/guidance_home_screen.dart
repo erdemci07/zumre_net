@@ -13,6 +13,7 @@ import '../models/education_scope.dart';
 import '../utils/class_name_display.dart';
 import '../utils/guidance_presentation.dart';
 import '../utils/guidance_student_groups.dart';
+import '../utils/appointment_time_groups.dart';
 
 const _guidanceTerminalStatuses = {'completed', 'cancelled', 'no_show'};
 
@@ -54,6 +55,134 @@ String _guidanceIsoDate(DateTime date) =>
     '${date.year.toString().padLeft(4, '0')}-'
     '${date.month.toString().padLeft(2, '0')}-'
     '${date.day.toString().padLeft(2, '0')}';
+
+List<Map<String, dynamic>> _guidanceAppointmentDateOptions(
+  Map<String, dynamic> availability,
+  List<Map<String, dynamic>> appointments,
+  DateTime now,
+) {
+  const weekdays = [
+    'sunday',
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+  ];
+  final weekly = availability['weekly'];
+  if (weekly is! Map) return [];
+
+  final configuredDuration = (availability['slotMinutes'] as num?)?.toInt();
+  final duration =
+      [15, 20, 30].contains(configuredDuration) ? configuredDuration! : 20;
+  final closedDates = (availability['closedDates'] as List? ?? const [])
+      .map((date) => date.toString())
+      .toSet();
+  final today = _guidanceIsoDate(now);
+  final nowMinutes = now.hour * 60 + now.minute;
+  final busyStatuses = {'pending', 'approved', 'in_progress'};
+  final results = <Map<String, dynamic>>[];
+
+  for (var offset = 0; offset < 366 && results.length < 7; offset++) {
+    final date = DateTime(now.year, now.month, now.day + offset);
+    final dateKey = _guidanceIsoDate(date);
+    if (closedDates.contains(dateKey)) continue;
+
+    final rawSlots = weekly[weekdays[date.weekday % 7]];
+    if (rawSlots is! List) continue;
+    final slots = <String>[];
+
+    for (final rawSlot in rawSlots.whereType<Map>()) {
+      final startParts = '${rawSlot['start'] ?? ''}'.split(':');
+      final endParts = '${rawSlot['end'] ?? ''}'.split(':');
+      if (startParts.length != 2 || endParts.length != 2) continue;
+      final startHour = int.tryParse(startParts[0]);
+      final startMinute = int.tryParse(startParts[1]);
+      final endHour = int.tryParse(endParts[0]);
+      final endMinute = int.tryParse(endParts[1]);
+      if (startHour == null ||
+          startMinute == null ||
+          endHour == null ||
+          endMinute == null ||
+          startHour > 23 ||
+          endHour > 23 ||
+          startMinute > 59 ||
+          endMinute > 59) {
+        continue;
+      }
+
+      final start = startHour * 60 + startMinute;
+      final end = endHour * 60 + endMinute;
+      for (var minute = start; minute + duration <= end; minute += duration) {
+        if (dateKey == today && minute <= nowMinutes) continue;
+        final time = '${(minute ~/ 60).toString().padLeft(2, '0')}:'
+            '${(minute % 60).toString().padLeft(2, '0')}';
+        final isBusy = appointments.any((appointment) {
+          final status = _guidanceStatus(appointment['status']?.toString());
+          final appointmentDate = appointment['appointmentDate']?.toString();
+          final appointmentDay =
+              appointment['dayLabel']?.toString().toLowerCase();
+          final isLegacyRecord =
+              appointmentDate == null || appointmentDate.isEmpty;
+          final legacyDayMatches = isLegacyRecord &&
+              offset <= 7 &&
+              ((appointmentDay == 'bugün' && dateKey == today) ||
+                  (appointmentDay == 'yarın' &&
+                      dateKey ==
+                          _guidanceIsoDate(
+                            DateTime(now.year, now.month, now.day + 1),
+                          )) ||
+                  appointmentDay ==
+                      [
+                        'pazar',
+                        'pazartesi',
+                        'salı',
+                        'çarşamba',
+                        'perşembe',
+                        'cuma',
+                        'cumartesi',
+                      ][date.weekday % 7]);
+          return (appointmentDate == dateKey || legacyDayMatches) &&
+              appointment['time'] == time &&
+              busyStatuses.contains(status);
+        });
+        if (!isBusy) slots.add(time);
+      }
+    }
+
+    if (slots.isNotEmpty) {
+      final sortedSlots = slots.toSet().toList()..sort();
+      results.add({'date': dateKey, 'slots': sortedSlots});
+    }
+  }
+
+  return results;
+}
+
+String _guidanceAppointmentDayLabel(String dateKey, DateTime now) {
+  const weekdays = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+  const months = [
+    'Oca',
+    'Şub',
+    'Mar',
+    'Nis',
+    'May',
+    'Haz',
+    'Tem',
+    'Ağu',
+    'Eyl',
+    'Eki',
+    'Kas',
+    'Ara',
+  ];
+  final date = DateTime.parse('${dateKey}T12:00:00');
+  if (dateKey == _guidanceIsoDate(now)) return 'Bugün';
+  if (dateKey == _guidanceIsoDate(DateTime(now.year, now.month, now.day + 1))) {
+    return 'Yarın';
+  }
+  return '${weekdays[date.weekday % 7]} ${date.day} ${months[date.month - 1]}';
+}
 
 String _guidanceDisplayDate(DateTime date) =>
     '${date.day.toString().padLeft(2, '0')}.'
@@ -113,6 +242,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
   final db = FirebaseFirestore.instance;
   final auth = FirebaseAuth.instance;
   final functions = FirebaseFunctions.instance;
+  final Set<String> _startingGuidanceAppointmentIds = {};
+  final Set<String> _approvingGuidanceAppointmentIds = {};
   String flowFilter = 'today';
   String _studentSearch = '';
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
@@ -166,6 +297,254 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
     await db.collection('guidanceAppointments').doc(id).update(
           _guidanceStatusUpdate(currentStatus, nextStatus),
         );
+  }
+
+  Future<bool> _confirmAppointmentAction({
+    required String title,
+    required String message,
+    required String confirmLabel,
+  }) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => Dialog(
+            backgroundColor: Colors.transparent,
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 420),
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF4A102B), Color(0xFF7A294B)],
+                ),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 10),
+                  Text(message,
+                      style:
+                          const TextStyle(color: Colors.white70, height: 1.35)),
+                  const SizedBox(height: 20),
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(dialogContext, false),
+                        child: const Text('Hayır'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(dialogContext, true),
+                        child: Text(confirmLabel),
+                      ),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _startGuidanceAppointment(
+    String appointmentId,
+    String status,
+    Map<String, dynamic> appointment,
+  ) async {
+    if (_startingGuidanceAppointmentIds.contains(appointmentId)) return;
+    setState(() => _startingGuidanceAppointmentIds.add(appointmentId));
+    try {
+      if (!_isGuidanceToday(appointment)) {
+        final planned = '${appointment['dayLabel'] ?? 'ileriki bir gün'}';
+        final confirmed = await _confirmAppointmentAction(
+          title: 'Randevuyu erken başlat',
+          message:
+              'Bu görüşme $planned için planlandı. Buna rağmen şimdi başlatmak istiyor musunuz?',
+          confirmLabel: 'Evet, Başlat',
+        );
+        if (!confirmed || !mounted) return;
+      }
+
+      await functions.httpsCallable('guidanceStartAppointment').call({
+        'appointmentId': appointmentId,
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Görüşme başlatıldı.')),
+      );
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.message ?? 'Görüşme başlatılamadı. Lütfen tekrar deneyin.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Görüşme başlatılamadı. Lütfen tekrar deneyin.'),
+      ));
+    } finally {
+      if (mounted) {
+        setState(() => _startingGuidanceAppointmentIds.remove(appointmentId));
+      }
+    }
+  }
+
+  Future<void> _approveGuidanceAppointment(String appointmentId) async {
+    if (_approvingGuidanceAppointmentIds.contains(appointmentId)) return;
+    final noteController = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 440),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF4A102B), Color(0xFF7A294B)],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Randevuyu onayla',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 21,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'İstersen öğrenciye kısa bir not ekleyebilirsin.',
+                style: TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: noteController,
+                maxLength: 300,
+                minLines: 2,
+                maxLines: 3,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Öğrenciye not (isteğe bağlı)',
+                  hintText: 'Saat 14.00’te gelebilirsin.',
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white.withValues(alpha: .08),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('Vazgeç'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.pop(
+                        dialogContext,
+                        noteController.text.trim(),
+                      ),
+                      icon: const Icon(Icons.check_rounded),
+                      label: const Text('Onayla'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFFFB1C8),
+                        foregroundColor: const Color(0xFF4A102B),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    noteController.dispose();
+    if (note == null || !mounted) return;
+
+    setState(() => _approvingGuidanceAppointmentIds.add(appointmentId));
+    try {
+      final now = FieldValue.serverTimestamp();
+      await db.collection('guidanceAppointments').doc(appointmentId).update({
+        'status': 'approved',
+        'approvedAt': now,
+        'updatedAt': now,
+        if (note.isNotEmpty) 'guidanceNote': note,
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Randevu onaylandı.')),
+      );
+    } on FirebaseException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.message ?? 'Randevu onaylanamadı.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(
+          () => _approvingGuidanceAppointmentIds.remove(appointmentId),
+        );
+      }
+    }
+  }
+
+  Future<void> _cancelGuidanceAppointment(
+      String appointmentId, String status) async {
+    final confirmed = await _confirmAppointmentAction(
+      title: 'Randevuyu iptal et',
+      message: 'Bu randevu iptal edilecek. Devam etmek istiyor musunuz?',
+      confirmLabel: 'Evet, İptal Et',
+    );
+    if (!confirmed) return;
+    await changeStatus(appointmentId, status, 'cancelled');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Randevu iptal edildi.')),
+    );
+  }
+
+  Future<void> _markGuidanceNoShow(String appointmentId, String status) async {
+    final confirmed = await _confirmAppointmentAction(
+      title: 'Gelmedi olarak işaretle',
+      message: 'Randevuya katılım olmadığını onaylıyor musunuz?',
+      confirmLabel: 'Evet, Gelmedi',
+    );
+    if (!confirmed) return;
+    await changeStatus(appointmentId, status, 'no_show');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Randevu “Gelmedi” olarak güncellendi.')),
+    );
   }
 
   bool _isGuardianAppointment(Map<String, dynamic> data) {
@@ -1137,31 +1516,44 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
   }
 
   Future<void> addStudent() async {
+    final counselorId = auth.currentUser?.uid;
+    if (counselorId == null) return;
     final students = await db
         .collection('users')
         .where('role', isEqualTo: 'student')
-        .where('guidanceCounselorId', isEqualTo: auth.currentUser!.uid)
+        .where('guidanceCounselorId', isEqualTo: counselorId)
         .get();
     if (!mounted) return;
+    final counselorSnapshot =
+        await db.collection('users').doc(counselorId).get();
+    final appointmentsSnapshot = await db
+        .collection('guidanceAppointments')
+        .where('counselorId', isEqualTo: counselorId)
+        .get();
+    if (!mounted) return;
+    final counselorData = counselorSnapshot.data() ?? {};
+    final rawAvailability = counselorData['guidanceAvailability'];
+    final availability = rawAvailability is Map
+        ? Map<String, dynamic>.from(rawAvailability)
+        : <String, dynamic>{};
+    final appointments =
+        appointmentsSnapshot.docs.map((doc) => doc.data()).toList();
+    final now = DateTime.now().toUtc().add(const Duration(hours: 3));
+    final dateOptions =
+        _guidanceAppointmentDateOptions(availability, appointments, now);
     String query = '';
     String? selectedId;
     String? selectedName;
     Map<String, dynamic>? selectedStudent;
     String participantType = 'student';
     String reason = 'Akademik takip';
-    String day = 'Bugün';
-    String time = '14:30';
-    final timeController = TextEditingController(text: time);
+    String selectedDate =
+        dateOptions.isEmpty ? '' : dateOptions.first['date']?.toString() ?? '';
+    List<String> availableTimes = dateOptions.isEmpty
+        ? const []
+        : List<String>.from(dateOptions.first['slots'] ?? const []);
+    String time = availableTimes.isEmpty ? '' : availableTimes.first;
     bool isSubmitting = false;
-    const days = [
-      'Bugün',
-      'Yarın',
-      'Pazartesi',
-      'Salı',
-      'Çarşamba',
-      'Perşembe',
-      'Cuma'
-    ];
     const reasons = [
       'Akademik takip',
       'Ödev kontrolü',
@@ -1174,6 +1566,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
+        final groupedTimes = groupAppointmentTimes(availableTimes);
         final filtered = students.docs.where((d) {
           final x = d.data();
           final name =
@@ -1298,109 +1691,297 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                         color: Color(0xFFFFB1C8))
                                     : null);
                           }))),
-              if (selectedId != null) ...[
-                const SizedBox(height: 12),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Randevu kimin için?',
-                      style: TextStyle(
-                          color: Colors.white70, fontWeight: FontWeight.w700)),
-                ),
-                const SizedBox(height: 6),
-                Wrap(spacing: 8, runSpacing: 8, children: [
-                  ChoiceChip(
-                    label: const Text('Öğrenci'),
-                    selected: participantType == 'student',
-                    onSelected: (_) => setD(() => participantType = 'student'),
-                  ),
-                  ChoiceChip(
-                    label: const Text('Veli'),
-                    selected: participantType == 'guardian',
-                    onSelected: (_) {
-                      final guardianName =
-                          guidanceGuardianLabel(selectedStudent);
-                      final guardianPhone =
-                          '${selectedStudent?['guardianPhone'] ?? ''}'.trim();
-                      if (guardianName.isEmpty && guardianPhone.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                                'Bu öğrenci için kayıtlı veli bilgisi bulunamadı.'),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (selectedId != null) ...[
+                        const SizedBox(height: 12),
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('Randevu kimin için?',
+                              style: TextStyle(
+                                  color: Colors.white70,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(spacing: 8, runSpacing: 8, children: [
+                          ChoiceChip(
+                            label: const Text('Öğrenci'),
+                            selected: participantType == 'student',
+                            onSelected: (_) => setD(() {
+                              participantType = 'student';
+                              reason = 'Akademik takip';
+                            }),
                           ),
-                        );
-                        return;
-                      }
-                      setD(() => participantType = 'guardian');
-                    },
+                          ChoiceChip(
+                            label: const Text('Veli'),
+                            selected: participantType == 'guardian',
+                            onSelected: (_) {
+                              final guardianName =
+                                  guidanceGuardianLabel(selectedStudent);
+                              final guardianPhone =
+                                  '${selectedStudent?['guardianPhone'] ?? ''}'
+                                      .trim();
+                              if (guardianName.isEmpty &&
+                                  guardianPhone.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                        'Bu öğrenci için kayıtlı veli bilgisi bulunamadı.'),
+                                  ),
+                                );
+                                return;
+                              }
+                              setD(() {
+                                participantType = 'guardian';
+                                reason = 'Veli görüşmesi';
+                              });
+                            },
+                          ),
+                        ]),
+                        if (participantType == 'guardian') ...[
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '${guidanceGuardianLabel(selectedStudent).isEmpty ? 'Kayıtlı veli' : guidanceGuardianLabel(selectedStudent)} • $selectedName öğrencisinin velisi',
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                        ],
+                        if (participantType == 'student') ...[
+                          Row(children: [
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                initialValue: reason,
+                                dropdownColor: const Color(0xFF681E40),
+                                style: const TextStyle(color: Colors.white),
+                                decoration: const InputDecoration(
+                                  labelText: 'Görüşme konusu',
+                                  labelStyle: TextStyle(color: Colors.white70),
+                                  enabledBorder: UnderlineInputBorder(
+                                    borderSide:
+                                        BorderSide(color: Colors.white38),
+                                  ),
+                                ),
+                                items: reasons
+                                    .map((value) => DropdownMenuItem(
+                                          value: value,
+                                          child: Text(value),
+                                        ))
+                                    .toList(),
+                                onChanged: (value) =>
+                                    setD(() => reason = value ?? reason),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 8),
+                        ],
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Tarih seçin',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        if (dateOptions.isEmpty)
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Çalışma programınızda uygun gün veya boş saat yok.',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          )
+                        else
+                          Column(
+                            children: dateOptions.map((option) {
+                              final optionDate =
+                                  option['date']?.toString() ?? '';
+                              final dateValue =
+                                  DateTime.tryParse('${optionDate}T12:00:00');
+                              if (dateValue == null) {
+                                return const SizedBox.shrink();
+                              }
+                              final selected = selectedDate == optionDate;
+                              final slotCount =
+                                  (option['slots'] as List? ?? const []).length;
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 7),
+                                child: Material(
+                                  color: selected
+                                      ? const Color(0xFFFFB1C8)
+                                      : Colors.white.withValues(alpha: .07),
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(14),
+                                    onTap: () => setD(() {
+                                      selectedDate = optionDate;
+                                      availableTimes = List<String>.from(
+                                        option['slots'] ?? const [],
+                                      );
+                                      time = availableTimes.isEmpty
+                                          ? ''
+                                          : availableTimes.first;
+                                    }),
+                                    child: Container(
+                                      constraints:
+                                          const BoxConstraints(minHeight: 54),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 13,
+                                        vertical: 9,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: selected
+                                              ? const Color(0xFFFFB1C8)
+                                              : Colors.white24,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            selected
+                                                ? Icons.check_circle_rounded
+                                                : Icons.calendar_today_rounded,
+                                            color: selected
+                                                ? const Color(0xFF4A102B)
+                                                : const Color(0xFFFFB1C8),
+                                            size: 18,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              '${_guidanceAppointmentDayLabel(optionDate, now)} · ${dateValue.day.toString().padLeft(2, '0')}/${dateValue.month.toString().padLeft(2, '0')}',
+                                              style: TextStyle(
+                                                color: selected
+                                                    ? const Color(0xFF4A102B)
+                                                    : Colors.white,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                          Text(
+                                            '$slotCount boş saat',
+                                            style: TextStyle(
+                                              color: selected
+                                                  ? const Color(0xFF4A102B)
+                                                  : Colors.white70,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        const SizedBox(height: 12),
+                        const Row(
+                          children: [
+                            Icon(Icons.schedule_rounded,
+                                size: 18, color: Color(0xFFFFB1C8)),
+                            SizedBox(width: 7),
+                            Text(
+                              'Saat seçin',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        if (availableTimes.isEmpty)
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Seçilen gün için boş saat bulunmuyor.',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          )
+                        else
+                          ...groupedTimes.entries.map((group) {
+                            const periodIcons = {
+                              'Sabah': Icons.wb_sunny_outlined,
+                              'Öğle': Icons.wb_cloudy_outlined,
+                              'Akşam': Icons.nights_stay_outlined,
+                            };
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: .07),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: Colors.white12),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(periodIcons[group.key],
+                                          size: 16,
+                                          color: const Color(0xFFFFB1C8)),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        group.key,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        '${group.value.length} saat',
+                                        style: const TextStyle(
+                                          color: Colors.white60,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 7),
+                                  Wrap(
+                                    spacing: 7,
+                                    runSpacing: 7,
+                                    children: group.value.map((option) {
+                                      final selected = time == option;
+                                      return ChoiceChip(
+                                        label: Text(option),
+                                        selected: selected,
+                                        onSelected: (_) =>
+                                            setD(() => time = option),
+                                        selectedColor: const Color(0xFFFFB1C8),
+                                        backgroundColor: Colors.white10,
+                                        labelStyle: TextStyle(
+                                          color: selected
+                                              ? const Color(0xFF4A102B)
+                                              : Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                      ],
+                    ],
                   ),
-                ]),
-                if (participantType == 'guardian') ...[
-                  const SizedBox(height: 6),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '${guidanceGuardianLabel(selectedStudent).isEmpty ? 'Kayıtlı veli' : guidanceGuardianLabel(selectedStudent)} • $selectedName öğrencisinin velisi',
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                ],
-                Row(children: [
-                  Expanded(
-                      child: DropdownButtonFormField<String>(
-                          initialValue: reason,
-                          dropdownColor: const Color(0xFF681E40),
-                          style: const TextStyle(color: Colors.white),
-                          decoration: const InputDecoration(
-                              labelText: 'Görüşme / görev',
-                              labelStyle: TextStyle(color: Colors.white70),
-                              enabledBorder: UnderlineInputBorder(
-                                  borderSide:
-                                      BorderSide(color: Colors.white38))),
-                          items: reasons
-                              .map((e) =>
-                                  DropdownMenuItem(value: e, child: Text(e)))
-                              .toList(),
-                          onChanged: (v) => setD(() => reason = v ?? reason))),
-                ]),
-                const SizedBox(height: 8),
-                const Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('Gün',
-                        style: TextStyle(
-                            color: Colors.white70,
-                            fontWeight: FontWeight.w700))),
-                const SizedBox(height: 6),
-                SizedBox(
-                    height: 42,
-                    child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: days.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 7),
-                        itemBuilder: (_, i) {
-                          final e = days[i];
-                          return ChoiceChip(
-                              label: Text(e),
-                              selected: day == e,
-                              onSelected: (_) => setD(() => day = e),
-                              selectedColor: const Color(0xFFFFB1C8),
-                              backgroundColor: Colors.white10,
-                              labelStyle: TextStyle(
-                                  color: day == e
-                                      ? const Color(0xFF4A102B)
-                                      : Colors.white));
-                        })),
-                const SizedBox(height: 8),
-                TextField(
-                    controller: timeController,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [_TimeTextFormatter()],
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                        labelText: 'Saat',
-                        hintText: '14:30',
-                        labelStyle: TextStyle(color: Colors.white70)),
-                    onChanged: (v) => time = v),
-              ],
+                ),
+              ),
               const SizedBox(height: 12),
               SizedBox(
                   width: double.infinity,
@@ -1410,20 +1991,141 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                           backgroundColor: const Color(0xFFFFB1C8),
                           foregroundColor: const Color(0xFF4A102B),
                           disabledBackgroundColor: Colors.white12),
-                      onPressed: selectedId == null || isSubmitting
+                      onPressed: selectedId == null ||
+                              selectedDate.isEmpty ||
+                              time.isEmpty ||
+                              isSubmitting
                           ? null
                           : () async {
                               final currentUser = auth.currentUser;
                               if (currentUser == null) return;
+                              final guardianName =
+                                  guidanceGuardianLabel(selectedStudent);
+                              final confirmed = await showDialog<bool>(
+                                    context: ctx,
+                                    builder: (confirmContext) => Dialog(
+                                      backgroundColor: Colors.transparent,
+                                      insetPadding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 24,
+                                      ),
+                                      child: Container(
+                                        constraints: const BoxConstraints(
+                                          maxWidth: 420,
+                                        ),
+                                        padding: const EdgeInsets.all(22),
+                                        decoration: BoxDecoration(
+                                          gradient: const LinearGradient(
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                            colors: [
+                                              Color(0xFF4A102B),
+                                              Color(0xFF8B3155),
+                                            ],
+                                          ),
+                                          borderRadius:
+                                              BorderRadius.circular(24),
+                                          border: Border.all(
+                                            color: Colors.white24,
+                                          ),
+                                        ),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              'Randevuyu Onayla',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 22,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 16),
+                                            _appointmentDetailChip(
+                                              Icons.person_outline_rounded,
+                                              '$selectedName',
+                                            ),
+                                            const SizedBox(height: 8),
+                                            _appointmentDetailChip(
+                                              Icons.event_rounded,
+                                              '${_guidanceAppointmentDayLabel(selectedDate, now)} • $time',
+                                            ),
+                                            const SizedBox(height: 8),
+                                            _appointmentDetailChip(
+                                              Icons.chat_bubble_outline_rounded,
+                                              participantType == 'guardian'
+                                                  ? (guardianName.isEmpty
+                                                      ? 'Kayıtlı veli'
+                                                      : guardianName)
+                                                  : 'Öğrenci görüşmesi',
+                                            ),
+                                            const SizedBox(height: 8),
+                                            if (participantType == 'student')
+                                              _appointmentDetailChip(
+                                                Icons.assignment_outlined,
+                                                reason,
+                                              ),
+                                            const SizedBox(height: 20),
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: OutlinedButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                      confirmContext,
+                                                      false,
+                                                    ),
+                                                    style: OutlinedButton
+                                                        .styleFrom(
+                                                      foregroundColor:
+                                                          Colors.white,
+                                                      side: const BorderSide(
+                                                        color: Colors.white54,
+                                                      ),
+                                                    ),
+                                                    child: const Text('Geri'),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 10),
+                                                Expanded(
+                                                  child: FilledButton.icon(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                      confirmContext,
+                                                      true,
+                                                    ),
+                                                    icon: const Icon(
+                                                      Icons.check_rounded,
+                                                    ),
+                                                    label: const Text('Onayla'),
+                                                    style:
+                                                        FilledButton.styleFrom(
+                                                      backgroundColor:
+                                                          const Color(
+                                                        0xFFFFB1C8,
+                                                      ),
+                                                      foregroundColor:
+                                                          const Color(
+                                                        0xFF4A102B,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ) ??
+                                  false;
+                              if (!confirmed || !ctx.mounted) return;
                               setD(() => isSubmitting = true);
                               try {
-                                final u = await db
-                                    .collection('users')
-                                    .doc(currentUser.uid)
-                                    .get();
-                                final data = u.data() ?? {};
                                 final counselorName =
-                                    '${data['fullName'] ?? '${data['name'] ?? ''} ${data['surname'] ?? ''}'}'
+                                    '${counselorData['fullName'] ?? '${counselorData['name'] ?? ''} ${counselorData['surname'] ?? ''}'}'
                                         .trim();
                                 await db
                                     .collection('guidanceAppointments')
@@ -1434,8 +2136,11 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                   'counselorName': counselorName.isEmpty
                                       ? 'Rehberlik Servisi'
                                       : counselorName,
-                                  'reason': reason,
-                                  'dayLabel': day,
+                                  'reason': participantType == 'guardian'
+                                      ? 'Veli görüşmesi'
+                                      : reason,
+                                  'appointmentDate': selectedDate,
+                                  'dayLabel': selectedDate,
                                   'time': time,
                                   'participantType': participantType,
                                   'status': 'approved',
@@ -1463,7 +2168,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                             },
                       icon: const Icon(Icons.add_rounded),
                       label: Text(
-                          isSubmitting ? 'Ekleniyor...' : 'Görüşmeye Ekle',
+                          isSubmitting ? 'Ekleniyor...' : 'Son Kontrole Geç',
                           style:
                               const TextStyle(fontWeight: FontWeight.w800)))),
             ]),
@@ -2986,6 +3691,9 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                       .where((d) => !_guidanceTerminalStatuses.contains(
                           _guidanceStatus(d.data()['status'] as String?)))
                       .length;
+                  final hasOngoingGuidanceAppointment = docs.any((doc) =>
+                      _guidanceStatus(doc.data()['status'] as String?) ==
+                      'in_progress');
                   final today = docs.where((d) {
                     final x = d.data();
                     return _isGuidanceToday(x) &&
@@ -3081,6 +3789,15 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                         foregroundColor: Colors.white,
                                         side: const BorderSide(
                                             color: Colors.white54)),
+                                    onPressed: addStudent,
+                                    icon: const Icon(
+                                        Icons.event_available_rounded),
+                                    label: const Text('Randevu Ver')),
+                                OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.white,
+                                        side: const BorderSide(
+                                            color: Colors.white54)),
                                     onPressed: addWeeklyTask,
                                     icon: const Icon(Icons.repeat_rounded),
                                     label: const Text('Haftalık Takip Ver')),
@@ -3118,6 +3835,35 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                       _dailyStatusChip('Tamamlanan', completedToday.length,
                           Colors.greenAccent),
                     ]),
+                    if (hasOngoingGuidanceAppointment) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.orangeAccent.withValues(alpha: .12),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: Colors.orangeAccent.withValues(alpha: .32),
+                          ),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.pause_circle_outline_rounded,
+                              color: Colors.orangeAccent,
+                            ),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Bir görüşme sürüyor. Yeni görüşme başlatmadan önce mevcut görüşmeyi tamamlayın.',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     Wrap(spacing: 7, runSpacing: 7, children: [
                       SizedBox(
@@ -3173,6 +3919,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                         final participant = guidanceParticipantLabel(x);
                         final informed = _isAppointmentRecipientInformed(x);
                         final guardianAppointment = _isGuardianAppointment(x);
+                        final startDisabled = hasOngoingGuidanceAppointment ||
+                            _startingGuidanceAppointmentIds.contains(doc.id);
                         return Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             decoration: BoxDecoration(
@@ -3272,7 +4020,10 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                               informed
                                                   ? (guardianAppointment
                                                       ? 'Veli bilgilendirildi'
-                                                      : 'Haberdar')
+                                                      : x['recipientInformedAt'] !=
+                                                              null
+                                                          ? 'Öğrenci rehberlikçi tarafından bilgilendirildi'
+                                                          : 'Öğrenci randevusunu kendi ekranında görüntüledi')
                                                   : (guardianAppointment
                                                       ? 'Veli bilgilendirilmeli'
                                                       : 'Öğrenci henüz randevuyu görüntülemedi.'),
@@ -3301,47 +4052,32 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                             runSpacing: 8,
                                             children: [
                                               if (s == 'pending')
-                                                FilledButton(
-                                                    onPressed: () =>
-                                                        changeStatus(doc.id, s,
-                                                            'approved'),
-                                                    child: const Text('Geldi')),
+                                                FilledButton.icon(
+                                                  onPressed:
+                                                      _approvingGuidanceAppointmentIds
+                                                              .contains(doc.id)
+                                                          ? null
+                                                          : () =>
+                                                              _approveGuidanceAppointment(
+                                                                doc.id,
+                                                              ),
+                                                  icon: const Icon(
+                                                    Icons.check_rounded,
+                                                  ),
+                                                  label: Text(
+                                                    _approvingGuidanceAppointmentIds
+                                                            .contains(doc.id)
+                                                        ? 'Onaylanıyor...'
+                                                        : 'Onayla',
+                                                  ),
+                                                ),
                                               if (s == 'approved')
                                                 FilledButton(
-                                                    onPressed: () async {
-                                                      final planned =
-                                                          '${x['dayLabel'] ?? ''}';
-                                                      if (planned != 'Bugün' &&
-                                                          !_isGuidanceToday(
-                                                              x)) {
-                                                        final ok = await showDialog<
-                                                                bool>(
-                                                            context: context,
-                                                            builder: (dctx) =>
-                                                                AlertDialog(
-                                                                    title: const Text(
-                                                                        'Planlanan günden önce başlat'),
-                                                                    content: Text(
-                                                                        'Bu görüşme $planned için planlandı. Yine de şimdi başlatmak istiyor musunuz?'),
-                                                                    actions: [
-                                                                      TextButton(
-                                                                          onPressed: () => Navigator.pop(
-                                                                              dctx,
-                                                                              false),
-                                                                          child:
-                                                                              const Text('Vazgeç')),
-                                                                      FilledButton(
-                                                                          onPressed: () => Navigator.pop(
-                                                                              dctx,
-                                                                              true),
-                                                                          child:
-                                                                              const Text('Evet, Başlat'))
-                                                                    ]));
-                                                        if (ok != true) return;
-                                                      }
-                                                      await changeStatus(doc.id,
-                                                          s, 'in_progress');
-                                                    },
+                                                    onPressed: startDisabled
+                                                        ? null
+                                                        : () =>
+                                                            _startGuidanceAppointment(
+                                                                doc.id, s, x),
                                                     child: const Text(
                                                         'Görüşmeyi Başlat')),
                                               if (s == 'in_progress')
@@ -3354,43 +4090,17 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                               OutlinedButton(
                                                   onPressed: s == 'in_progress'
                                                       ? null
-                                                      : () async {
-                                                          final ok = await showDialog<
-                                                                  bool>(
-                                                              context: context,
-                                                              builder: (dctx) =>
-                                                                  AlertDialog(
-                                                                      title: const Text(
-                                                                          'Randevuyu iptal et'),
-                                                                      content:
-                                                                          const Text(
-                                                                              'Bu randevu iptal edilecek. Devam edilsin mi?'),
-                                                                      actions: [
-                                                                        TextButton(
-                                                                            onPressed: () => Navigator.pop(dctx,
-                                                                                false),
-                                                                            child:
-                                                                                const Text('Vazgeç')),
-                                                                        FilledButton(
-                                                                            onPressed: () => Navigator.pop(dctx,
-                                                                                true),
-                                                                            child:
-                                                                                const Text('İptal Et'))
-                                                                      ]));
-                                                          if (ok == true) {
-                                                            await changeStatus(
-                                                                doc.id,
-                                                                s,
-                                                                'cancelled');
-                                                          }
-                                                        },
+                                                      : () =>
+                                                          _cancelGuidanceAppointment(
+                                                              doc.id, s),
                                                   child:
                                                       const Text('İptal Et')),
                                               OutlinedButton(
                                                   onPressed: s == 'in_progress'
                                                       ? null
-                                                      : () => changeStatus(
-                                                          doc.id, s, 'no_show'),
+                                                      : () =>
+                                                          _markGuidanceNoShow(
+                                                              doc.id, s),
                                                   child: const Text('Gelmedi'))
                                             ])
                                       ]

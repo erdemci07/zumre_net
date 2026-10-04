@@ -7,8 +7,10 @@ String guidanceStatusValue(Object? value) {
 
 String guidanceStatusLabel(String status) {
   switch (guidanceStatusValue(status)) {
+    case 'pending':
+      return 'Onay bekliyor';
     case 'approved':
-      return 'Geldi / Bekliyor';
+      return 'Onaylandı';
     case 'in_progress':
       return 'Görüşmede';
     case 'completed':

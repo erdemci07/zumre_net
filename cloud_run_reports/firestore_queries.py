@@ -572,3 +572,107 @@ def build_teacher_activity_summary(start_date: str, end_date: str, education_lev
         "date_range": date_range,
         "teachers": rows,
     }
+
+
+def build_guidance_activity_summary(start_date: str, end_date: str) -> dict:
+    """Summarize completed student and guardian meetings for every counselor."""
+    db = firestore.client()
+    date_range = parse_date_range(start_date, end_date)
+
+    counselors = {}
+    for doc in db.collection("users").where(
+        filter=FieldFilter("role", "==", "guidance")
+    ).stream():
+        data = doc.to_dict() or {}
+        counselors[doc.id] = {
+            "id": doc.id,
+            "name": _clean(
+                data.get("fullName") or data.get("name") or data.get("email"),
+                "Rehberlikçi",
+            ),
+            "student_meeting_count": 0,
+            "guardian_meeting_count": 0,
+        }
+
+    appointments = (
+        db.collection("guidanceAppointments")
+        .where(filter=FieldFilter("status", "==", "completed"))
+        .where(filter=FieldFilter("completedAt", ">=", date_range.start))
+        .where(filter=FieldFilter("completedAt", "<", date_range.end))
+        .stream()
+    )
+    for doc in appointments:
+        data = doc.to_dict() or {}
+        counselor = counselors.get(_clean(data.get("counselorId")))
+        if counselor is None:
+            continue
+
+        participant_type = _clean(data.get("participantType")).lower()
+        source = _clean(data.get("source")).lower()
+        if participant_type == "guardian" or source.startswith("parent_public"):
+            counselor["guardian_meeting_count"] += 1
+        else:
+            counselor["student_meeting_count"] += 1
+
+    rows = sorted(counselors.values(), key=lambda item: item["name"].casefold())
+    for row in rows:
+        row["total_meeting_count"] = (
+            row["student_meeting_count"] + row["guardian_meeting_count"]
+        )
+
+    return {
+        "date_range": date_range,
+        "counselors": rows,
+    }
+
+
+def build_guidance_activity_summary(start_date: str, end_date: str) -> dict:
+    """Summarize completed student and guardian meetings for every counselor."""
+    db = firestore.client()
+    date_range = parse_date_range(start_date, end_date)
+
+    counselors = {}
+    for doc in db.collection("users").where(
+        filter=FieldFilter("role", "==", "guidance")
+    ).stream():
+        data = doc.to_dict() or {}
+        counselors[doc.id] = {
+            "id": doc.id,
+            "name": _clean(
+                data.get("fullName") or data.get("name") or data.get("email"),
+                "Rehberlikçi",
+            ),
+            "student_meeting_count": 0,
+            "guardian_meeting_count": 0,
+        }
+
+    appointments = (
+        db.collection("guidanceAppointments")
+        .where(filter=FieldFilter("status", "==", "completed"))
+        .where(filter=FieldFilter("completedAt", ">=", date_range.start))
+        .where(filter=FieldFilter("completedAt", "<", date_range.end))
+        .stream()
+    )
+    for doc in appointments:
+        data = doc.to_dict() or {}
+        counselor = counselors.get(_clean(data.get("counselorId")))
+        if counselor is None:
+            continue
+
+        participant_type = _clean(data.get("participantType")).lower()
+        source = _clean(data.get("source")).lower()
+        if participant_type == "guardian" or source.startswith("parent_public"):
+            counselor["guardian_meeting_count"] += 1
+        else:
+            counselor["student_meeting_count"] += 1
+
+    rows = sorted(counselors.values(), key=lambda item: item["name"].casefold())
+    for row in rows:
+        row["total_meeting_count"] = (
+            row["student_meeting_count"] + row["guardian_meeting_count"]
+        )
+
+    return {
+        "date_range": date_range,
+        "counselors": rows,
+    }

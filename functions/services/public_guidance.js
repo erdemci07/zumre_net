@@ -91,6 +91,19 @@ function slotOptions(availability, dateKey, now = new Date(), appointments = [])
   }
   return options;
 }
+function availableDateOptions(availability, now = new Date(), appointments = [], count = 7) {
+  const normalized = normalizeAvailability(availability);
+  const firstDate = new Date(`${istanbulDateKey(now)}T12:00:00.000Z`);
+  const results = [];
+  for (let offset = 0; offset < 366 && results.length < count; offset += 1) {
+    const date = new Date(firstDate);
+    date.setUTCDate(firstDate.getUTCDate() + offset);
+    const dateKey = date.toISOString().slice(0, 10);
+    const slots = slotOptions(normalized, dateKey, now, appointments);
+    if (slots.length > 0) results.push({ date: dateKey, slots });
+  }
+  return results;
+}
 function istanbulDateKey(now = new Date()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul" }).format(now);
 }
@@ -130,6 +143,6 @@ function genericVerificationError(HttpsError) { return new HttpsError("failed-pr
 
 module.exports = {
   ACTIVE_STATUSES, OTP_COOLDOWN_MS, OTP_DAILY_LIMIT, OTP_MAX_ATTEMPTS, OTP_TTL_MS, PUBLIC_SESSION_TTL_MS,
-  availabilityValidationError, clean, dateWeekday, genericVerificationError, hashOtp, istanbulDateKey, maskPhone, normalizeAvailability, normalizePhone,
+  availabilityValidationError, availableDateOptions, clean, dateWeekday, genericVerificationError, hashOtp, istanbulDateKey, maskPhone, normalizeAvailability, normalizePhone,
   normalizeUsername, opaqueToken, otpAttemptDecision, otpCode, publicUpcomingAppointments, slotOptions, timeToMinutes, validDateKey,
 };

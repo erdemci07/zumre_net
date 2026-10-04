@@ -145,7 +145,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return grade != null && grade >= 5 && grade <= 8;
   }
 
-  Map<String, dynamic>? _guidanceAppointment;
+  List<Map<String, dynamic>> _guidanceAppointments = const [];
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
       _guidanceAppointmentSubscription;
   bool _hasUpcomingZumreAppointments = false;
@@ -901,7 +901,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         nextZumreText = 'Sonraki zümre: ${futureSlots.first['start']}';
       } else {
         nextZumreText = isWeekend
-            ? 'Bugünkü zümre tamamlandı'
+            ? 'Bugünkü zümre bitti'
             : 'Yarın zümre ${slots.first['start']}';
       }
     }
@@ -2252,24 +2252,29 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       });
       if (!mounted) return;
       setState(() {
-        if (active.isEmpty) {
-          _guidanceAppointment = null;
-        } else {
-          final d = active.first.data();
-          _guidanceAppointment = {
-            'id': active.first.id,
-            'counselor': '${d['counselorName'] ?? 'Rehberlik Servisi'}',
-            'reason': '${d['reason'] ?? ''}',
-            'day': '${d['dayLabel'] ?? ''}',
-            'time': '${d['time'] ?? ''}',
-            'status': _guidanceStatusLabel('${d['status'] ?? 'pending'}'),
-            'participantType':
-                '${d['participantType'] ?? ('${d['source'] ?? ''}'.startsWith('parent_public') ? 'guardian' : 'student')}',
-            'studentViewed': d['studentViewedAt'] != null,
-          };
-        }
+        _guidanceAppointments = active
+            .map((doc) => _guidanceAppointmentFromData(doc.id, doc.data()))
+            .toList();
       });
     });
+  }
+
+  Map<String, dynamic> _guidanceAppointmentFromData(
+    String id,
+    Map<String, dynamic> data,
+  ) {
+    return {
+      'id': id,
+      'counselor': '${data['counselorName'] ?? 'Rehberlik Servisi'}',
+      'reason': '${data['reason'] ?? ''}',
+      'day': '${data['dayLabel'] ?? ''}',
+      'time': '${data['time'] ?? ''}',
+      'guidanceNote': '${data['guidanceNote'] ?? ''}',
+      'status': _guidanceStatusLabel('${data['status'] ?? 'pending'}'),
+      'participantType':
+          '${data['participantType'] ?? ('${data['source'] ?? ''}'.startsWith('parent_public') ? 'guardian' : 'student')}',
+      'studentViewed': data['studentViewedAt'] != null,
+    };
   }
 
   String _guidanceStatusLabel(String status) {
@@ -2539,17 +2544,24 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                 });
                                 if (!mounted) return;
                                 setState(() {
-                                  _guidanceAppointment = {
-                                    'id': appointment.id,
-                                    'counselor': counselorName,
-                                    'reason': reason!,
-                                    'day': _formatGuidancePlanningDay(
-                                        selectedDateKey!),
-                                    'time': 'Gün içinde',
-                                    'status': 'Onay Bekliyor',
-                                    'participantType': 'student',
-                                    'studentViewed': false,
-                                  };
+                                  _guidanceAppointments = [
+                                    ..._guidanceAppointments.where(
+                                      (item) => item['id'] != appointment.id,
+                                    ),
+                                    _guidanceAppointmentFromData(
+                                      appointment.id,
+                                      {
+                                        'counselorName': counselorName,
+                                        'reason': reason!,
+                                        'dayLabel': _formatGuidancePlanningDay(
+                                          selectedDateKey!,
+                                        ),
+                                        'time': 'Gün içinde',
+                                        'status': 'pending',
+                                        'participantType': 'student',
+                                      },
+                                    ),
+                                  ];
                                 });
                                 if (!ctx.mounted) return;
                                 Navigator.pop(ctx);
@@ -4014,7 +4026,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxHeight < 900;
-        final hasExtraCards = _guidanceAppointment != null ||
+        final hasExtraCards = _guidanceAppointments.isNotEmpty ||
             _hasUpcomingZumreAppointments ||
             _hasActiveGuidanceTask ||
             _remainingCooldownSeconds > 0 ||
@@ -4192,10 +4204,129 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
-  Future<void> _showGuidanceAppointmentDetails() async {
-    final appointment = _guidanceAppointment;
-    if (appointment == null) return;
+  Future<void> _showGuidanceAppointments() async {
+    if (_guidanceAppointments.isEmpty) {
+      await _showGuidanceAppointmentDemo();
+      return;
+    }
+    if (_guidanceAppointments.length == 1) {
+      await _showGuidanceAppointmentDetails(_guidanceAppointments.first);
+      return;
+    }
 
+    final selected = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 460, maxHeight: 560),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF081D3A),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Rehberlik randevularınız',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 21,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Görüntülemek istediğiniz randevuyu seçin.',
+                style: TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 14),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _guidanceAppointments.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final appointment = _guidanceAppointments[index];
+                    final isGuardian =
+                        appointment['participantType'] == 'guardian';
+                    return Material(
+                      color: Colors.white.withValues(alpha: .07),
+                      borderRadius: BorderRadius.circular(14),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => Navigator.pop(dialogContext, appointment),
+                        child: Padding(
+                          padding: const EdgeInsets.all(13),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isGuardian
+                                    ? Icons.family_restroom_rounded
+                                    : Icons.school_rounded,
+                                color: Colors.cyanAccent,
+                              ),
+                              const SizedBox(width: 11),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      isGuardian
+                                          ? 'Veli görüşmesi'
+                                          : 'Öğrenci randevusu',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${appointment['day'] ?? ''} • ${appointment['time'] ?? ''} • ${appointment['status'] ?? ''}',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                color: Colors.white54,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Kapat'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected != null && mounted) {
+      await _showGuidanceAppointmentDetails(selected);
+    }
+  }
+
+  Future<void> _showGuidanceAppointmentDetails(
+    Map<String, dynamic> appointment,
+  ) async {
     final appointmentId = appointment['id']?.toString();
     if (appointment['studentViewed'] != true && appointmentId != null) {
       try {
@@ -4237,22 +4368,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 'Görüşme konusu', appointment['reason']!),
             _guidanceDetailRow(
                 Icons.calendar_today_rounded, 'Tarih', appointment['day']!),
-            if (guardianAppointment)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 12),
-                child: Text(
-                  'Veliniz için rehberlik görüşmesi planlandı.',
-                  style: TextStyle(color: Colors.white70),
-                ),
-              )
-            else
-              const Padding(
-                padding: EdgeInsets.only(bottom: 12),
-                child: Text(
-                  'Gösterilen gün içinde rehberlik birimine geliniz.',
-                  style: TextStyle(color: Colors.white70),
-                ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                guardianAppointment
+                    ? 'Veliniz için rehberlik görüşmesi planlandı.'
+                    : appointment['status'] == 'Onay Bekliyor'
+                        ? 'Talebiniz rehberlikçi onayı bekliyor. Onaylandığında varsa notu burada görebilirsiniz.'
+                        : 'Onaylanan görüşme için belirtilen günde rehberlik biriminde olun.',
+                style: const TextStyle(color: Colors.white70),
               ),
+            ),
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
@@ -4286,6 +4412,38 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                         fontWeight: FontWeight.bold)),
               ]),
             ),
+            if ((appointment['guidanceNote'] as String? ?? '')
+                .trim()
+                .isNotEmpty)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.cyanAccent.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: Colors.cyanAccent.withValues(alpha: .28),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Rehberlikçinizden not',
+                      style: TextStyle(
+                        color: Colors.cyanAccent,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      appointment['guidanceNote'] as String,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
         actions: [
@@ -4321,7 +4479,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     });
                   }
                   if (!mounted) return;
-                  setState(() => _guidanceAppointment = null);
+                  setState(() {
+                    _guidanceAppointments = _guidanceAppointments
+                        .where((item) => item['id'] != id)
+                        .toList();
+                  });
                   if (ctx.mounted) Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -4434,10 +4596,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   Widget _buildGuidanceAppointmentDemoCard({bool compact = false}) {
+    final appointments = _guidanceAppointments;
+    final hasAppointments = appointments.isNotEmpty;
+    final hasMultipleAppointments = appointments.length > 1;
+    final firstAppointment = hasAppointments ? appointments.first : null;
     return InkWell(
-      onTap: _guidanceAppointment == null
-          ? _showGuidanceAppointmentDemo
-          : _showGuidanceAppointmentDetails,
+      onTap: hasAppointments
+          ? _showGuidanceAppointments
+          : _showGuidanceAppointmentDemo,
       borderRadius: BorderRadius.circular(18),
       child: Container(
         width: double.infinity,
@@ -4467,18 +4633,24 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                      _guidanceAppointment?['participantType'] == 'guardian'
-                          ? 'Veli Görüşmesi'
-                          : 'Rehberlik Randevusu',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: compact ? 12.5 : 14.5)),
+                    hasMultipleAppointments
+                        ? '${appointments.length} rehberlik randevusu'
+                        : firstAppointment?['participantType'] == 'guardian'
+                            ? 'Veli Görüşmesi'
+                            : 'Rehberlik Randevusu',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: compact ? 12.5 : 14.5,
+                    ),
+                  ),
                   SizedBox(height: compact ? 0 : 2),
                   Text(
-                    _guidanceAppointment == null
+                    !hasAppointments
                         ? 'Rehberlikçini seç, uygun tarihi planla.'
-                        : '${_guidanceAppointment!['day']} • ${_guidanceAppointment!['status']}',
+                        : hasMultipleAppointments
+                            ? 'Veli ve öğrenci randevuları • Görüntülemek için dokun'
+                            : '${firstAppointment?['day']} • ${firstAppointment?['status']}',
                     maxLines: compact ? 1 : 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -4488,12 +4660,10 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               ),
             ),
             Icon(
-              _guidanceAppointment == null
+              !hasAppointments
                   ? Icons.add_circle_outline_rounded
                   : Icons.chevron_right_rounded,
-              color: _guidanceAppointment == null
-                  ? Colors.white38
-                  : Colors.cyanAccent,
+              color: !hasAppointments ? Colors.white38 : Colors.cyanAccent,
               size: 18,
             ),
           ],

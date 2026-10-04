@@ -840,6 +840,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         ),
       );
     }
+    var isSaving = false;
 
     await showDialog(
       context: context,
@@ -1137,60 +1138,78 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         children: [
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: () => Navigator.pop(ctx),
+                              onPressed:
+                                  isSaving ? null : () => Navigator.pop(ctx),
                               child: const Text('Vazgeç'),
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: ElevatedButton(
-                              onPressed: () async {
-                                final nextStatus =
-                                    _resolveEffectiveTeacherStatus(
-                                  weeklyAvailability: temp,
-                                  currentStatus: _teacherStatus,
-                                  manualAbsentDate: _manualAbsentDate,
-                                  breakUntil: _breakUntil,
-                                );
-                                try {
-                                  await _functions
-                                      .httpsCallable('saveTeacherAvailability')
-                                      .call({'weeklyAvailability': temp});
-                                } on FirebaseFunctionsException catch (error) {
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(this.context)
-                                      .showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        error.message ??
-                                            'Kurum saatleri kaydedilemedi.',
+                              onPressed: isSaving
+                                  ? null
+                                  : () async {
+                                      setDialogState(() => isSaving = true);
+                                      final nextStatus =
+                                          _resolveEffectiveTeacherStatus(
+                                        weeklyAvailability: temp,
+                                        currentStatus: _teacherStatus,
+                                        manualAbsentDate: _manualAbsentDate,
+                                        breakUntil: _breakUntil,
+                                      );
+                                      try {
+                                        await _functions
+                                            .httpsCallable(
+                                                'saveTeacherAvailability')
+                                            .call({'weeklyAvailability': temp});
+                                      } on FirebaseFunctionsException catch (error) {
+                                        if (ctx.mounted) {
+                                          setDialogState(
+                                              () => isSaving = false);
+                                        }
+                                        if (!mounted) return;
+                                        ScaffoldMessenger.of(this.context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              error.message ??
+                                                  'Kurum saatleri kaydedilemedi.',
+                                            ),
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      if (!mounted) return;
+
+                                      setState(() {
+                                        _weeklyAvailability = temp;
+                                        if (nextStatus != 'studyGuard') {
+                                          _teacherStatus = nextStatus;
+                                        }
+                                      });
+                                      await _checkScheduleAvailability();
+                                      if (!mounted) return;
+
+                                      if (ctx.mounted) Navigator.pop(ctx);
+
+                                      ScaffoldMessenger.of(this.context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                              'Kurum saatleriniz güncellendi'),
+                                        ),
+                                      );
+                                    },
+                              child: isSaving
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.3,
                                       ),
-                                    ),
-                                  );
-                                  return;
-                                }
-
-                                if (!mounted) return;
-
-                                setState(() {
-                                  _weeklyAvailability = temp;
-                                  if (nextStatus != 'studyGuard') {
-                                    _teacherStatus = nextStatus;
-                                  }
-                                });
-                                await _checkScheduleAvailability();
-                                if (!mounted) return;
-
-                                if (ctx.mounted) Navigator.pop(ctx);
-
-                                ScaffoldMessenger.of(this.context).showSnackBar(
-                                  const SnackBar(
-                                    content:
-                                        Text('Kurum saatleriniz güncellendi'),
-                                  ),
-                                );
-                              },
-                              child: const Text('Kaydet'),
+                                    )
+                                  : const Text('Kaydet'),
                             ),
                           ),
                         ],

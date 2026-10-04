@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from unittest.mock import Mock
 from zoneinfo import ZoneInfo
 
 from models import (
@@ -13,7 +14,8 @@ from models import (
     StudySession,
 )
 from report_metrics import class_activity_summary, class_totals, institution_metrics
-from firestore_queries import fetch_class_students
+import firestore_queries
+from firestore_queries import build_guidance_activity_summary, fetch_class_students
 
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
@@ -121,6 +123,69 @@ def test_class_students_can_be_limited_to_guidance_assignments():
     )
 
     assert [student.student_id for student in students] == ["assigned"]
+
+
+def test_guidance_activity_summary_counts_student_and_guardian_meetings_and_keeps_zeroes(
+    monkeypatch,
+):
+    def document(document_id, data):
+        item = Mock()
+        item.id = document_id
+        item.to_dict.return_value = data
+        return item
+
+    users_query = Mock()
+    users_query.where.return_value = users_query
+    users_query.stream.return_value = [
+        document("counselor-1", {"fullName": "Ayşe Yılmaz", "role": "guidance"}),
+        document("counselor-2", {"name": "Mehmet Kaya", "role": "guidance"}),
+    ]
+    appointments_query = Mock()
+    appointments_query.where.return_value = appointments_query
+    appointments_query.stream.return_value = [
+        document(
+            "student-meeting",
+            {
+                "counselorId": "counselor-1",
+                "participantType": "student",
+                "status": "completed",
+            },
+        ),
+        document(
+            "guardian-meeting",
+            {
+                "counselorId": "counselor-1",
+                "source": "parent_public_booking",
+                "status": "completed",
+            },
+        ),
+    ]
+    database = Mock()
+    database.collection.side_effect = lambda name: {
+        "users": Mock(where=Mock(return_value=users_query)),
+        "guidanceAppointments": Mock(where=Mock(return_value=appointments_query)),
+    }[name]
+    monkeypatch.setattr(firestore_queries.firestore, "client", lambda: database)
+
+    result = build_guidance_activity_summary("2026-09-01", "2026-09-30")
+
+    assert result["counselors"] == [
+        {
+            "id": "counselor-1",
+            "name": "Ayşe Yılmaz",
+            "student_meeting_count": 1,
+            "guardian_meeting_count": 1,
+            "total_meeting_count": 2,
+        },
+        {
+            "id": "counselor-2",
+            "name": "Mehmet Kaya",
+            "student_meeting_count": 0,
+            "guardian_meeting_count": 0,
+            "total_meeting_count": 0,
+        },
+    ]
+    assert appointments_query.where.call_count == 3
 
 
 def test_class_activity_summary_keeps_recorded_teacher_and_omits_legacy_teacher():

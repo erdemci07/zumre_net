@@ -377,10 +377,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextButton.icon(
                           onPressed: () =>
                               Navigator.of(context).pushNamed('/veli'),
-                          icon: const Icon(Icons.calendar_month_outlined,
+                          icon: const Icon(Icons.event_available_rounded,
                               color: Colors.white70),
-                          label: const Text(
-                              'Veli misiniz? Rehberlik Görüşmesi İçin Randevu Alın',
+                          label: const Text('Veli Randevusu Alın veya Görüntüleyin',
                               textAlign: TextAlign.center),
                           style: TextButton.styleFrom(
                               foregroundColor: Colors.white70),

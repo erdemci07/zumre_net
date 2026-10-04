@@ -6663,7 +6663,7 @@ async function loadPublicGuidanceSession(token) {
 async function counselorAppointments(counselorId) {
   const snapshot = await db.collection("guidanceAppointments")
     .where("counselorId", "==", counselorId).get();
-  return snapshot.docs.map((doc) => doc.data() || {});
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
 }
 
 async function availablePublicGuidanceSlots(sessionData, dateKey) {
@@ -6672,6 +6672,24 @@ async function availablePublicGuidanceSlots(sessionData, dateKey) {
   if (!counselorDoc.exists || counselorDoc.data()?.role !== "guidance") return [];
   const availability = publicGuidance.normalizeAvailability(counselorDoc.data()?.guidanceAvailability);
   return publicGuidance.slotOptions(availability, dateKey, new Date(), await counselorAppointments(sessionData.counselorId));
+}
+
+async function availablePublicGuidanceDates(sessionData, appointmentId = "") {
+  const counselorDoc = await db.collection("users").doc(sessionData.counselorId).get();
+  if (!counselorDoc.exists || counselorDoc.data()?.role !== "guidance") return [];
+  const availability = publicGuidance.normalizeAvailability(counselorDoc.data()?.guidanceAvailability);
+  let appointments = await counselorAppointments(sessionData.counselorId);
+  if (appointmentId) {
+    const appointment = appointments.find((item) => item.id === appointmentId);
+    if (!appointment ||
+        appointment.studentId !== sessionData.studentId ||
+        !(appointment.participantType === "guardian" || cleanText(appointment.source).startsWith("parent_public")) ||
+        !["pending", "approved"].includes(appointment.status || "pending")) {
+      throw publicGuidanceError();
+    }
+    appointments = appointments.filter((item) => item.id !== appointmentId);
+  }
+  return publicGuidance.availableDateOptions(availability, new Date(), appointments);
 }
 
 function parentPhoneMatchFallbackEnabled(env = process.env) {
@@ -6851,6 +6869,86 @@ exports.guidanceAssignStudents = onCall({ region: REGION }, async (request) => {
     };
   });
 });
+
+exports.guidanceStartAppointment = onCall(
+  { region: REGION, invoker: "public" },
+  async (request) => {
+  const counselor = await assertRoleCaller(request, "guidance");
+  const appointmentId = cleanText(request.data?.appointmentId);
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(appointmentId)) {
+    throw new HttpsError("invalid-argument", "Randevu bilgisi geçersiz.");
+  }
+
+  const appointmentRef = db.collection("guidanceAppointments").doc(appointmentId);
+  const studentRefForAppointment = db.collection("users");
+  const counselorRef = db.collection("users").doc(counselor.uid);
+  const startLockRef = db.collection("guidanceAppointmentLocks").doc(counselor.uid);
+  const counselorAppointmentsQuery = db.collection("guidanceAppointments")
+    .where("counselorId", "==", counselor.uid);
+
+  return db.runTransaction(async (transaction) => {
+    const [appointmentDoc, counselorDoc, startLockDoc] = await Promise.all([
+      transaction.get(appointmentRef),
+      transaction.get(counselorRef),
+      transaction.get(startLockRef),
+    ]);
+    if (!appointmentDoc.exists) {
+      throw new HttpsError("not-found", "Randevu bulunamadı.");
+    }
+    if (!counselorDoc.exists || counselorDoc.data()?.role !== "guidance") {
+      throw new HttpsError("permission-denied", "Bu işlem için yetkiniz yok.");
+    }
+
+    const appointment = appointmentDoc.data() || {};
+    if (cleanText(appointment.counselorId) !== counselor.uid) {
+      throw new HttpsError("permission-denied", "Bu randevu size ait değil.");
+    }
+    if (appointment.status === "in_progress") {
+      return { ok: true, alreadyStarted: true };
+    }
+    if (appointment.status !== "approved") {
+      throw new HttpsError(
+        "failed-precondition",
+        "Randevu, rehberlikçi tarafından onaylandıktan sonra başlatılabilir."
+      );
+    }
+
+    const studentRef = studentRefForAppointment.doc(cleanText(appointment.studentId));
+    const [studentDoc, counselorAppointments] = await Promise.all([
+      transaction.get(studentRef),
+      transaction.get(counselorAppointmentsQuery),
+    ]);
+    if (!studentDoc.exists ||
+        studentDoc.data()?.role !== "student" ||
+        cleanText(studentDoc.data()?.guidanceCounselorId) !== counselor.uid) {
+      throw new HttpsError("failed-precondition", "Öğrenci artık size atanmış değil.");
+    }
+
+    const anotherAppointmentIsActive = counselorAppointments.docs.some((doc) =>
+      doc.id !== appointmentId && doc.data()?.status === "in_progress"
+    );
+    if (anotherAppointmentIsActive) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Başka bir görüşme devam ediyor. Yeni görüşmeden önce onu tamamlayın."
+      );
+    }
+
+    const timestamp = fieldValue.serverTimestamp();
+    const lockVersion = Number(startLockDoc.data()?.version || 0) + 1;
+    transaction.set(startLockRef, {
+      version: lockVersion,
+      updatedAt: timestamp,
+    });
+    transaction.update(appointmentRef, {
+      status: "in_progress",
+      startedAt: timestamp,
+      updatedAt: timestamp,
+    });
+    return { ok: true, alreadyStarted: false };
+  });
+  }
+);
 
 exports.guidanceCreateWeeklyTask = onCall({ region: REGION }, async (request) => {
   const counselor = await assertRoleCaller(request, "guidance");
@@ -7054,6 +7152,16 @@ exports.publicGuidanceAvailableSlots = onCall({ region: REGION }, async (request
   const dateKey = cleanText(request.data?.date);
   const slots = await availablePublicGuidanceSlots(session.data, dateKey);
   return { date: dateKey, slots };
+});
+
+exports.publicGuidanceAvailableDates = onCall({ region: REGION }, async (request) => {
+  const session = await loadPublicGuidanceSession(request.data?.sessionToken);
+  const appointmentId = cleanText(request.data?.appointmentId);
+  if (appointmentId && !/^[A-Za-z0-9_-]{1,160}$/.test(appointmentId)) {
+    throw publicGuidanceError();
+  }
+  const dates = await availablePublicGuidanceDates(session.data, appointmentId);
+  return { dates };
 });
 
 exports.publicGuidanceExistingAppointments = onCall({ region: REGION }, async (request) => {

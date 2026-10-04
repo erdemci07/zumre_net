@@ -7,7 +7,7 @@ from reportlab.platypus import Spacer
 
 from models import ClassReportData, DateRange, InstitutionSummaryData, StudentReportRow
 from pdf.pagination import student_chunks
-from reports import class_activity, class_activity_summary, class_tracking, institution_summary, teacher_activity_summary
+from reports import class_activity, class_activity_summary, class_tracking, guidance_activity_summary, institution_summary, teacher_activity_summary
 from reports.class_activity_summary import _student_summary_rows
 from pdf.styles import report_styles
 
@@ -52,6 +52,22 @@ def test_teacher_activity_summary_contains_no_study_session_column(monkeypatch):
 
     assert teacher_activity_summary.render(data).startswith(b"%PDF")
     assert headers == ["Öğretmen", "Branş", "Zümrede Çözülen Soru"]
+
+
+def test_guidance_activity_summary_renders_student_and_guardian_counts():
+    data = {
+        "date_range": _range(),
+        "counselors": [
+            {
+                "name": "Rehber Öğretmen",
+                "student_meeting_count": 2,
+                "guardian_meeting_count": 1,
+                "total_meeting_count": 3,
+            }
+        ],
+    }
+
+    assert guidance_activity_summary.render(data).startswith(b"%PDF")
 
 
 def test_student_chunks_adds_continuation_title_for_long_sections():

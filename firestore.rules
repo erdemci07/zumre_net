@@ -121,6 +121,8 @@ service cloud.firestore {
         && isGuidanceAppointmentText("reason", 256)
         && isGuidanceAppointmentText("dayLabel", 64)
         && isGuidanceAppointmentText("time", 16)
+        && (!request.resource.data.keys().hasAny(["guidanceNote"])
+          || isGuidanceAppointmentText("guidanceNote", 300))
         && (!request.resource.data.keys().hasAny(["appointmentDate"])
           || (request.resource.data.appointmentDate is string
             && request.resource.data.appointmentDate.size() == 10))
@@ -220,7 +222,7 @@ service cloud.firestore {
         && ((nextStatus == "approved"
             && request.resource.data.approvedAt == request.time
             && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(["status", "updatedAt", "approvedAt"]))
+              .hasOnly(["status", "updatedAt", "approvedAt", "guidanceNote"]))
           || (nextStatus == "in_progress"
             && request.resource.data.startedAt == request.time
             && request.resource.data.diff(resource.data).affectedKeys()
