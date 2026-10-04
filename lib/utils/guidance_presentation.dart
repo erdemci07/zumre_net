@@ -42,10 +42,13 @@ String guidanceGuardianLabel(Map<String, dynamic>? student) {
 }
 
 String guidanceParticipantLabel(Map<String, dynamic> appointment) {
-  final raw = (appointment['participantType'] ?? appointment['participant'])
-      ?.toString()
-      .trim()
-      .toLowerCase();
+  final source = appointment['source']?.toString().trim() ?? '';
+  final fallback = source.startsWith('parent_public') ? 'guardian' : '';
+  final raw =
+      (appointment['participantType'] ?? appointment['participant'] ?? fallback)
+          ?.toString()
+          .trim()
+          .toLowerCase();
   switch (raw) {
     case 'student':
     case 'öğrenci':

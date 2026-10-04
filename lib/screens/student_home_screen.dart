@@ -145,7 +145,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     return grade != null && grade >= 5 && grade <= 8;
   }
 
-  Map<String, String>? _guidanceAppointment;
+  Map<String, dynamic>? _guidanceAppointment;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
       _guidanceAppointmentSubscription;
   bool _hasUpcomingZumreAppointments = false;
@@ -1722,32 +1722,32 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Widget _buildSubjectGrid({required bool compact}) {
     return LayoutBuilder(
       builder: (context, constraints) {
-      final crossAxisCount = compact && constraints.maxWidth < 600
-        ? _visibleSubjectOptions.length > 6
-          ? 4
-          : 3
-        : 2;
-      final dense = crossAxisCount == 4;
-      const crossAxisSpacing = 8.0;
-      const mainAxisSpacing = 8.0;
-      final rowCount =
-        (_visibleSubjectOptions.length / crossAxisCount).ceil();
-      final itemWidth = (constraints.maxWidth -
-          crossAxisSpacing * (crossAxisCount - 1)) /
-        crossAxisCount;
-      final availableItemHeight = constraints.maxHeight.isFinite
-        ? (constraints.maxHeight - mainAxisSpacing * (rowCount - 1)) /
-          rowCount
-        : itemWidth / 2.7;
-      final itemHeight = availableItemHeight.clamp(44.0, 140.0);
+        final crossAxisCount = compact && constraints.maxWidth < 600
+            ? _visibleSubjectOptions.length > 6
+                ? 4
+                : 3
+            : 2;
+        final dense = crossAxisCount == 4;
+        const crossAxisSpacing = 8.0;
+        const mainAxisSpacing = 8.0;
+        final rowCount =
+            (_visibleSubjectOptions.length / crossAxisCount).ceil();
+        final itemWidth =
+            (constraints.maxWidth - crossAxisSpacing * (crossAxisCount - 1)) /
+                crossAxisCount;
+        final availableItemHeight = constraints.maxHeight.isFinite
+            ? (constraints.maxHeight - mainAxisSpacing * (rowCount - 1)) /
+                rowCount
+            : itemWidth / 2.7;
+        final itemHeight = availableItemHeight.clamp(44.0, 140.0);
         return GridView.count(
-        shrinkWrap: false,
+          shrinkWrap: false,
           padding: EdgeInsets.zero,
           physics: const NeverScrollableScrollPhysics(),
           crossAxisCount: crossAxisCount,
-        crossAxisSpacing: crossAxisSpacing,
-        mainAxisSpacing: mainAxisSpacing,
-        childAspectRatio: itemWidth / itemHeight,
+          crossAxisSpacing: crossAxisSpacing,
+          mainAxisSpacing: mainAxisSpacing,
+          childAspectRatio: itemWidth / itemHeight,
           children: _visibleSubjectOptions
               .map((subject) => _subjectCard(
                     subject.name,
@@ -2263,6 +2263,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             'day': '${d['dayLabel'] ?? ''}',
             'time': '${d['time'] ?? ''}',
             'status': _guidanceStatusLabel('${d['status'] ?? 'pending'}'),
+            'participantType':
+                '${d['participantType'] ?? ('${d['source'] ?? ''}'.startsWith('parent_public') ? 'guardian' : 'student')}',
+            'studentViewed': d['studentViewedAt'] != null,
           };
         }
       });
@@ -2529,6 +2532,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                       selectedDateKey!),
                                   'appointmentDate': selectedDateKey,
                                   'time': 'Gün içinde',
+                                  'participantType': 'student',
                                   'status': 'pending',
                                   'createdAt': FieldValue.serverTimestamp(),
                                   'updatedAt': FieldValue.serverTimestamp(),
@@ -2543,6 +2547,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                         selectedDateKey!),
                                     'time': 'Gün içinde',
                                     'status': 'Onay Bekliyor',
+                                    'participantType': 'student',
+                                    'studentViewed': false,
                                   };
                                 });
                                 if (!ctx.mounted) return;
@@ -3302,8 +3308,17 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           children: [
             Icon(icon,
                 color: selected ? Colors.white : color,
-                size: dense ? 18 : compact ? 21 : 26),
-            SizedBox(height: dense ? 1 : compact ? 2 : 5),
+                size: dense
+                    ? 18
+                    : compact
+                        ? 21
+                        : 26),
+            SizedBox(
+                height: dense
+                    ? 1
+                    : compact
+                        ? 2
+                        : 5),
             Text(
               title,
               maxLines: dense ? 2 : 1,
@@ -3312,7 +3327,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: dense ? 9 : compact ? 12 : 13,
+                fontSize: dense
+                    ? 9
+                    : compact
+                        ? 12
+                        : 13,
               ),
             ),
           ],
@@ -4177,17 +4196,36 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     final appointment = _guidanceAppointment;
     if (appointment == null) return;
 
+    final appointmentId = appointment['id']?.toString();
+    if (appointment['studentViewed'] != true && appointmentId != null) {
+      try {
+        await _firestore
+            .collection('guidanceAppointments')
+            .doc(appointmentId)
+            .update({
+          'studentViewedAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        appointment['studentViewed'] = true;
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    final guardianAppointment = appointment['participantType'] == 'guardian';
+
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF081D3A),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Row(children: [
-          Icon(Icons.event_available_rounded, color: Colors.cyanAccent),
-          SizedBox(width: 10),
+        title: Row(children: [
+          const Icon(Icons.event_available_rounded, color: Colors.cyanAccent),
+          const SizedBox(width: 10),
           Expanded(
-              child: Text('Rehberlik Randevusu',
-                  style: TextStyle(color: Colors.white))),
+              child: Text(
+                  guardianAppointment
+                      ? 'Veli Görüşmesi'
+                      : 'Rehberlik Randevunuz',
+                  style: const TextStyle(color: Colors.white))),
         ]),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -4199,6 +4237,22 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                 'Görüşme konusu', appointment['reason']!),
             _guidanceDetailRow(
                 Icons.calendar_today_rounded, 'Tarih', appointment['day']!),
+            if (guardianAppointment)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Veliniz için rehberlik görüşmesi planlandı.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              )
+            else
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Gösterilen gün içinde rehberlik birimine geliniz.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
@@ -4406,18 +4460,21 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         child: Row(
           children: [
             Icon(Icons.forum_rounded,
-              color: Colors.cyanAccent, size: compact ? 18 : 23),
+                color: Colors.cyanAccent, size: compact ? 18 : 23),
             SizedBox(width: compact ? 8 : 11),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                    Text('Rehberlik Randevusu',
+                  Text(
+                      _guidanceAppointment?['participantType'] == 'guardian'
+                          ? 'Veli Görüşmesi'
+                          : 'Rehberlik Randevusu',
                       style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: compact ? 12.5 : 14.5)),
-                    SizedBox(height: compact ? 0 : 2),
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: compact ? 12.5 : 14.5)),
+                  SizedBox(height: compact ? 0 : 2),
                   Text(
                     _guidanceAppointment == null
                         ? 'Rehberlikçini seç, uygun tarihi planla.'
@@ -4425,8 +4482,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     maxLines: compact ? 1 : 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: Colors.white60,
-                      fontSize: compact ? 10 : 11.5),
+                        color: Colors.white60, fontSize: compact ? 10 : 11.5),
                   ),
                 ],
               ),

@@ -100,10 +100,12 @@ function publicUpcomingAppointments(appointments = [], now = new Date()) {
     .filter((item) => ACTIVE_STATUSES.has(item.status || "pending"))
     .filter((item) => validDateKey(clean(item.appointmentDate)) && clean(item.appointmentDate) >= today)
     .map((item) => ({
+      id: clean(item.id),
       date: clean(item.appointmentDate),
       time: clean(item.time),
       counselorName: clean(item.counselorName),
       status: clean(item.status || "pending"),
+      participantType: clean(item.participantType || "guardian"),
     }))
     .sort((left, right) => `${left.date} ${left.time}`.localeCompare(`${right.date} ${right.time}`));
 }

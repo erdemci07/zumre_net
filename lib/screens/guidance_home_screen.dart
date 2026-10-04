@@ -168,6 +168,52 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
         );
   }
 
+  bool _isGuardianAppointment(Map<String, dynamic> data) {
+    final participant = '${data['participantType'] ?? ''}'.toLowerCase();
+    return participant == 'guardian' ||
+        '${data['source'] ?? ''}'.startsWith('parent_public');
+  }
+
+  bool _isAppointmentRecipientInformed(Map<String, dynamic> data) {
+    if (data['recipientInformedAt'] != null) return true;
+    return !_isGuardianAppointment(data) && data['studentViewedAt'] != null;
+  }
+
+  Future<void> _markAppointmentInformed(
+    String appointmentId,
+    Map<String, dynamic> appointment,
+  ) async {
+    final guardianTarget = _isGuardianAppointment(appointment);
+    final options = <String, String>{
+      if (!guardianTarget) 'student_verbal': 'Öğrenciye sözlü bildirildi',
+      if (!guardianTarget) 'student_phone': 'Öğrenci telefonla bilgilendirildi',
+      'guardian_verbal': 'Veliye sözlü bildirildi',
+      'guardian_phone': 'Veli telefonla bilgilendirildi',
+    };
+    final method = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('Bilgilendirme yöntemi'),
+        children: options.entries
+            .map((entry) => SimpleDialogOption(
+                  onPressed: () => Navigator.pop(dialogContext, entry.key),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(entry.value),
+                  ),
+                ))
+            .toList(),
+      ),
+    );
+    if (method == null) return;
+    await db.collection('guidanceAppointments').doc(appointmentId).update({
+      'recipientInformedAt': FieldValue.serverTimestamp(),
+      'recipientInformedBy': auth.currentUser!.uid,
+      'recipientInformedMethod': method,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   List<_GuidanceClassOption> _classSummaryOptions(
     Map<String, Map<String, dynamic>> studentsById,
   ) {
@@ -297,8 +343,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                       onSelected: (_) => setDialogState(() {
                         preset = option.$2;
                         if (preset != 'custom') {
-                          selectedRange =
-                              _guidanceReportRangeForPreset(preset);
+                          selectedRange = _guidanceReportRangeForPreset(preset);
                         }
                       }),
                       selectedColor: const Color(0xFFFFB1C8),
@@ -309,9 +354,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                             : Colors.white24,
                       ),
                       labelStyle: TextStyle(
-                        color: isSelected
-                            ? const Color(0xFF4A1830)
-                            : Colors.white,
+                        color:
+                            isSelected ? const Color(0xFF4A1830) : Colors.white,
                         fontWeight: FontWeight.w700,
                       ),
                     );
@@ -359,8 +403,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                               label: const Text('Başlangıç'),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: const Color(0xFFFFB1C8),
-                                side: const BorderSide(
-                                    color: Color(0x66FFB1C8)),
+                                side:
+                                    const BorderSide(color: Color(0x66FFB1C8)),
                               ),
                             );
                             final endButton = OutlinedButton.icon(
@@ -373,8 +417,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                               label: const Text('Bitiş'),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: const Color(0xFFFFB1C8),
-                                side: const BorderSide(
-                                    color: Color(0x66FFB1C8)),
+                                side:
+                                    const BorderSide(color: Color(0x66FFB1C8)),
                               ),
                             );
                             if (stackDates) {
@@ -770,8 +814,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                           ? null
                           : () => setDialogState(() {
                                 if (allFilteredSelected) {
-                                  selectedIds.removeAll(selectableFiltered
-                                      .map((doc) => doc.id));
+                                  selectedIds.removeAll(
+                                      selectableFiltered.map((doc) => doc.id));
                                 } else {
                                   selectedIds.addAll(
                                       selectableFiltered.map((doc) => doc.id));
@@ -1102,6 +1146,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
     String query = '';
     String? selectedId;
     String? selectedName;
+    Map<String, dynamic>? selectedStudent;
+    String participantType = 'student';
     String reason = 'Akademik takip';
     String day = 'Bugün';
     String time = '14:30';
@@ -1224,6 +1270,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                 onTap: () => setD(() {
                                       selectedId = d.id;
                                       selectedName = name;
+                                      selectedStudent = x;
+                                      participantType = 'student';
                                     }),
                                 leading: CircleAvatar(
                                     backgroundColor: selected
@@ -1252,6 +1300,50 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                           }))),
               if (selectedId != null) ...[
                 const SizedBox(height: 12),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Randevu kimin için?',
+                      style: TextStyle(
+                          color: Colors.white70, fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(height: 6),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  ChoiceChip(
+                    label: const Text('Öğrenci'),
+                    selected: participantType == 'student',
+                    onSelected: (_) => setD(() => participantType = 'student'),
+                  ),
+                  ChoiceChip(
+                    label: const Text('Veli'),
+                    selected: participantType == 'guardian',
+                    onSelected: (_) {
+                      final guardianName =
+                          guidanceGuardianLabel(selectedStudent);
+                      final guardianPhone =
+                          '${selectedStudent?['guardianPhone'] ?? ''}'.trim();
+                      if (guardianName.isEmpty && guardianPhone.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'Bu öğrenci için kayıtlı veli bilgisi bulunamadı.'),
+                          ),
+                        );
+                        return;
+                      }
+                      setD(() => participantType = 'guardian');
+                    },
+                  ),
+                ]),
+                if (participantType == 'guardian') ...[
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '${guidanceGuardianLabel(selectedStudent).isEmpty ? 'Kayıtlı veli' : guidanceGuardianLabel(selectedStudent)} • $selectedName öğrencisinin velisi',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                ],
                 Row(children: [
                   Expanded(
                       child: DropdownButtonFormField<String>(
@@ -1345,6 +1437,7 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                   'reason': reason,
                                   'dayLabel': day,
                                   'time': time,
+                                  'participantType': participantType,
                                   'status': 'approved',
                                   'source': 'guidance',
                                   'createdAt': FieldValue.serverTimestamp(),
@@ -1690,27 +1783,26 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                 final selectedStudentId = studentId!;
                                 setD(() => isSubmitting = true);
                                 try {
-                                   await functions
-                                       .httpsCallable(
-                                           'guidanceCreateWeeklyTask')
-                                       .call({
-                                     'studentId': selectedStudentId,
-                                     'title': title,
-                                     'schedule': day,
+                                  await functions
+                                      .httpsCallable('guidanceCreateWeeklyTask')
+                                      .call({
+                                    'studentId': selectedStudentId,
+                                    'title': title,
+                                    'schedule': day,
                                   });
                                   if (ctx.mounted) Navigator.pop(ctx);
-                                 } on FirebaseFunctionsException catch (error) {
+                                } on FirebaseFunctionsException catch (error) {
                                   if (!ctx.mounted) return;
                                   setD(() => isSubmitting = false);
-                                   final message = error.message?.trim();
+                                  final message = error.message?.trim();
                                   ScaffoldMessenger.of(ctx).showSnackBar(
-                                     SnackBar(
-                                       content: Text(
-                                         message == null || message.isEmpty
-                                             ? 'Haftalık takip kaydedilemedi. Lütfen tekrar deneyin.'
-                                             : message,
-                                       ),
-                                     ),
+                                    SnackBar(
+                                      content: Text(
+                                        message == null || message.isEmpty
+                                            ? 'Haftalık takip kaydedilemedi. Lütfen tekrar deneyin.'
+                                            : message,
+                                      ),
+                                    ),
                                   );
                                 } catch (_) {
                                   if (!ctx.mounted) return;
@@ -2912,6 +3004,13 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                       .where((d) => _guidanceTerminalStatuses.contains(
                           _guidanceStatus(d.data()['status'] as String?)))
                       .toList();
+                  final awarenessPending = docs.where((d) {
+                    final data = d.data();
+                    return !_guidanceTerminalStatuses.contains(
+                          _guidanceStatus(data['status'] as String?),
+                        ) &&
+                        !_isAppointmentRecipientInformed(data);
+                  }).toList();
                   final current = today.where((d) =>
                       _guidanceStatus(d.data()['status'] as String?) ==
                       'in_progress');
@@ -2933,7 +3032,9 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                       ? today
                       : flowFilter == 'upcoming'
                           ? upcoming
-                          : finished;
+                          : flowFilter == 'awareness'
+                              ? awarenessPending
+                              : finished;
                   return ListView(padding: const EdgeInsets.all(16), children: [
                     Container(
                         padding: const EdgeInsets.all(20),
@@ -3035,6 +3136,12 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                           width: 128,
                           child: _flowFilterButton('students', 'Öğrencilerim',
                               _studentsById.length)),
+                      SizedBox(
+                          width: 170,
+                          child: _flowFilterButton(
+                              'awareness',
+                              'Bilgilendirme Bekleyen',
+                              awarenessPending.length)),
                     ]),
                     const SizedBox(height: 16),
                     if (flowFilter == 'students')
@@ -3064,6 +3171,8 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                               );
                         final guardian = guidanceGuardianLabel(student);
                         final participant = guidanceParticipantLabel(x);
+                        final informed = _isAppointmentRecipientInformed(x);
+                        final guardianAppointment = _isGuardianAppointment(x);
                         return Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             decoration: BoxDecoration(
@@ -3146,6 +3255,46 @@ class _GuidanceHomeScreenState extends State<GuidanceHomeScreen> {
                                         ),
                                       if (!_guidanceTerminalStatuses
                                           .contains(s)) ...[
+                                        const SizedBox(height: 10),
+                                        Row(children: [
+                                          Icon(
+                                            informed
+                                                ? Icons.check_circle_rounded
+                                                : Icons.warning_amber_rounded,
+                                            color: informed
+                                                ? Colors.greenAccent
+                                                : Colors.amberAccent,
+                                            size: 19,
+                                          ),
+                                          const SizedBox(width: 7),
+                                          Expanded(
+                                            child: Text(
+                                              informed
+                                                  ? (guardianAppointment
+                                                      ? 'Veli bilgilendirildi'
+                                                      : 'Haberdar')
+                                                  : (guardianAppointment
+                                                      ? 'Veli bilgilendirilmeli'
+                                                      : 'Öğrenci henüz randevuyu görüntülemedi.'),
+                                              style: TextStyle(
+                                                color: informed
+                                                    ? Colors.greenAccent
+                                                    : Colors.amberAccent,
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                          if (!informed)
+                                            TextButton(
+                                              onPressed: () =>
+                                                  _markAppointmentInformed(
+                                                doc.id,
+                                                x,
+                                              ),
+                                              child: const Text('Bilgilendir'),
+                                            ),
+                                        ]),
                                         const Divider(height: 22),
                                         Wrap(
                                             spacing: 8,

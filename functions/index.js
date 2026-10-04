@@ -7061,12 +7061,78 @@ exports.publicGuidanceExistingAppointments = onCall({ region: REGION }, async (r
   const snapshot = await db.collection("guidanceAppointments")
     .where("studentId", "==", session.data.studentId).get();
   const appointments = publicGuidance.publicUpcomingAppointments(
-    snapshot.docs.map((doc) => doc.data() || {}),
+    snapshot.docs
+      .map((doc) => ({ id: doc.id, ...(doc.data() || {}) }))
+      .filter((item) => item.participantType === "guardian" || cleanText(item.source).startsWith("parent_public")),
   );
   // The session was created only after guardian-phone verification. Keep the
   // response deliberately small: no student identifiers, internal notes, or
   // operational appointment fields are disclosed.
   return { appointments };
+});
+
+exports.publicGuidanceCancelAppointment = onCall({ region: REGION }, async (request) => {
+  const session = await loadPublicGuidanceSession(request.data?.sessionToken);
+  const appointmentId = cleanText(request.data?.appointmentId);
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(appointmentId)) throw publicGuidanceError();
+  const appointmentRef = db.collection("guidanceAppointments").doc(appointmentId);
+  await db.runTransaction(async (transaction) => {
+    const appointmentDoc = await transaction.get(appointmentRef);
+    const appointment = appointmentDoc.data() || {};
+    if (!appointmentDoc.exists ||
+        appointment.studentId !== session.data.studentId ||
+        appointment.counselorId !== session.data.counselorId ||
+        !(appointment.participantType === "guardian" || cleanText(appointment.source).startsWith("parent_public")) ||
+        !["pending", "approved"].includes(appointment.status || "pending")) {
+      throw publicGuidanceError();
+    }
+    transaction.update(appointmentRef, {
+      status: "cancelled",
+      cancelledAt: fieldValue.serverTimestamp(),
+      updatedAt: fieldValue.serverTimestamp(),
+    });
+  });
+  return { ok: true };
+});
+
+exports.publicGuidanceRescheduleAppointment = onCall({ region: REGION }, async (request) => {
+  const session = await loadPublicGuidanceSession(request.data?.sessionToken);
+  const appointmentId = cleanText(request.data?.appointmentId);
+  const dateKey = cleanText(request.data?.date);
+  const time = cleanText(request.data?.time);
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(appointmentId) || !publicGuidance.validDateKey(dateKey)) {
+    throw publicGuidanceError();
+  }
+  const appointmentRef = db.collection("guidanceAppointments").doc(appointmentId);
+  await db.runTransaction(async (transaction) => {
+    const [appointmentDoc, counselorDoc, appointmentSnapshot] = await Promise.all([
+      transaction.get(appointmentRef),
+      transaction.get(db.collection("users").doc(session.data.counselorId)),
+      transaction.get(db.collection("guidanceAppointments").where("counselorId", "==", session.data.counselorId)),
+    ]);
+    const appointment = appointmentDoc.data() || {};
+    if (!appointmentDoc.exists ||
+        appointment.studentId !== session.data.studentId ||
+        appointment.counselorId !== session.data.counselorId ||
+        !(appointment.participantType === "guardian" || cleanText(appointment.source).startsWith("parent_public")) ||
+        !["pending", "approved"].includes(appointment.status || "pending")) {
+      throw publicGuidanceError();
+    }
+    const availability = publicGuidance.normalizeAvailability(counselorDoc.data()?.guidanceAvailability);
+    const busy = appointmentSnapshot.docs
+      .filter((doc) => doc.id !== appointmentId)
+      .map((doc) => doc.data() || {});
+    if (!publicGuidance.slotOptions(availability, dateKey, new Date(), busy).includes(time)) {
+      throw new HttpsError("failed-precondition", "Seçilen saat artık uygun değil.");
+    }
+    transaction.update(appointmentRef, {
+      appointmentDate: dateKey,
+      dayLabel: dateKey,
+      time,
+      updatedAt: fieldValue.serverTimestamp(),
+    });
+  });
+  return { ok: true, date: dateKey, time };
 });
 
 exports.publicGuidanceRequestOtp = onCall({ region: REGION }, async (request) => {

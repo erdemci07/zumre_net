@@ -23,9 +23,13 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
   List<String> _slots = const [];
   List<Map<String, dynamic>> _existingAppointments = const [];
   List<Map<String, dynamic>> _searchResults = const [];
-  String? _selectionToken, _maskedPhone, _studentClassLabel;
+  String? _selectionToken,
+      _maskedPhone,
+      _studentClassLabel,
+      _editingAppointmentId;
   int _step = 0;
   bool _loading = false;
+  bool _resultWasReschedule = false;
 
   @override
   void dispose() {
@@ -179,7 +183,7 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
             _counselorName = bookingData['counselorName'] as String?;
             _date = bookingData['date'] as String?;
             _time = bookingData['time'] as String?;
-            _step = 4;
+            _step = 5;
           });
           return;
         }
@@ -189,7 +193,7 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
         }
         setState(() {
           _challengeId = data['challengeId'] as String?;
-          _step = 3;
+          _step = 4;
         });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -212,9 +216,60 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
           _counselorName = data['counselorName'] as String?;
           _date = data['date'] as String?;
           _time = data['time'] as String?;
-          _step = 4;
+          _step = 5;
         });
       });
+
+  Future<void> _confirmAppointment() async {
+    if (_editingAppointmentId == null) {
+      await _requestOtp();
+      return;
+    }
+    await _run(() async {
+      final result = await _functions
+          .httpsCallable('publicGuidanceRescheduleAppointment')
+          .call({
+        'sessionToken': _sessionToken,
+        'appointmentId': _editingAppointmentId,
+        'date': _date,
+        'time': _time,
+      });
+      final data = Map<String, dynamic>.from(result.data as Map);
+      setState(() {
+        _date = data['date'] as String?;
+        _time = data['time'] as String?;
+        _resultWasReschedule = true;
+        _editingAppointmentId = null;
+        _step = 5;
+      });
+    });
+  }
+
+  Future<void> _cancelAppointment(Map<String, dynamic> appointment) =>
+      _run(() async {
+        final id = appointment['id']?.toString() ?? '';
+        if (id.isEmpty) throw StateError('Randevu bilgisi bulunamadı.');
+        await _functions
+            .httpsCallable('publicGuidanceCancelAppointment')
+            .call({'sessionToken': _sessionToken, 'appointmentId': id});
+        if (!mounted) return;
+        setState(() {
+          _existingAppointments = _existingAppointments
+              .where((item) => item['id']?.toString() != id)
+              .toList();
+          _step = _existingAppointments.isEmpty ? 2 : 1;
+        });
+      });
+
+  void _startReschedule(Map<String, dynamic> appointment) {
+    setState(() {
+      _editingAppointmentId = appointment['id']?.toString();
+      _date = null;
+      _time = null;
+      _slots = const [];
+      _step = 2;
+    });
+  }
 
   @override
   Widget build(BuildContext context) => Theme(
@@ -292,8 +347,10 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
                                         : _step == 2
                                             ? _slotStep()
                                             : _step == 3
-                                                ? _otpStep()
-                                                : _resultStep(),
+                                                ? _reviewStep()
+                                                : _step == 4
+                                                    ? _otpStep()
+                                                    : _resultStep(),
                               ),
                             ),
                           ],
@@ -309,12 +366,12 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
       );
 
   Widget _progress() {
-    const labels = ['Öğrenci', 'Doğrulama', 'Randevu', 'Tamamlandı'];
+    const labels = ['Bilgiler', 'Randevu', 'Son Kontrol', 'Tamamlandı'];
     final current = _step == 0
         ? 0
-        : _step == 4
+        : _step == 5
             ? 3
-            : _step == 3
+            : _step >= 3
                 ? 2
                 : 1;
     return Row(
@@ -530,6 +587,24 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
           style: const TextStyle(color: Color(0xFF62748A))),
       const SizedBox(height: 16),
       _appointmentSummaryCard(nearest),
+      const SizedBox(height: 10),
+      Row(children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _loading ? null : () => _startReschedule(nearest),
+            icon: const Icon(Icons.edit_calendar_rounded),
+            label: const Text('Tarihi Değiştir'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _loading ? null : () => _cancelAppointment(nearest),
+            icon: const Icon(Icons.cancel_outlined),
+            label: const Text('İptal Et'),
+          ),
+        ),
+      ]),
       if (_existingAppointments.length > 1)
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
@@ -553,7 +628,10 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
         const SizedBox(width: 10),
         Expanded(
             child: FilledButton(
-                onPressed: () => setState(() => _step = 2),
+                onPressed: () => setState(() {
+                      _editingAppointmentId = null;
+                      _step = 2;
+                    }),
                 child: const Text('Yeni Randevuya Devam Et'))),
       ]),
     ]);
@@ -649,12 +727,55 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
             SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                    onPressed: _time == null || _loading ? null : _requestOtp,
+                    onPressed: _time == null || _loading
+                        ? null
+                        : () => setState(() => _step = 3),
                     style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(50),
                         backgroundColor: const Color(0xFF236AAC)),
                     child: const Text('Randevu Özetiyle Devam Et'))),
           ]);
+
+  Widget _reviewStep() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Son kontrol',
+              style: TextStyle(
+                  color: Color(0xFF132D51),
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          const Text(
+            'Randevu henüz oluşturulmadı. Bilgileri kontrol edip onaylayın.',
+            style: TextStyle(color: Color(0xFF62748A)),
+          ),
+          const SizedBox(height: 16),
+          _appointmentSummaryCard({
+            'date': _date,
+            'time': _time,
+            'counselorName': _counselorName,
+          }),
+          const SizedBox(height: 18),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _loading ? null : () => setState(() => _step = 2),
+                child: const Text('Geri Dön'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton(
+                onPressed: _loading ? null : _confirmAppointment,
+                child: Text(_editingAppointmentId == null
+                    ? 'Randevuyu Onayla'
+                    : 'Değişikliği Onayla'),
+              ),
+            ),
+          ]),
+        ],
+      );
 
   Widget _otpStep() => Column(mainAxisSize: MainAxisSize.min, children: [
         const Text('Randevu özeti',
@@ -681,8 +802,11 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
         const Icon(Icons.check_circle_rounded,
             color: Color(0xFF2F9C73), size: 64),
         const SizedBox(height: 12),
-        const Text('Randevunuz oluşturuldu',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        Text(
+            _resultWasReschedule
+                ? 'Randevunuz güncellendi'
+                : 'Randevunuz oluşturuldu',
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
         Text('$_date • $_time',
             style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -702,6 +826,8 @@ class _ParentGuidanceScreenState extends State<ParentGuidanceScreen> {
                 _date = null;
                 _time = null;
                 _slots = const [];
+                _editingAppointmentId = null;
+                _resultWasReschedule = false;
                 _phone.clear();
                 _otp.clear();
               }),

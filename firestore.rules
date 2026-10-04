@@ -60,6 +60,19 @@ service cloud.firestore {
           .data.guidanceCounselorId == request.auth.uid;
     }
 
+    function assignedStudentHasGuardianInfo(studentId) {
+      let student = get(
+        /databases/$(database)/documents/users/$(studentId)
+      ).data;
+      return isAssignedGuidanceStudent(studentId)
+        && ((student.keys().hasAny(["guardianName"])
+            && student.guardianName is string
+            && student.guardianName.size() > 0)
+          || (student.keys().hasAny(["guardianPhone"])
+            && student.guardianPhone is string
+            && student.guardianPhone.size() > 0));
+    }
+
     function isValidWeeklyGuidanceSchedule(value) {
       return value is string
         && value in [
@@ -116,6 +129,18 @@ service cloud.firestore {
         ]
         && request.resource.data.createdAt is timestamp
         && request.resource.data.updatedAt is timestamp
+        && (!request.resource.data.keys().hasAny(["participantType"])
+          || request.resource.data.participantType in ["student", "guardian"])
+        && (!request.resource.data.keys().hasAny(["studentViewedAt"])
+          || request.resource.data.studentViewedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(["recipientInformedAt"])
+          || request.resource.data.recipientInformedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(["recipientInformedBy"])
+          || request.resource.data.recipientInformedBy is string)
+        && (!request.resource.data.keys().hasAny(["recipientInformedMethod"])
+          || request.resource.data.recipientInformedMethod in [
+            "student_verbal", "student_phone", "guardian_verbal", "guardian_phone"
+          ])
         && (!request.resource.data.keys().hasAny(["source"])
           || (request.resource.data.source is string
             && request.resource.data.source.size() > 0
@@ -137,7 +162,8 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           "studentId", "studentName", "counselorId", "counselorName",
           "reason", "dayLabel", "appointmentDate", "time", "status", "source", "createdAt",
-          "updatedAt", "approvedAt", "startedAt", "completedAt", "cancelledAt", "noShowAt"
+          "updatedAt", "approvedAt", "startedAt", "completedAt", "cancelledAt", "noShowAt",
+          "participantType"
         ])
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
@@ -151,6 +177,29 @@ service cloud.firestore {
             && !request.resource.data.keys().hasAny([
               "startedAt", "completedAt", "cancelledAt", "noShowAt"
             ])));
+    }
+
+    function isGuidanceAppointmentStudentViewedUpdate() {
+      return request.resource.data.studentViewedAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["studentViewedAt", "updatedAt"]);
+    }
+
+    function isGuidanceAppointmentInformedUpdate() {
+      return request.resource.data.recipientInformedAt == request.time
+        && request.resource.data.recipientInformedBy == request.auth.uid
+        && request.resource.data.recipientInformedMethod in [
+          "student_verbal", "student_phone", "guardian_verbal", "guardian_phone"
+        ]
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            "recipientInformedAt", "recipientInformedBy",
+            "recipientInformedMethod", "updatedAt"
+          ]);
     }
 
     function isLegacyGuidancePending() {
@@ -294,25 +343,36 @@ service cloud.firestore {
           && userHasRole(request.resource.data.counselorId, "guidance")
           && currentUser().data.guidanceCounselorId
             == request.resource.data.counselorId
-          && request.resource.data.status == "pending")
+          && request.resource.data.status == "pending"
+          && (!request.resource.data.keys().hasAny(["participantType"])
+            || request.resource.data.participantType == "student"))
         || (isGuidance()
           && request.resource.data.counselorId == request.auth.uid
           && isAssignedGuidanceStudent(request.resource.data.studentId)
+          && (!request.resource.data.keys().hasAny(["participantType"])
+            || request.resource.data.participantType == "student"
+            || (request.resource.data.participantType == "guardian"
+              && assignedStudentHasGuardianInfo(
+                request.resource.data.studentId
+              )))
           && request.resource.data.status == "approved"));
 
       allow update: if isStudent()
         && resource.data.studentId == request.auth.uid
         && hasValidGuidanceAppointmentCore()
-        && request.resource.data.status == "cancelled"
-        && (isLegacyGuidancePending()
-          || resource.data.status in ["pending", "approved"])
-        && hasGuidanceStatusAudit("cancelled");
+        && (isGuidanceAppointmentStudentViewedUpdate()
+          || (request.resource.data.status == "cancelled"
+            && (isLegacyGuidancePending()
+              || resource.data.status in ["pending", "approved"])
+            && hasGuidanceStatusAudit("cancelled")));
 
       allow update: if isGuidance()
         && resource.data.counselorId == request.auth.uid
         && hasValidGuidanceAppointmentCore()
-        && isGuidanceStatusTransition(request.resource.data.status)
-        && hasGuidanceStatusAudit(request.resource.data.status);
+        && isAssignedGuidanceStudent(resource.data.studentId)
+        && (isGuidanceAppointmentInformedUpdate()
+          || (isGuidanceStatusTransition(request.resource.data.status)
+            && hasGuidanceStatusAudit(request.resource.data.status)));
 
       allow create, update, delete: if isAdmin();
     }
