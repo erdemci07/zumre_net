@@ -3238,17 +3238,16 @@ class _StatisticsPageState extends State<StatisticsPage> {
           .whereType<Map>()
           .map((slot) => Map<String, dynamic>.from(slot))
           .where((slot) {
-            if (!institutionScheduleSlotMatchesEducationLevel(
-              slot,
-              educationLevel,
-            )) {
-              return false;
-            }
-            final start = _clockToMinutes('${slot['start'] ?? ''}');
-            final end = _clockToMinutes('${slot['end'] ?? ''}');
-            return start >= 0 && end > start;
-          })
-          .toList()
+        if (!institutionScheduleSlotMatchesEducationLevel(
+          slot,
+          educationLevel,
+        )) {
+          return false;
+        }
+        final start = _clockToMinutes('${slot['start'] ?? ''}');
+        final end = _clockToMinutes('${slot['end'] ?? ''}');
+        return start >= 0 && end > start;
+      }).toList()
         ..sort(
           (first, second) => _clockToMinutes('${first['start']}')
               .compareTo(_clockToMinutes('${second['start']}')),
@@ -3266,9 +3265,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
         final slots = slotsFor(date);
         if (slots.isEmpty) continue;
 
-        final dayLabel = offset == 1
-            ? 'Yarın'
-            : _scheduleDays[date.weekday - 1]['label']!;
+        final dayLabel =
+            offset == 1 ? 'Yarın' : _scheduleDays[date.weekday - 1]['label']!;
         final start = _clockToMinutes('${slots.first['start']}');
         return '$dayLabel 1. $activityName ${formatClock(start)}';
       }
@@ -5174,6 +5172,19 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     ? null
                                     : () => _editUser(uid, data),
                               ),
+                              if (role == 'teacher' &&
+                                  _isDualScopeTeacher(data))
+                                IconButton(
+                                  tooltip: 'Günlük LGS/YKS zümre programı',
+                                  icon: const Icon(
+                                    Icons.calendar_view_week_rounded,
+                                    color: Colors.cyanAccent,
+                                  ),
+                                  onPressed: _isBulkDeleting
+                                      ? null
+                                      : () => _showTeacherDailyScopeDialog(
+                                          uid, data),
+                                ),
                               if (role == 'guidance')
                                 IconButton(
                                   tooltip: 'Atanmış öğrenciler',
@@ -7087,6 +7098,218 @@ class _UserManagementPageState extends State<UserManagementPage> {
                       },
                 child: const Text('Ata')),
           ],
+        ),
+      ),
+    );
+  }
+
+  bool _isDualScopeTeacher(Map<String, dynamic> data) {
+    final levels = <String>{
+      ...educationLevelsFromData(data),
+      ...teachingScopesFromData(data)
+          .map((scope) => scope['level'])
+          .whereType<String>(),
+    };
+    return levels.contains('LGS') && levels.contains('YKS');
+  }
+
+  Future<void> _showTeacherDailyScopeDialog(
+    String teacherId,
+    Map<String, dynamic> teacherData,
+  ) async {
+    const days = <String, String>{
+      'monday': 'Pazartesi',
+      'tuesday': 'Salı',
+      'wednesday': 'Çarşamba',
+      'thursday': 'Perşembe',
+      'friday': 'Cuma',
+      'saturday': 'Cumartesi',
+      'sunday': 'Pazar',
+    };
+    final raw = teacherData['weeklyZumreScopeByDay'];
+    final selectedScopes = <String, String>{
+      for (final day in days.keys)
+        day: raw is Map &&
+                const {'LGS', 'YKS', 'OFF'}
+                    .contains('${raw[day] ?? 'OFF'}'.toUpperCase())
+            ? '${raw[day] ?? 'OFF'}'.toUpperCase()
+            : 'OFF',
+    };
+    var isSaving = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 22),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 500, maxHeight: 680),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0B234B),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.calendar_view_week_rounded,
+                      color: Colors.cyanAccent,
+                    ),
+                    const SizedBox(width: 9),
+                    const Expanded(
+                      child: Text(
+                        'Günlük LGS/YKS Programı',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Kapat',
+                      onPressed:
+                          isSaving ? null : () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close_rounded,
+                          color: Colors.white70),
+                    ),
+                  ],
+                ),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      'Her gün öğretmenin bakacağı zümre kapsamını seçin.',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView(
+                    children: days.entries.map((entry) {
+                      final scope = selectedScopes[entry.key] ?? 'OFF';
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: .06),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: Text(
+                                entry.value,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 5,
+                              child: Wrap(
+                                alignment: WrapAlignment.end,
+                                spacing: 5,
+                                children: ['LGS', 'YKS', 'OFF'].map((value) {
+                                  final selected = scope == value;
+                                  return ChoiceChip(
+                                    label:
+                                        Text(value == 'OFF' ? 'Kapalı' : value),
+                                    selected: selected,
+                                    onSelected: isSaving
+                                        ? null
+                                        : (_) => setDialogState(
+                                              () => selectedScopes[entry.key] =
+                                                  value,
+                                            ),
+                                    visualDensity: VisualDensity.compact,
+                                    labelStyle: TextStyle(
+                                      color: selected
+                                          ? const Color(0xFF082448)
+                                          : Colors.white70,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                    selectedColor: value == 'LGS'
+                                        ? Colors.lightBlueAccent
+                                        : value == 'YKS'
+                                            ? Colors.orangeAccent
+                                            : Colors.white54,
+                                    backgroundColor: Colors.white10,
+                                    side: BorderSide.none,
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            setDialogState(() => isSaving = true);
+                            try {
+                              await FirebaseFirestore.instance
+                                  .collection('users')
+                                  .doc(teacherId)
+                                  .update({
+                                'weeklyZumreScopeByDay': selectedScopes,
+                                'updatedAt': FieldValue.serverTimestamp(),
+                              });
+                              if (dialogContext.mounted) {
+                                Navigator.pop(dialogContext);
+                              }
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Öğretmen programı kaydedildi.'),
+                                  ),
+                                );
+                              }
+                            } catch (_) {
+                              if (dialogContext.mounted) {
+                                setDialogState(() => isSaving = false);
+                                ScaffoldMessenger.of(dialogContext)
+                                    .showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Program kaydedilemedi.'),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                    icon: isSaving
+                        ? const SizedBox.square(
+                            dimension: 17,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_rounded),
+                    label: const Text('Programı Kaydet'),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

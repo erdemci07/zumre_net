@@ -4,7 +4,7 @@ const lgsSubjects = [
   'TÜRKÇE',
   'MATEMATİK',
   'FEN BİLİMLERİ',
-  'T.C. İNKILAP TARİHİ VE ATATÜRKÇÜLÜK',
+  'T.C. İNKILAP TARİHİ',
   'DİN KÜLTÜRÜ VE AHLAK BİLGİSİ',
   'İNGİLİZCE',
 ];

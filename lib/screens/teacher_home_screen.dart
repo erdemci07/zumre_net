@@ -54,6 +54,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   String? _teacherName;
   String? _teacherSubject;
   Set<String> _teacherEducationLevels = <String>{};
+  Map<String, String> _teacherSubjectsByLevel = {};
+  Map<String, String> _weeklyZumreScopeByDay = {};
+  String _dailyZumreScopeLabel = '';
   Map<String, List<Map<String, String>>> _weeklyAvailability = {};
   bool _isZumreOpenNow = false;
   bool _isTeacherWorkingNow = false;
@@ -120,6 +123,53 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     return effectiveLevels.length == 1 ? effectiveLevels.single : 'BOTH';
   }
 
+  bool get _isDualScopeTeacher =>
+      _teacherEducationLevels.contains('LGS') &&
+      _teacherEducationLevels.contains('YKS');
+
+  String? _teacherZumreScopeForDate(DateTime date) {
+    if (_isDualScopeTeacher) {
+      return _weeklyZumreScopeByDay[_dayKey(date)];
+    }
+    return _teacherEducationLevels.length == 1
+        ? _teacherEducationLevels.single
+        : null;
+  }
+
+  String _teacherZumreScopeLabel(String? scope) {
+    if (scope == null || scope == 'OFF') return '';
+    final subject = _teacherSubjectsByLevel[scope];
+    return subject == null || subject.isEmpty ? scope : '$scope • $subject';
+  }
+
+  Map<String, String> _weeklyZumreScopesFromData(Map<String, dynamic> data) {
+    final raw = data['weeklyZumreScopeByDay'];
+    if (raw is! Map) return {};
+    final scopes = <String, String>{};
+    for (final entry in raw.entries) {
+      final value = '${entry.value}'.trim().toUpperCase();
+      if (educationLevels.contains(value) || value == 'OFF') {
+        scopes['${entry.key}'] = value;
+      }
+    }
+    return scopes;
+  }
+
+  Map<String, String> _teacherSubjectsByLevelFromData(
+    Map<String, dynamic> data,
+  ) {
+    return {
+      for (final scope in teachingScopesFromData(data))
+        if (scope['level'] != null && scope['subject'] != null)
+          scope['level']!: scope['subject']!,
+    };
+  }
+
+  String _withTeacherZumreScope(String value) {
+    if (_dailyZumreScopeLabel.isEmpty) return value;
+    return '$_dailyZumreScopeLabel • $value';
+  }
+
   int _timeToMinutes(String time) {
     final parts = time.split(':');
     if (parts.length != 2) return 0;
@@ -151,7 +201,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _scheduleSlotsFromRaw(dynamic raw) {
+  List<Map<String, dynamic>> _scheduleSlotsFromRaw(
+    dynamic raw, {
+    String? selectedScope,
+    bool requireSelectedScope = false,
+  }) {
+    if (requireSelectedScope &&
+        (selectedScope == null || selectedScope == 'OFF')) {
+      return [];
+    }
     if (raw is! List) return [];
 
     final slots = raw.whereType<Map>().map((slot) {
@@ -161,6 +219,12 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         'educationLevel': institutionScheduleScopeFromData(slot),
       };
     });
+
+    if (selectedScope != null && selectedScope != 'OFF') {
+      return slots
+          .where((slot) => slot['educationLevel'] == selectedScope)
+          .toList();
+    }
 
     if (_teacherEducationLevels.isEmpty) {
       return slots.toList();
@@ -180,11 +244,17 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     final weeklySchedule = data['weeklySchedule'];
     final dayKey = _dayKey(now);
     final daily = weeklySchedule is Map ? weeklySchedule[dayKey] : null;
+    final selectedScope = _teacherZumreScopeForDate(now);
 
     if (daily is Map) {
       return {
         'closed': daily['closed'] == true || daily['zumreClosed'] == true,
-        'zumreSlots': _scheduleSlotsFromRaw(daily['zumreSlots']),
+        'zumreScope': selectedScope,
+        'zumreSlots': _scheduleSlotsFromRaw(
+          daily['zumreSlots'],
+          selectedScope: selectedScope,
+          requireSelectedScope: _isDualScopeTeacher,
+        ),
       };
     }
 
@@ -192,8 +262,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         now.weekday == DateTime.saturday || now.weekday == DateTime.sunday;
     return {
       'closed': false,
+      'zumreScope': selectedScope,
       'zumreSlots': _scheduleSlotsFromRaw(
         isWeekend ? data['weekendSlots'] : data['weekdaySlots'],
+        selectedScope: selectedScope,
+        requireSelectedScope: _isDualScopeTeacher,
       ),
     };
   }
@@ -585,8 +658,14 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
     setState(() {
       _isZumreOpenNow = isOpen;
-      _zumreSlotText = isOpen ? uiState['slotText']?.toString() ?? '' : '';
-      _nextZumreText = isOpen ? '' : uiState['nextZumreText']?.toString() ?? '';
+      _zumreSlotText = isOpen
+          ? _withTeacherZumreScope(uiState['slotText']?.toString() ?? '')
+          : '';
+      _nextZumreText = isOpen
+          ? ''
+          : _withTeacherZumreScope(
+              uiState['nextZumreText']?.toString() ?? '',
+            );
       _zumreRemainingMinutes =
           isOpen && remainingMinutes is int ? remainingMinutes : null;
     });
@@ -744,6 +823,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
     final settings = settingsDoc.data() ?? {};
     final dailySchedule = _dailyScheduleFromData(settings, now);
+    final selectedZumreScope = dailySchedule['zumreScope']?.toString();
+    final scopeLabel = _teacherZumreScopeLabel(selectedZumreScope);
     final isClosedDay = dailySchedule['closed'] == true;
     final zumreSlots = isClosedDay
         ? <Map<String, dynamic>>[]
@@ -779,6 +860,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
     if (runtimeMessage != null) {
       message = runtimeMessage;
+    } else if (_isDualScopeTeacher && selectedZumreScope == null) {
+      message = 'Bugünkü LGS/YKS kapsamınız yönetici tarafından belirlenmedi.';
+    } else if (selectedZumreScope == 'OFF') {
+      message = 'Bugün için zümre göreviniz bulunmuyor.';
     } else if (!effectiveZumreOpen) {
       message = 'Şu an zümre saati aktif değil.';
     } else if (effectiveLunch) {
@@ -802,11 +887,21 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       _isZumreOpenNow = effectiveZumreOpen;
       _isTeacherWorkingNow = isTeacherWorking;
       _isLunchNow = effectiveLunch;
-      _zumreSlotText =
-          effectiveZumreOpen ? zumreUiState['slotText']?.toString() ?? '' : '';
+      _dailyZumreScopeLabel = scopeLabel;
+      _zumreSlotText = effectiveZumreOpen && scopeLabel.isNotEmpty
+          ? '$scopeLabel • ${zumreUiState['slotText'] ?? ''}'
+          : effectiveZumreOpen
+              ? zumreUiState['slotText']?.toString() ?? ''
+              : '';
       _nextZumreText = effectiveZumreOpen
           ? ''
-          : zumreUiState['nextZumreText']?.toString() ?? '';
+          : _isDualScopeTeacher && selectedZumreScope == null
+              ? 'Günlük kapsam belirlenmedi'
+              : selectedZumreScope == 'OFF'
+                  ? 'Bugün zümre göreviniz yok'
+                  : scopeLabel.isNotEmpty
+                      ? '$scopeLabel • ${zumreUiState['nextZumreText'] ?? 'Zümre kapalı'}'
+                      : zumreUiState['nextZumreText']?.toString() ?? '';
       _zumreRemainingMinutes = effectiveZumreOpen && remainingMinutes is int
           ? remainingMinutes
           : null;
@@ -1256,6 +1351,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
     setState(() {
       _teacherEducationLevels = teacherLevels;
+      _weeklyZumreScopeByDay = _weeklyZumreScopesFromData(teacherData);
+      _teacherSubjectsByLevel = _teacherSubjectsByLevelFromData(teacherData);
       _weeklyAvailability = parsed;
     });
   }
@@ -1532,11 +1629,15 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
       final teacherData = Map<String, dynamic>.from(data ?? {});
       final teacherLevels = _teacherLevelsFromData(teacherData);
+      final weeklyZumreScopes = _weeklyZumreScopesFromData(teacherData);
+      final subjectsByLevel = _teacherSubjectsByLevelFromData(teacherData);
 
       setState(() {
         _teacherName = data?['name'] ?? data?['email'] ?? 'Öğretmen';
         _teacherSubject = subject ?? 'Ders';
         _teacherEducationLevels = teacherLevels;
+        _weeklyZumreScopeByDay = weeklyZumreScopes;
+        _teacherSubjectsByLevel = subjectsByLevel;
         _teacherStatus = data?['teacherStatus'] ?? 'available';
         _manualAbsentDate = data?['manualAbsentDate']?.toString();
         _breakUntil = data?['breakUntil'] is Timestamp
@@ -3871,7 +3972,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     final remaining = _zumreRemainingMinutes;
     final text = active
         ? remaining != null && remaining <= 5 && remaining > 0
-            ? 'Bitime $remaining dk'
+            ? '${_dailyZumreScopeLabel.isEmpty ? '' : '$_dailyZumreScopeLabel • '}Bitime $remaining dk'
             : _zumreSlotText.isEmpty
                 ? 'Zümre Aktif'
                 : 'Zümre Aktif • $_zumreSlotText'
