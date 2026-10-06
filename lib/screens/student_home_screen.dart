@@ -1731,22 +1731,22 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Widget _buildSubjectGrid({required bool compact}) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth >= 700
-            ? 4
-            : constraints.maxWidth >= 340
-                ? 3
-                : 2;
-        final dense = crossAxisCount == 4;
+        final crossAxisCount = constraints.maxWidth >= 330 ? 3 : 2;
         const crossAxisSpacing = 8.0;
         const mainAxisSpacing = 8.0;
+        final rowCount =
+            (_visibleSubjectOptions.length / crossAxisCount).ceil();
         final itemWidth =
             (constraints.maxWidth - crossAxisSpacing * (crossAxisCount - 1)) /
                 crossAxisCount;
-        final itemHeight = compact
-            ? (itemWidth * 0.82).clamp(82.0, 116.0)
-            : (itemWidth * 0.92).clamp(104.0, 142.0);
+        final itemHeight = constraints.maxHeight.isFinite
+            ? ((constraints.maxHeight - mainAxisSpacing * (rowCount - 1)) /
+                    rowCount)
+                .clamp(36.0, double.infinity)
+            : itemWidth;
+        final dense = itemHeight < 82;
         return GridView.count(
-          shrinkWrap: true,
+          shrinkWrap: false,
           padding: EdgeInsets.zero,
           physics: const NeverScrollableScrollPhysics(),
           crossAxisCount: crossAxisCount,
@@ -4037,79 +4037,74 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             _isInStudySession;
         final compact = constraints.maxHeight < 980 || hasExtraCards;
         final actionHeight = compact ? (hasExtraCards ? 40.0 : 52.0) : 48.0;
-        return SingleChildScrollView(
+        return Padding(
           padding: EdgeInsets.fromLTRB(18, compact ? 5 : 8, 18, 8),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildWelcomeCard(compact: compact),
-                  SizedBox(height: compact ? 3 : 7),
-                  _buildCooldownCard(compact: compact),
-                  _buildUpcomingAppointmentsSection(compact: compact),
-                  SizedBox(height: compact ? 3 : 6),
-                  _buildGuidanceAppointmentDemoCard(compact: compact),
-                  _buildGuidanceTaskCard(compact: compact),
-                  SizedBox(height: compact ? 3 : 6),
-                  if (_isInStudySession && compact)
-                    Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.only(bottom: 4),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 9, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.orangeAccent.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Text(
-                        'Etüt sürüyor • Etüt bitince zümre sırası alabilirsiniz.',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: Colors.white70, fontSize: 10.5),
-                      ),
-                    ),
-                  if (_isInStudySession && !compact) ...[
-                    Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.orangeAccent.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.orangeAccent.withValues(alpha: 0.25),
-                        ),
-                      ),
-                      child: const Text(
-                        'Şu anda etütte görünüyorsunuz. Etüt bitince zümre sırası alabilirsiniz.',
-                        style: TextStyle(color: Colors.white70, fontSize: 12.5),
-                      ),
-                    ),
-                  ],
-                  const Text(
-                    'Ders Seç',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 19,
-                      fontWeight: FontWeight.bold,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildWelcomeCard(compact: compact),
+              SizedBox(height: compact ? 3 : 7),
+              _buildCooldownCard(compact: compact),
+              _buildUpcomingAppointmentsSection(compact: compact),
+              SizedBox(height: compact ? 3 : 6),
+              _buildGuidanceAppointmentDemoCard(compact: compact),
+              _buildGuidanceTaskCard(compact: compact),
+              SizedBox(height: compact ? 3 : 6),
+              if (_isInStudySession && compact)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.orangeAccent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Etüt sürüyor • Etüt bitince zümre sırası alabilirsiniz.',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                  ),
+                ),
+              if (_isInStudySession && !compact) ...[
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orangeAccent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: Colors.orangeAccent.withValues(alpha: 0.25),
                     ),
                   ),
-                  SizedBox(height: compact ? 2 : 6),
-                  _buildSubjectGrid(compact: compact),
-                  SizedBox(height: compact ? 3 : 7),
-                  _buildQuestionCountSelector(compact: compact),
-                  SizedBox(height: compact ? 3 : 7),
-                  _buildTeacherSelector(compact: compact),
-                  SizedBox(height: compact ? 3 : 7),
-                  _buildQueueActions(
-                    compact: compact,
-                    buttonHeight: actionHeight,
+                  child: const Text(
+                    'Şu anda etütte görünüyorsunuz. Etüt bitince zümre sırası alabilirsiniz.',
+                    style: TextStyle(color: Colors.white70, fontSize: 12.5),
                   ),
-                ],
+                ),
+              ],
+              const Text(
+                'Ders Seç',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
+              SizedBox(height: compact ? 2 : 6),
+              Expanded(child: _buildSubjectGrid(compact: compact)),
+              SizedBox(height: compact ? 3 : 7),
+              _buildQuestionCountSelector(compact: compact),
+              SizedBox(height: compact ? 3 : 7),
+              _buildTeacherSelector(compact: compact),
+              SizedBox(height: compact ? 3 : 7),
+              _buildQueueActions(
+                compact: compact,
+                buttonHeight: actionHeight,
+              ),
+            ],
           ),
         );
       },
