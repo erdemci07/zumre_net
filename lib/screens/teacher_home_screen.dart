@@ -56,7 +56,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
   Set<String> _teacherEducationLevels = <String>{};
   Map<String, String> _teacherSubjectsByLevel = {};
   Map<String, String> _weeklyZumreScopeByDay = {};
-  String _dailyZumreScopeLabel = '';
   Map<String, List<Map<String, String>>> _weeklyAvailability = {};
   bool _isZumreOpenNow = false;
   bool _isTeacherWorkingNow = false;
@@ -136,7 +135,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
     final slots = _weeklyAvailability[_dayKey(date)] ?? const [];
     final scopedSlots = slots.where((slot) {
-      final scope = '${slot['educationLevel'] ?? slot['scope'] ?? ''}'
+      final scope = (slot['educationLevel'] ?? slot['scope'] ?? '')
           .trim()
           .toUpperCase();
       return scope == 'LGS' || scope == 'YKS';
