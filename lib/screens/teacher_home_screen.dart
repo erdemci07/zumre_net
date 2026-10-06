@@ -940,7 +940,6 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       _isZumreOpenNow = effectiveZumreOpen;
       _isTeacherWorkingNow = isTeacherWorking;
       _isLunchNow = effectiveLunch;
-      _dailyZumreScopeLabel = scopeLabel;
       _zumreSlotText = effectiveZumreOpen && scopeLabel.isNotEmpty
           ? '$scopeLabel • ${zumreUiState['slotText'] ?? ''}'
           : effectiveZumreOpen
