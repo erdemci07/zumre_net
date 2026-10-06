@@ -6,7 +6,7 @@ function cleanText(value) {
 }
 
 function normalizeSubject(value) {
-  return cleanText(value)
+  const normalized = cleanText(value)
     .toLocaleLowerCase("tr-TR")
     .replace(/ı/g, "i")
     .replace(/ş/g, "s")
@@ -14,6 +14,11 @@ function normalizeSubject(value) {
     .replace(/ü/g, "u")
     .replace(/ö/g, "o")
     .replace(/ç/g, "c");
+  const compact = normalized.replace(/[^a-z0-9]/g, "");
+  if (["inkilap", "inkilaptarihi", "tcinkilap", "tcinkilaptarihi"].includes(compact)) {
+    return "inkilaptarihi";
+  }
+  return normalized;
 }
 
 function educationLevel(value) {

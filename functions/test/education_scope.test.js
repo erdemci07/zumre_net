@@ -67,3 +67,30 @@ test("dual-scope and legacy teachers remain available as intended", () => {
   assert.equal(helpers.teacherMatchesStudentScope(dualTeacher, { educationLevel: "YKS" }, "MATEMATİK"), true);
   assert.equal(helpers.teacherMatchesStudentScope({ subjects: ["MATEMATİK"] }, { educationLevel: "LGS" }, "MATEMATİK"), true);
 });
+
+test("a second scoped branch is matched even when the legacy subject list only has the first branch", () => {
+  const historyTeacher = {
+    subjects: ["TARİH"],
+    teachingScopes: [
+      { level: "YKS", subject: "TARİH" },
+      { level: "LGS", subject: "İnkılap" },
+    ],
+  };
+
+  assert.equal(
+    helpers.teacherMatchesStudentScope(
+      historyTeacher,
+      { educationLevel: "LGS" },
+      "T.C. İNKILAP TARİHİ"
+    ),
+    true
+  );
+  assert.equal(
+    helpers.teacherMatchesStudentScope(
+      historyTeacher,
+      { educationLevel: "YKS" },
+      "TARİH"
+    ),
+    true
+  );
+});

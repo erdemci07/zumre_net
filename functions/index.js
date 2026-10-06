@@ -1015,7 +1015,7 @@ function cleanTeachingScopes(value) {
 }
 
 function normalizeSubjectText(value) {
-  return cleanText(value)
+  const normalized = cleanText(value)
     .toLocaleLowerCase("tr-TR")
     .replace(/ı/g, "i")
     .replace(/ş/g, "s")
@@ -1023,6 +1023,11 @@ function normalizeSubjectText(value) {
     .replace(/ü/g, "u")
     .replace(/ö/g, "o")
     .replace(/ç/g, "c");
+  const compact = normalized.replace(/[^a-z0-9]/g, "");
+  if (["inkilap", "inkilaptarihi", "tcinkilap", "tcinkilaptarihi"].includes(compact)) {
+    return "inkilaptarihi";
+  }
+  return normalized;
 }
 
 function teacherSubjects(teacherData = {}) {
@@ -1042,6 +1047,11 @@ function teacherSubjects(teacherData = {}) {
   if (teacherData.subject) {
     subjects.push(teacherData.subject);
   }
+
+  subjects.push(
+    ...cleanTeachingScopes(teacherData.teachingScopes)
+      .map((scope) => scope.subject)
+  );
 
   return subjects
     .map((item) => cleanText(item))

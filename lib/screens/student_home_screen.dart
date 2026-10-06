@@ -117,6 +117,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   String? _studentName;
   String? _studentClassName;
+  String? _studentEducationLevel;
   String? _guidanceCounselorId;
   String? _guidanceCounselorName;
   Map<String, dynamic> _guidanceAvailability = const {};
@@ -131,9 +132,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   List<_SubjectOption> get _visibleSubjectOptions {
     final grade = _studentGrade;
-    if (grade == 8) return _lgsSubjects;
-    if (grade != null && grade >= 5 && grade <= 7) {
-      return _middleSchoolSubjects;
+    if (_studentEducationLevel == 'LGS') {
+      if (grade != null && grade >= 5 && grade <= 7) {
+        return _middleSchoolSubjects;
+      }
+      return _lgsSubjects;
     }
     return _subjectOptions;
   }
@@ -141,8 +144,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   // Ders kartlarının kullandığı tek karar:
   // 5-6-7-8 => LGS, geri kalan herkes => YKS.
   bool get _usesLgsSubjectCards {
-    final grade = _studentGrade;
-    return grade != null && grade >= 5 && grade <= 8;
+    return _studentEducationLevel == 'LGS';
   }
 
   List<Map<String, dynamic>> _guidanceAppointments = const [];
@@ -1112,6 +1114,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         _studentName = fullName.isNotEmpty ? fullName : '$name $surname'.trim();
         if (_studentName!.isEmpty) _studentName = data?['email'] ?? 'Öğrenci';
         _studentClassName = data?['className']?.toString();
+        _studentEducationLevel =
+            inferredStudentEducationLevel(data ?? const {});
         _isInStudySession = data?['isInStudySession'] == true;
         _guidanceCounselorId = data?['guidanceCounselorId']?.toString().trim();
 
@@ -1731,7 +1735,12 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Widget _buildSubjectGrid({required bool compact}) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth >= 330 ? 3 : 2;
+        final isYksGrid = _studentEducationLevel == 'YKS';
+        final crossAxisCount = isYksGrid && constraints.maxWidth >= 380
+            ? 4
+            : constraints.maxWidth >= 330
+                ? 3
+                : 2;
         const crossAxisSpacing = 8.0;
         const mainAxisSpacing = 8.0;
         final rowCount =
@@ -1744,7 +1753,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                     rowCount)
                 .clamp(36.0, double.infinity)
             : itemWidth;
-        final dense = itemHeight < 82;
+        final dense = crossAxisCount == 4 || itemHeight < 82;
         return GridView.count(
           shrinkWrap: false,
           padding: EdgeInsets.zero,
@@ -3605,7 +3614,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 18),
                     child: Text(
-                      'Son 14 gün içinde bildirim bulunmuyor.',
+                      'Son 14 güne ait planladığınız bir zümreye katılmama kaydınız bulunmuyor.',
                       style: TextStyle(color: Colors.white60),
                     ),
                   )
@@ -4036,7 +4045,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             _remainingCooldownSeconds > 0 ||
             _isInStudySession;
         final compact = constraints.maxHeight < 980 || hasExtraCards;
-        final actionHeight = compact ? (hasExtraCards ? 40.0 : 52.0) : 48.0;
         return Padding(
           padding: EdgeInsets.fromLTRB(18, compact ? 5 : 8, 18, 8),
           child: Column(
@@ -4095,14 +4103,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
               ),
               SizedBox(height: compact ? 2 : 6),
               Expanded(child: _buildSubjectGrid(compact: compact)),
-              SizedBox(height: compact ? 3 : 7),
-              _buildQuestionCountSelector(compact: compact),
-              SizedBox(height: compact ? 3 : 7),
-              _buildTeacherSelector(compact: compact),
-              SizedBox(height: compact ? 3 : 7),
+              const SizedBox(height: 6),
+              _buildQuestionCountSelector(compact: false),
+              const SizedBox(height: 7),
+              _buildTeacherSelector(compact: false),
+              const SizedBox(height: 7),
               _buildQueueActions(
-                compact: compact,
-                buttonHeight: actionHeight,
+                compact: false,
+                buttonHeight: 54,
               ),
             ],
           ),
