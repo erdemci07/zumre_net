@@ -18,6 +18,31 @@ void main() {
         isFalse);
   });
 
+  test('LGS revolution history aliases match the canonical branch', () {
+    final teacher = {
+      'teachingScopes': [
+        {'level': 'LGS', 'subject': 'İnkılap'},
+      ],
+    };
+
+    expect(
+      teacherMatchesEducationScope(
+        teacher,
+        subject: 'T.C. İNKILAP TARİHİ',
+        educationLevel: 'LGS',
+      ),
+      isTrue,
+    );
+    expect(
+      teacherMatchesEducationScope(
+        teacher,
+        subject: 'Tarih',
+        educationLevel: 'YKS',
+      ),
+      isFalse,
+    );
+  });
+
   test(
       'a dual-scope teacher matches both levels and legacy teachers remain usable',
       () {

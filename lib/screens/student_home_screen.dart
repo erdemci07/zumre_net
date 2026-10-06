@@ -250,6 +250,15 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       subjects.add(subject);
     }
 
+    // Ã‡ift kademede farklÄ± branÅŸa giren Ã¶ÄŸretmenlerin ikinci branÅŸÄ±
+    // legacy subjects/subject alanÄ±nda bulunmayabilir. Kapsam kaydÄ± bu durumda
+    // Ã¶ÄŸretmenin gerÃ§ek branÅŸ kaynaÄŸÄ±dÄ±r.
+    subjects.addAll(
+      teachingScopesFromData(data)
+          .map((scope) => scope['subject'])
+          .whereType<String>(),
+    );
+
     final seen = <String>{};
     return subjects.map((item) => item.trim()).where((item) {
       if (item.isEmpty) return false;
@@ -266,9 +275,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       return false;
     }
 
-    final normalizedSelected = _normalizeSubjectText(selectedSubject);
+    final normalizedSelected = normalizeEducationSubject(selectedSubject);
     return _teacherSubjects(data).any(
-          (subject) => _normalizeSubjectText(subject) == normalizedSelected,
+          (subject) => normalizeEducationSubject(subject) == normalizedSelected,
         ) &&
         teacherMatchesEducationScope(
           data,
@@ -1722,26 +1731,22 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Widget _buildSubjectGrid({required bool compact}) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = compact && constraints.maxWidth < 600
-            ? _visibleSubjectOptions.length > 6
-                ? 4
-                : 3
-            : 2;
+        final crossAxisCount = constraints.maxWidth >= 700
+            ? 4
+            : constraints.maxWidth >= 340
+                ? 3
+                : 2;
         final dense = crossAxisCount == 4;
         const crossAxisSpacing = 8.0;
         const mainAxisSpacing = 8.0;
-        final rowCount =
-            (_visibleSubjectOptions.length / crossAxisCount).ceil();
         final itemWidth =
             (constraints.maxWidth - crossAxisSpacing * (crossAxisCount - 1)) /
                 crossAxisCount;
-        final availableItemHeight = constraints.maxHeight.isFinite
-            ? (constraints.maxHeight - mainAxisSpacing * (rowCount - 1)) /
-                rowCount
-            : itemWidth / 2.7;
-        final itemHeight = availableItemHeight.clamp(44.0, 140.0);
+        final itemHeight = compact
+            ? (itemWidth * 0.82).clamp(82.0, 116.0)
+            : (itemWidth * 0.92).clamp(104.0, 142.0);
         return GridView.count(
-          shrinkWrap: false,
+          shrinkWrap: true,
           padding: EdgeInsets.zero,
           physics: const NeverScrollableScrollPhysics(),
           crossAxisCount: crossAxisCount,
@@ -4025,81 +4030,86 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   Widget _buildHomeView() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxHeight < 900;
         final hasExtraCards = _guidanceAppointments.isNotEmpty ||
             _hasUpcomingZumreAppointments ||
             _hasActiveGuidanceTask ||
             _remainingCooldownSeconds > 0 ||
             _isInStudySession;
+        final compact = constraints.maxHeight < 980 || hasExtraCards;
         final actionHeight = compact ? (hasExtraCards ? 40.0 : 52.0) : 48.0;
-        return Padding(
+        return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(18, compact ? 5 : 8, 18, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildWelcomeCard(compact: compact),
-              SizedBox(height: compact ? 3 : 7),
-              _buildCooldownCard(compact: compact),
-              _buildUpcomingAppointmentsSection(compact: compact),
-              SizedBox(height: compact ? 3 : 6),
-              _buildGuidanceAppointmentDemoCard(compact: compact),
-              _buildGuidanceTaskCard(compact: compact),
-              SizedBox(height: compact ? 3 : 6),
-              if (_isInStudySession && compact)
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(bottom: 4),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: Colors.orangeAccent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text(
-                    'Etüt sürüyor • Etüt bitince zümre sırası alabilirsiniz.',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white70, fontSize: 10.5),
-                  ),
-                ),
-              if (_isInStudySession && !compact) ...[
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orangeAccent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: Colors.orangeAccent.withValues(alpha: 0.25),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildWelcomeCard(compact: compact),
+                  SizedBox(height: compact ? 3 : 7),
+                  _buildCooldownCard(compact: compact),
+                  _buildUpcomingAppointmentsSection(compact: compact),
+                  SizedBox(height: compact ? 3 : 6),
+                  _buildGuidanceAppointmentDemoCard(compact: compact),
+                  _buildGuidanceTaskCard(compact: compact),
+                  SizedBox(height: compact ? 3 : 6),
+                  if (_isInStudySession && compact)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 9, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.orangeAccent.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'Etüt sürüyor • Etüt bitince zümre sırası alabilirsiniz.',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                      ),
+                    ),
+                  if (_isInStudySession && !compact) ...[
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orangeAccent.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: Colors.orangeAccent.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: const Text(
+                        'Şu anda etütte görünüyorsunuz. Etüt bitince zümre sırası alabilirsiniz.',
+                        style: TextStyle(color: Colors.white70, fontSize: 12.5),
+                      ),
+                    ),
+                  ],
+                  const Text(
+                    'Ders Seç',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                  child: const Text(
-                    'Şu anda etütte görünüyorsunuz. Etüt bitince zümre sırası alabilirsiniz.',
-                    style: TextStyle(color: Colors.white70, fontSize: 12.5),
+                  SizedBox(height: compact ? 2 : 6),
+                  _buildSubjectGrid(compact: compact),
+                  SizedBox(height: compact ? 3 : 7),
+                  _buildQuestionCountSelector(compact: compact),
+                  SizedBox(height: compact ? 3 : 7),
+                  _buildTeacherSelector(compact: compact),
+                  SizedBox(height: compact ? 3 : 7),
+                  _buildQueueActions(
+                    compact: compact,
+                    buttonHeight: actionHeight,
                   ),
-                ),
-              ],
-              const Text(
-                'Ders Seç',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 19,
-                  fontWeight: FontWeight.bold,
-                ),
+                ],
               ),
-              SizedBox(height: compact ? 2 : 6),
-              Expanded(child: _buildSubjectGrid(compact: compact)),
-              SizedBox(height: compact ? 3 : 7),
-              _buildQuestionCountSelector(compact: compact),
-              SizedBox(height: compact ? 3 : 7),
-              _buildTeacherSelector(compact: compact),
-              SizedBox(height: compact ? 3 : 7),
-              _buildQueueActions(
-                compact: compact,
-                buttonHeight: actionHeight,
-              ),
-            ],
+            ),
           ),
         );
       },

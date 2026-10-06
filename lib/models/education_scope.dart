@@ -25,16 +25,28 @@ String? validEducationLevel(Object? value) {
   return educationLevels.contains(level) ? level : null;
 }
 
-String normalizeEducationSubject(Object? value) => value
-    .toString()
-    .trim()
-    .toLowerCase()
-    .replaceAll('ı', 'i')
-    .replaceAll('ş', 's')
-    .replaceAll('ğ', 'g')
-    .replaceAll('ü', 'u')
-    .replaceAll('ö', 'o')
-    .replaceAll('ç', 'c');
+String normalizeEducationSubject(Object? value) {
+  final normalized = value
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replaceAll('ı', 'i')
+      .replaceAll('ş', 's')
+      .replaceAll('ğ', 'g')
+      .replaceAll('ü', 'u')
+      .replaceAll('ö', 'o')
+      .replaceAll('ç', 'c');
+  final compact = normalized.replaceAll(RegExp(r'[^a-z0-9]'), '');
+  if (const {
+    'inkilap',
+    'inkilaptarihi',
+    'tcinkilap',
+    'tcinkilaptarihi',
+  }.contains(compact)) {
+    return 'inkilaptarihi';
+  }
+  return normalized;
+}
 
 String? inferredStudentEducationLevel(Map<String, dynamic> data) {
   final explicit = validEducationLevel(data['educationLevel']);

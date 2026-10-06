@@ -136,10 +136,21 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         : null;
   }
 
+  String get _activeTeacherSubject {
+    final scope = _teacherZumreScopeForDate(_istanbulNow());
+    final scopedSubject = scope == null ? null : _teacherSubjectsByLevel[scope];
+    return scopedSubject?.trim().isNotEmpty == true
+        ? scopedSubject!.trim()
+        : (_teacherSubject ?? 'Ders');
+  }
+
   String _teacherZumreScopeLabel(String? scope) {
-    if (scope == null || scope == 'OFF') return '';
+    if (!_isDualScopeTeacher || scope == null || scope == 'OFF') return '';
     final subject = _teacherSubjectsByLevel[scope];
-    return subject == null || subject.isEmpty ? scope : '$scope • $subject';
+    if (subject == null || subject.isEmpty) return '';
+    return normalizeEducationSubject(subject) == 'inkilaptarihi'
+        ? 'İnkılap'
+        : subject;
   }
 
   Map<String, String> _weeklyZumreScopesFromData(Map<String, dynamic> data) {
@@ -2287,7 +2298,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                         .httpsCallable('teacherAddManualQueue');
                                     await callable.call<Map<String, dynamic>>({
                                       'studentId': selectedId,
-                                      'subject': _teacherSubject ?? 'Ders',
+                                      'subject': _activeTeacherSubject,
                                     });
                                   } on FirebaseFunctionsException catch (e) {
                                     // Backend workflow ilk kurulumda henüz
@@ -2303,7 +2314,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                       'studentName': selectedStudentName,
                                       'teacherId': teacherId,
                                       'teacherName': _teacherName ?? 'Öğretmen',
-                                      'subject': _teacherSubject ?? 'Ders',
+                                      'subject': _activeTeacherSubject,
                                       'status': 'waiting',
                                       'isManual': true,
                                       'questionCount': 1,
@@ -4082,7 +4093,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                   border: Border.all(color: Colors.white12),
                                 ),
                                 child: Text(
-                                  'Branş: ${_teacherSubject ?? "Ders"}',
+                                  'Branş: $_activeTeacherSubject',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
