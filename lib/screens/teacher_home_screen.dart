@@ -128,12 +128,58 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       _teacherEducationLevels.contains('YKS');
 
   String? _teacherZumreScopeForDate(DateTime date) {
-    if (_isDualScopeTeacher) {
-      return _weeklyZumreScopeByDay[_dayKey(date)];
+    if (!_isDualScopeTeacher) {
+      return _teacherEducationLevels.length == 1
+          ? _teacherEducationLevels.single
+          : null;
     }
-    return _teacherEducationLevels.length == 1
-        ? _teacherEducationLevels.single
-        : null;
+
+    final slots = _weeklyAvailability[_dayKey(date)] ?? const [];
+    final scopedSlots = slots.where((slot) {
+      final scope = '${slot['educationLevel'] ?? slot['scope'] ?? ''}'
+          .trim()
+          .toUpperCase();
+      return scope == 'LGS' || scope == 'YKS';
+    }).toList();
+
+    if (scopedSlots.isNotEmpty) {
+      final now = _istanbulNow();
+      final isToday = date.year == now.year &&
+          date.month == now.month &&
+          date.day == now.day;
+      final minute = isToday ? now.hour * 60 + now.minute : -1;
+
+      if (isToday) {
+        for (final slot in scopedSlots) {
+          final start = _timeToMinutes(slot['start'] ?? '');
+          final end = _timeToMinutes(slot['end'] ?? '');
+          if (minute >= start && minute < end) {
+            return '${slot['educationLevel'] ?? slot['scope']}'
+                .trim()
+                .toUpperCase();
+          }
+        }
+
+        for (final slot in scopedSlots) {
+          final start = _timeToMinutes(slot['start'] ?? '');
+          if (start > minute) {
+            return '${slot['educationLevel'] ?? slot['scope']}'
+                .trim()
+                .toUpperCase();
+          }
+        }
+      }
+
+      final scopes = scopedSlots
+          .map((slot) =>
+              '${slot['educationLevel'] ?? slot['scope']}'.trim().toUpperCase())
+          .toSet();
+      if (scopes.length == 1) return scopes.single;
+    }
+
+    // Eski admin programından kalan veri, öğretmen kendi programını
+    // LGS/YKS olarak ayırana kadar yalnızca geçiş fallback'i olarak okunur.
+    return _weeklyZumreScopeByDay[_dayKey(date)];
   }
 
   String get _activeTeacherSubject {
@@ -176,10 +222,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     };
   }
 
-  String _withTeacherZumreScope(String value) {
-    if (_dailyZumreScopeLabel.isEmpty) return value;
-    return '$_dailyZumreScopeLabel • $value';
-  }
+  String _withTeacherZumreScope(String value) => value;
 
   int _timeToMinutes(String time) {
     final parts = time.split(':');
@@ -1020,7 +1063,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                           'start': '09:00',
                                           'end': '17:00',
                                           'educationLevel':
-                                              _defaultAvailabilityScope(),
+                                              _isDualScopeTeacher
+                                                  ? 'LGS'
+                                                  : _defaultAvailabilityScope(),
                                         });
                                       });
                                     },
@@ -1231,6 +1276,28 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                           ),
                                         ],
                                       ),
+                                      if (_isDualScopeTeacher) ...[
+                                        const SizedBox(height: 8),
+                                        Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Wrap(
+                                            spacing: 8,
+                                            children: ['LGS', 'YKS'].map((level) {
+                                              final selected =
+                                                  slot['educationLevel'] == level;
+                                              return ChoiceChip(
+                                                label: Text(level),
+                                                selected: selected,
+                                                onSelected: (_) {
+                                                  setDialogState(() {
+                                                    slot['educationLevel'] = level;
+                                                  });
+                                                },
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ),
+                                      ],
                                       const SizedBox(height: 8),
                                     ],
                                   );
@@ -3983,7 +4050,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     final remaining = _zumreRemainingMinutes;
     final text = active
         ? remaining != null && remaining <= 5 && remaining > 0
-            ? '${_dailyZumreScopeLabel.isEmpty ? '' : '$_dailyZumreScopeLabel • '}Bitime $remaining dk'
+            ? 'Bitime $remaining dk'
             : _zumreSlotText.isEmpty
                 ? 'Zümre Aktif'
                 : 'Zümre Aktif • $_zumreSlotText'
