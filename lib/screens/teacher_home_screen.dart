@@ -2159,10 +2159,19 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                     activeStudentIds.contains(doc.id);
                                 final isInStudySession =
                                     data['isInStudySession'] == true;
+                                final teacherScope =
+                                    _teacherZumreScopeForDate(now);
+                                final studentScope =
+                                    inferredStudentEducationLevel(data);
+                                final matchesTeacherScope =
+                                    teacherScope == 'LGS'
+                                        ? studentScope == 'LGS'
+                                        : studentScope != 'LGS';
 
                                 if (isInActiveQueue ||
                                     isInCooldown ||
-                                    isInStudySession) {
+                                    isInStudySession ||
+                                    !matchesTeacherScope) {
                                   return false;
                                 }
 
