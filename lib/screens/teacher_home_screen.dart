@@ -2421,7 +2421,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                   );
                                 } finally {
                                   if (ctx.mounted) {
-                                    setDialogState(() => isAddingStudent = false);
+                                    setDialogState(
+                                      () => isAddingStudent = false,
+                                    );
                                   }
                                 }
                               },
@@ -2437,7 +2439,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                             : const Icon(Icons.add),
                         label: Text(
                           isAddingStudent ? 'Ekleniyor...' : 'Sıraya Ekle',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green,
@@ -3763,7 +3765,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
 
               return Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(16),
@@ -3801,7 +3806,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                 ),
                               ),
                               Text(
-                                '${data['subject'] ?? 'Ders'} • $questionCount soru • ${estimatedMinutes + extraMinutes} dk',
+                                '${data['subject'] ?? 'Ders'} • $questionCount soru • '
+                                    '${estimatedMinutes + extraMinutes} dk',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
@@ -3832,7 +3838,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                             onPressed: () async {
                               await _startWaitingQueueSafely(queueDoc: doc);
                             },
-                            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                            icon: const Icon(
+                              Icons.play_arrow_rounded,
+                              size: 18,
+                            ),
                             label: const Text('Başlat'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
@@ -3855,7 +3864,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                             final confirm = await _confirmAction(
                               title: 'Bekleyen öğrenci iptal edilsin mi?',
                               message:
-                                  '${data['studentName']} isimli öğrencinin sırasını iptal etmek istediğinize emin misiniz?',
+                                  '${data['studentName']} isimli öğrencinin sırasını '
+                                  'iptal etmek istediğinize emin misiniz?',
                               confirmText: 'İptal Et',
                             );
                             if (confirm) {
