@@ -3340,6 +3340,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       enabled: _canTransferQueue(data, availableTeachers) &&
                           !_transferringQueueIds.contains(doc.id),
                       onTap: () async {
+                        if (_transferringQueueIds.contains(doc.id)) return;
+                        if (!_canTransferQueue(data, availableTeachers)) {
+                          await _showTransferUnavailableInfo();
+                          return;
+                        }
                         await _showTransferDialog(
                           queueId: doc.id,
                           subject: data['subject'] ?? 'Ders',
@@ -3875,21 +3880,24 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                         ),
                         const SizedBox(width: 8),
                         OutlinedButton.icon(
-                          onPressed: canTransfer
-                              ? () async {
-                                  await _showTransferDialog(
-                                    queueId: doc.id,
-                                    subject: data['subject'] ?? 'Ders',
-                                    studentName:
-                                        data['studentName'] ?? 'Öğrenci',
-                                  );
-                                }
-                              : null,
+                          onPressed: () async {
+                            if (_transferringQueueIds.contains(doc.id)) return;
+                            if (!canTransfer) {
+                              await _showTransferUnavailableInfo();
+                              return;
+                            }
+                            await _showTransferDialog(
+                              queueId: doc.id,
+                              subject: data['subject'] ?? 'Ders',
+                              studentName: data['studentName'] ?? 'Öğrenci',
+                            );
+                          },
                           icon: const Icon(Icons.swap_horiz_rounded, size: 16),
                           label: const Text('Devret'),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.lightBlueAccent,
-                            disabledForegroundColor: Colors.white38,
+                            foregroundColor: canTransfer
+                                ? Colors.lightBlueAccent
+                                : Colors.white38,
                             side: BorderSide(
                               color: canTransfer
                                   ? Colors.lightBlueAccent
@@ -3915,6 +3923,42 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
   }
 
+  Future<void> _showTransferUnavailableInfo() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF063D37),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: Colors.white24),
+        ),
+        icon: const Icon(
+          Icons.info_outline_rounded,
+          color: Colors.lightBlueAccent,
+          size: 36,
+        ),
+        title: const Text(
+          'Şu anda devir yapılamıyor',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Bu soru için uygun ve müsait başka bir öğretmen bulunamadı. '
+          'Uygun bir öğretmen olduğunda Devret seçeneği aktifleşecektir.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white70),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Anladım'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _compactQueueAction({
     required IconData icon,
     required Color color,
@@ -3936,7 +3980,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         padding: EdgeInsets.zero,
         tooltip: tooltip,
         icon: Icon(icon, color: actionColor, size: 18),
-        onPressed: enabled ? onTap : null,
+        onPressed: onTap,
       ),
     );
   }
