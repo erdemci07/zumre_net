@@ -2011,6 +2011,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     String? selectedStudentId;
     String? selectedStudentName;
     String searchText = '';
+    bool isAddingStudent = false;
     final studentsStream = _firestore
         .collection('users')
         .where('role', isEqualTo: 'student')
@@ -2278,9 +2279,10 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       width: double.infinity,
                       height: 54,
                       child: ElevatedButton.icon(
-                        onPressed: selectedStudentId == null
+                        onPressed: selectedStudentId == null || isAddingStudent
                             ? null
                             : () async {
+                                setDialogState(() => isAddingStudent = true);
                                 try {
                                   final teacherId = _auth.currentUser!.uid;
                                   final selectedId = selectedStudentId;
@@ -2417,11 +2419,24 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                                       .showSnackBar(
                                     SnackBar(content: Text('Hata: $e')),
                                   );
+                                } finally {
+                                  if (ctx.mounted) {
+                                    setDialogState(() => isAddingStudent = false);
+                                  }
                                 }
                               },
-                        icon: const Icon(Icons.add),
-                        label: const Text(
-                          'Sıraya Ekle',
+                        icon: isAddingStudent
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.add),
+                        label: Text(
+                          isAddingStudent ? 'Ekleniyor...' : 'Sıraya Ekle',
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         style: ElevatedButton.styleFrom(
@@ -3116,7 +3131,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
   }
 
-  Widget _buildActiveQuestion() {
+  Widget _buildActiveQuestion(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> availableTeachers,
+  ) {
     final teacherId = _auth.currentUser!.uid;
 
     return StreamBuilder<QuerySnapshot>(
@@ -3318,6 +3335,8 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                       icon: Icons.swap_horiz_rounded,
                       color: Colors.lightBlueAccent,
                       tooltip: 'Devret',
+                      enabled: _canTransferQueue(data, availableTeachers) &&
+                          !_transferringQueueIds.contains(doc.id),
                       onTap: () async {
                         await _showTransferDialog(
                           queueId: doc.id,
@@ -3668,7 +3687,9 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     );
   }
 
-  Widget _buildWaitingQueueList() {
+  Widget _buildWaitingQueueList(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> availableTeachers,
+  ) {
     final teacherId = _auth.currentUser!.uid;
 
     return StreamBuilder<QuerySnapshot>(
@@ -3737,144 +3758,142 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   _toInt(data['estimatedMinutes'], fallback: 4);
               final extraMinutes = _toInt(data['extraMinutes']);
 
+              final canTransfer = _canTransferQueue(data, availableTeachers) &&
+                  !_transferringQueueIds.contains(doc.id);
+
               return Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(16),
                   border:
                       Border.all(color: Colors.white.withValues(alpha: 0.14)),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: isManual ? Colors.orange : Colors.green,
-                      child: Icon(
-                        isManual ? Icons.person_add : Icons.person,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            data['studentName'] ?? 'Öğrenci',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15.5,
-                            ),
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor:
+                              isManual ? Colors.orange : Colors.green,
+                          child: Icon(
+                            isManual ? Icons.person_add : Icons.person,
+                            color: Colors.white,
+                            size: 18,
                           ),
-                          Text(
-                            '${data['subject'] ?? 'Ders'} • $questionCount soru • ${estimatedMinutes + extraMinutes} dk',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white60,
-                              fontSize: 12.5,
-                            ),
-                          ),
-                          if (isManual)
-                            const Text(
-                              'Öğretmen tarafından eklendi',
-                              style: TextStyle(
-                                color: Colors.orangeAccent,
-                                fontSize: 12,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(
-                      width: 80,
-                      child: Column(
-                        children: [
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: () async {
-                                await _startWaitingQueueSafely(
-                                  queueDoc: doc,
-                                );
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                                foregroundColor: Colors.white,
-                                minimumSize: const Size(0, 34),
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 8),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(13),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                data['studentName'] ?? 'Öğrenci',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
                                 ),
                               ),
-                              child: const Text('Başlat'),
+                              Text(
+                                '${data['subject'] ?? 'Ders'} • $questionCount soru • ${estimatedMinutes + extraMinutes} dk',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              if (isManual)
+                                const Text(
+                                  'Öğretmen tarafından eklendi',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.orangeAccent,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              await _startWaitingQueueSafely(queueDoc: doc);
+                            },
+                            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                            label: const Text('Başlat'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(0, 38),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 6),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
                           ),
-                          SizedBox(
-                            height: 34,
-                            child: IconButton(
-                              visualDensity: VisualDensity.compact,
-                              constraints: const BoxConstraints(
-                                minWidth: 32,
-                                minHeight: 32,
-                              ),
-                              padding: EdgeInsets.zero,
-                              icon: const Icon(
-                                Icons.delete_outline_rounded,
-                                color: Colors.redAccent,
-                              ),
-                              tooltip: 'Sırayı İptal Et',
-                              onPressed: () async {
-                                final confirm = await _confirmAction(
-                                  title: 'Bekleyen öğrenci iptal edilsin mi?',
-                                  message:
-                                      '${data['studentName']} isimli öğrencinin sırasını iptal etmek istediğinize emin misiniz?',
-                                  confirmText: 'İptal Et',
-                                );
-
-                                if (confirm) {
-                                  await _cancelQueue(doc.id);
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton.outlined(
+                          tooltip: 'Sırayı İptal Et',
+                          color: Colors.redAccent,
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          onPressed: () async {
+                            final confirm = await _confirmAction(
+                              title: 'Bekleyen öğrenci iptal edilsin mi?',
+                              message:
+                                  '${data['studentName']} isimli öğrencinin sırasını iptal etmek istediğinize emin misiniz?',
+                              confirmText: 'İptal Et',
+                            );
+                            if (confirm) {
+                              await _cancelQueue(doc.id);
+                            }
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: canTransfer
+                              ? () async {
+                                  await _showTransferDialog(
+                                    queueId: doc.id,
+                                    subject: data['subject'] ?? 'Ders',
+                                    studentName:
+                                        data['studentName'] ?? 'Öğrenci',
+                                  );
                                 }
-                              },
+                              : null,
+                          icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                          label: const Text('Devret'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.lightBlueAccent,
+                            disabledForegroundColor: Colors.white38,
+                            side: BorderSide(
+                              color: canTransfer
+                                  ? Colors.lightBlueAccent
+                                  : Colors.white24,
+                            ),
+                            minimumSize: const Size(0, 38),
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                          const SizedBox(height: 3),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: () async {
-                                await _showTransferDialog(
-                                  queueId: doc.id,
-                                  subject: data['subject'] ?? 'Ders',
-                                  studentName: data['studentName'] ?? 'Öğrenci',
-                                );
-                              },
-                              icon: const Icon(
-                                Icons.swap_horiz_rounded,
-                                size: 16,
-                              ),
-                              label: const Text('Devret'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.lightBlueAccent,
-                                side: const BorderSide(
-                                  color: Colors.lightBlueAccent,
-                                ),
-                                minimumSize: const Size(0, 32),
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 6),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(13),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -3891,36 +3910,89 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
     required Color color,
     required String tooltip,
     required VoidCallback onTap,
+    bool enabled = true,
   }) {
+    final actionColor = enabled ? color : Colors.white38;
     return Container(
       width: 34,
       height: 34,
       margin: const EdgeInsets.only(left: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: actionColor.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+        border: Border.all(color: actionColor.withValues(alpha: 0.25)),
       ),
       child: IconButton(
         padding: EdgeInsets.zero,
         tooltip: tooltip,
-        icon: Icon(icon, color: color, size: 18),
-        onPressed: onTap,
+        icon: Icon(icon, color: actionColor, size: 18),
+        onPressed: enabled ? onTap : null,
       ),
     );
   }
 
+  bool _canTransferQueue(
+    Map<String, dynamic> queue,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> teachers,
+  ) {
+    final level = validEducationLevel(queue['educationLevel']);
+    final subject = queue['subject']?.toString() ?? '';
+    if (level == null || subject.isEmpty || !_isZumreOpenNow || _isLunchNow) {
+      return false;
+    }
+
+    final now = _istanbulNow();
+    final currentTeacherId = _auth.currentUser?.uid;
+    return teachers.any((teacher) {
+      if (teacher.id == currentTeacherId) return false;
+      final data = teacher.data();
+      if (!teacherMatchesEducationScope(
+        data,
+        subject: subject,
+        educationLevel: level,
+      )) {
+        return false;
+      }
+      final scopes = teachingScopesFromData(data);
+      if (scopes.isEmpty) {
+        final teacherSubject = data['subject'] ?? data['branch'];
+        if (teacherSubject == null ||
+            normalizeEducationSubject(teacherSubject) !=
+                normalizeEducationSubject(subject)) {
+          return false;
+        }
+      }
+
+      return _availabilitySlotsFromData(data, now).any(
+        (slot) =>
+            timeSlotMatchesEducationLevel(slot, level) &&
+            _isNowInSlots(now, [slot]),
+      );
+    });
+  }
+
   Widget _buildWaitingQueues() {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(bottom: 32),
-      children: [
-        _buildTeacherHeader(),
-        _buildStatusCard(),
-        _buildActiveQuestion(),
-        _buildTeacherAppointments(),
-        _buildWaitingQueueList(),
-      ],
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'teacher')
+          .where('teacherStatus', isEqualTo: 'available')
+          .snapshots(),
+      builder: (context, snapshot) {
+        final availableTeachers = snapshot.data?.docs ??
+            <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+        return ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(bottom: 32),
+          children: [
+            _buildTeacherHeader(),
+            _buildStatusCard(),
+            _buildActiveQuestion(availableTeachers),
+            _buildTeacherAppointments(),
+            _buildWaitingQueueList(availableTeachers),
+          ],
+        );
+      },
     );
   }
 
