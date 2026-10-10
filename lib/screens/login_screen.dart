@@ -193,6 +193,7 @@ class _LoginScreenState extends State<LoginScreen> {
               constraints.maxHeight < 650 || constraints.maxWidth < 390;
           return Stack(
             children: [
+              /*
               Positioned(
                 top: keyboardOpen ? 8 : (compact ? 14 : 22),
                 right: compact ? 14 : 22,
@@ -227,6 +228,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ),
+              */
               Center(
                 child: SingleChildScrollView(
                   padding:
