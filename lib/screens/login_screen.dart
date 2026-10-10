@@ -190,8 +190,6 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         child: LayoutBuilder(builder: (context, constraints) {
           final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
-          final compact =
-              constraints.maxHeight < 650 || constraints.maxWidth < 390;
           return Stack(
             children: [
               /*
