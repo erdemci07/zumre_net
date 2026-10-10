@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-// ignore: unused_import — retained for restoring the commented developer credit
+// ignore: unused_import
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
