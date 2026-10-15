@@ -30,5 +30,8 @@ jobs:
           node-version: "22"
       - name: Verify isolated notification code
         run: node --check paralel_notifications/index.js
+      - name: Install notification dependencies
+        working-directory: paralel_notifications
+        run: npm install --no-package-lock --ignore-scripts --no-audit --no-fund
       - name: Deploy only the new notification codebase
         run: npx --yes firebase-tools@15.32.0 deploy --config firebase.notifications.json --only functions:paralel-notifications --project zumrenet-657e1 --non-interactive
