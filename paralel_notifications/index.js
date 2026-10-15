@@ -53,7 +53,7 @@ function setCors(req, res) {
 async function verifyMember(req) {
   const authorization = req.get('authorization') || ''
   if (!authorization.startsWith('Bearer ')) throw Object.assign(new Error('Kimlik gerekli.'), { httpStatus: 401 })
-  const verified = await memberAuth.verifyIdToken(authorization.slice(7), true)
+  const verified = await memberAuth.verifyIdToken(authorization.slice(7))
   const profileSnap = await sourceDb.collection('users').doc(verified.uid).get()
   const profile = profileSnap.data()
   if (!profile || profile.isMember !== true || !['faruk', 'berfin'].includes(profile.profileId)) {
