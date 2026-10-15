@@ -1,6 +1,12 @@
 name: Deploy Paralel Okuma Notifications
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'paralel_notifications/**'
+      - 'firebase.notifications.json'
+      - '.github/workflows/deploy-paralel-notifications.yml'
 permissions:
   contents: read
   id-token: write
