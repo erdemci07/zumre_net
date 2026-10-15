@@ -31,4 +31,4 @@ jobs:
       - name: Verify isolated notification code
         run: node --check paralel_notifications/index.js
       - name: Deploy only the new notification codebase
-        run: npx --yes firebase-tools@15.32.0 deploy --config firebase.notifications.json --only functions:paralelNotifications --project zumrenet-657e1 --non-interactive
+        run: npx --yes firebase-tools@15.32.0 deploy --config firebase.notifications.json --only functions:paralel-notifications --project zumrenet-657e1 --non-interactive
