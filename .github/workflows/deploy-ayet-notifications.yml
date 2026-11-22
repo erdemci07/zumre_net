@@ -7,6 +7,12 @@ on:
       - 'ayet_notifications/**'
       - 'firebase.ayet-notifications.json'
       - '.github/workflows/deploy-ayet-notifications.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ayet_notifications/**'
+      - 'firebase.ayet-notifications.json'
+      - '.github/workflows/deploy-ayet-notifications.yml'
 permissions:
   contents: read
   id-token: write
@@ -29,7 +35,7 @@ jobs:
   deploy:
     needs: verify
     # Cloud secrets, runtime identity and deployment permissions must be configured first.
-    if: vars.ENABLE_AYET_NOTIFICATIONS_DEPLOY == 'true'
+    if: github.event_name != 'pull_request' && vars.ENABLE_AYET_NOTIFICATIONS_DEPLOY == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
