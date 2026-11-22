@@ -103,3 +103,25 @@ export function messageFor(type) {
     default: return null
   }
 }
+
+/** Strictly restrict destinations to trusted push service hosts. */
+export function validSubscription(s) {
+  if (!s || typeof s !== 'object' || typeof s.endpoint !== 'string' ||
+      s.endpoint.length > 2100 || !s.keys || typeof s.keys.p256dh !== 'string' ||
+      typeof s.keys.auth !== 'string' ||
+      !/^[A-Za-z0-9_-]{40,150}$/.test(s.keys.p256dh) ||
+      !/^[A-Za-z0-9_-]{10,80}$/.test(s.keys.auth)) return false
+  try {
+    const u = new URL(s.endpoint)
+    const h = u.hostname.toLowerCase()
+    return u.protocol === 'https:' && !u.username && !u.password &&
+      (!u.port || u.port === '443') &&
+      (h === 'fcm.googleapis.com' || h === 'updates.push.services.mozilla.com' ||
+       h.endsWith('.push.apple.com') || h.endsWith('.notify.windows.com'))
+  } catch { return false }
+}
+
+export function canClaimDispatch(types, kind) {
+  const previous = Array.isArray(types) ? types : []
+  return !previous.includes(kind) && previous.length < 2
+}

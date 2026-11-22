@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { cleanPrefs, cleanTimezone, due, quiet, localParts, reminderFor, daysBetween, messageFor } from './rules.mjs'
+import { cleanPrefs, cleanTimezone, due, quiet, localParts, reminderFor, daysBetween, messageFor, validSubscription, canClaimDispatch } from './rules.mjs'
 
 test('invalid user values are rejected and existing defaults remain safe', () => {
   const p = cleanPrefs({ nasilsin: false, gununAyetiSaat: '99:00', sessizBas: '22:30' })
@@ -46,4 +46,20 @@ test('messages contain no mood history or unverified verses', () => {
     assert.ok(messageFor(type).title)
     assert.ok(messageFor(type).body)
   }
+})
+
+test('push target validation accepts Apple and FCM but rejects arbitrary URLs', () => {
+  const s = { endpoint: 'https://web.push.apple.com/QAAAAAAA',
+    keys: { p256dh: 'A'.repeat(87), auth: 'B'.repeat(22) } }
+  assert.equal(validSubscription(s), true)
+  assert.equal(validSubscription({ ...s, endpoint: 'https://fcm.googleapis.com/fcm/send/abc' }), true)
+  assert.equal(validSubscription({ ...s, endpoint: 'https://web.push.apple.com.attacker.example/' }), false)
+  assert.equal(validSubscription({ ...s, endpoint: 'http://web.push.apple.com/' }), false)
+  assert.equal(validSubscription({ ...s, keys: { ...s.keys, p256dh: 'oops' } }), false)
+})
+test('dispatch is one per type and at most two kinds per device/day', () => {
+  assert.equal(canClaimDispatch([], 'morning'), true)
+  assert.equal(canClaimDispatch(['morning'], 'morning'), false)
+  assert.equal(canClaimDispatch(['morning'], 'evening'), true)
+  assert.equal(canClaimDispatch(['morning', 'evening'], 'reading'), false)
 })

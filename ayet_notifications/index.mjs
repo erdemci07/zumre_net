@@ -5,7 +5,7 @@ import { defineSecret } from 'firebase-functions/params'
 import { onRequest } from 'firebase-functions/v2/https'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import webpush from 'web-push'
-import { cleanPrefs, cleanTimezone, localParts, reminderFor, messageFor } from './rules.mjs'
+import { cleanPrefs, cleanTimezone, localParts, reminderFor, messageFor, validSubscription, canClaimDispatch } from './rules.mjs'
 
 // This dedicated codebase is isolated from ZümreNet's application functions.
 initializeApp({ projectId: 'zumrenet-657e1' })
@@ -44,21 +44,6 @@ function validateIdentity(body) {
 function sameHash(a, b) {
   if (typeof a !== 'string' || a.length !== 64 || b.length !== 64) return false
   return timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'))
-}
-function validSubscription(s) {
-  if (!s || typeof s !== 'object' || typeof s.endpoint !== 'string' ||
-      s.endpoint.length > 2100 || !s.keys || typeof s.keys.p256dh !== 'string' ||
-      typeof s.keys.auth !== 'string' ||
-      !/^[A-Za-z0-9_-]{40,150}$/.test(s.keys.p256dh) ||
-      !/^[A-Za-z0-9_-]{10,80}$/.test(s.keys.auth)) return false
-  try {
-    const u = new URL(s.endpoint)
-    const h = u.hostname.toLowerCase()
-    return u.protocol === 'https:' && !u.username && !u.password &&
-      (!u.port || u.port === '443') &&
-      (h === 'fcm.googleapis.com' || h === 'updates.push.services.mozilla.com' ||
-       h.endsWith('.push.apple.com') || h.endsWith('.notify.windows.com'))
-  } catch { return false }
 }
 function cleanDay(day) {
   return typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null
@@ -193,7 +178,7 @@ export const dispatchAyetReminders = onSchedule({
       const old = await tx.get(claimRef)
       const state = old.data() || {}
       const kinds = Array.isArray(state.types) ? state.types : []
-      if (kinds.includes(selected.type) || kinds.length >= 2) return false
+      if (!canClaimDispatch(kinds, selected.type)) return false
       tx.set(claimRef, {
         deviceId: device.id, types: [...kinds, selected.type], updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true })

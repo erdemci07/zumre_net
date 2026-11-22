@@ -71,8 +71,19 @@ printf %s '<PRIVATE_KEY>' | gcloud secrets create AYET_PUSH_VAPID_PRIVATE \
 
 Secret önceden varsa `secrets versions add` kullan; yanlışlıkla farklı anahtar
 çiftini karıştırma. Runtime identity'ye yalnızca bu iki Secret için
-`roles/secretmanager.secretAccessor` ver (Console → Secret Manager → ilgili
-Secret → Permissions).
+`roles/secretmanager.secretAccessor` ver:
+
+```bash
+RUNTIME="serviceAccount:ayet-rehberi-notifications@zumrenet-657e1.iam.gserviceaccount.com"
+for SECRET in AYET_PUSH_VAPID_PUBLIC AYET_PUSH_VAPID_PRIVATE; do
+  gcloud secrets add-iam-policy-binding "$SECRET" \
+    --member="$RUNTIME" --role="roles/secretmanager.secretAccessor" \
+    --project=zumrenet-657e1
+done
+```
+
+Bunları yalnızca Ayet secret'larına uygula; Paralel Okuma'nın anahtarlarına
+dokunma.
 
 **GitHub repository variable** (ZümreNet repo, Ayet repo değil):
 `ENABLE_AYET_NOTIFICATIONS_DEPLOY=true` değerini ancak ayarlar tamamlanınca
