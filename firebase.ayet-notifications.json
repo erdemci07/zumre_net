@@ -1,0 +1,14 @@
+{
+  "functions": [
+    {
+      "source": "ayet_notifications",
+      "codebase": "ayet-notifications",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "*.local"
+      ]
+    }
+  ]
+}
